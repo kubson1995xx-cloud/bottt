@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Natywny cBot APEX (wszystko w jednym) – do pracy bez aplikacji Desktop oraz do backtestów w cTrader.
+       Kod rdzenia (src/Apex.Core) jest kompilowany bezpośrednio do tego cBota, dzięki czemu plik .algo
+       jest w pełni samodzielny (bez dodatkowych bibliotek). -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>10.0</LangVersion>
+    <RootNamespace>cAlgo.Robots</RootNamespace>
+    <AlgoPublish>False</AlgoPublish>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="cTrader.Automate" Version="1.0.21" />
+    <Compile Include="..\..\..\..\Apex.Core\**\*.cs" Exclude="..\..\..\..\Apex.Core\obj\**;..\..\..\..\Apex.Core\bin\**" LinkBase="Core" />
+  </ItemGroup>
+</Project>

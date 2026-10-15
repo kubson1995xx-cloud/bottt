@@ -1,0 +1,39 @@
+| Strategia | Klasa | n OOS | E[R] OOS | t OOS | PF OOS | lata+ | siatka+ | domyślne OOS E[R] | wybrane parametry | E[R] x1,5 | E[R] x2 | decyzja |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---|
+| DailyTrend | Forex | 160 | -0.050 | -0.39 | 0.92 | 4/9 | 46 % | -0.055 | D1 kanał 100, SL 2ATR, trailing 3ATR, filtr 1 | -0.032 | -0.100 | odrzucona |
+| DailyTrend | Metal | 60 | -0.040 | -0.22 | 0.93 | 3/9 | 50 % | 0.002 | D1 kanał 20, SL 2ATR, trailing 3ATR, filtr 1 | 0.066 | 0.009 | odrzucona |
+| DailyTrend | Energy | 80 | 0.005 | 0.03 | 1.01 | 5/9 | 25 % | 0.041 | D1 kanał 55, SL 3ATR, trailing 3ATR, filtr 0 | 0.068 | 0.037 | odrzucona |
+| DailyTrend | Index | 138 | -0.188 | -1.40 | 0.70 | 3/9 | 0 % | -0.251 | D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 1 | -0.156 | -0.302 | odrzucona |
+| DailyTrend | Bond | 40 | -0.777 | -5.77 | 0.13 | 0/9 | 0 % | -0.710 | D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 0 | -0.663 | -0.778 | odrzucona |
+| DailyTrend | Commodity | 125 | -0.223 | -1.84 | 0.62 | 2/9 | 58 % | -0.124 | D1 kanał 20, SL 2ATR, trailing 5ATR, filtr 1 | -0.092 | -0.169 | odrzucona |
+
+### DailyTrend / Forex
+Wybory walk-forward: 2009: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 1 (IS obj 1.03); 2010: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 1 (IS obj 1.28); 2011: D1 kanał 100, SL 2ATR, trailing 5ATR, filtr 1 (IS obj 1.07); 2012: D1 kanał 100, SL 2ATR, trailing 5ATR, filtr 0 (IS obj 0.53); 2013: D1 kanał 100, SL 2ATR, trailing 3ATR, filtr 0 (IS obj -0.54); 2014: D1 kanał 100, SL 2ATR, trailing 3ATR, filtr 1 (IS obj 0.09); 2015: D1 kanał 100, SL 2ATR, trailing 3ATR, filtr 1 (IS obj 1.12); 2016: D1 kanał 100, SL 2ATR, trailing 3ATR, filtr 1 (IS obj 1.22); 2017: D1 kanał 100, SL 2ATR, trailing 5ATR, filtr 0 (IS obj 0.56)
+Wyniki OOS wg lat: 2009: n=11 E=0.09R, 2010: n=19 E=-0.24R, 2011: n=25 E=-0.41R, 2012: n=22 E=0.11R, 2013: n=19 E=0.42R, 2014: n=22 E=0.43R, 2015: n=15 E=-0.22R, 2016: n=14 E=-0.55R, 2017: n=13 E=-0.22R
+Powody odrzucenia: E[R] OOS -0.050 < 0,05; t OOS -0.39 < 1,65; zyskowne lata OOS 4/9 < 55%; dodatnie kombinacje siatki 46 % < 60%; E[R] przy kosztach x1,5 = -0.032 ≤ 0
+
+### DailyTrend / Metal
+Wybory walk-forward: 2009: D1 kanał 55, SL 2ATR, trailing 3ATR, filtr 1 (IS obj -Infinity); 2010: D1 kanał 20, SL 2ATR, trailing 3ATR, filtr 1 (IS obj 0.01); 2011: D1 kanał 55, SL 2ATR, trailing 3ATR, filtr 1 (IS obj 0.09); 2012: D1 kanał 20, SL 2ATR, trailing 3ATR, filtr 1 (IS obj 0.14); 2013: D1 kanał 20, SL 2ATR, trailing 3ATR, filtr 1 (IS obj 0.33); 2014: D1 kanał 20, SL 2ATR, trailing 3ATR, filtr 0 (IS obj 0.10); 2015: D1 kanał 20, SL 3ATR, trailing 3ATR, filtr 0 (IS obj 0.18); 2016: D1 kanał 55, SL 3ATR, trailing 3ATR, filtr 0 (IS obj -0.08); 2017: D1 kanał 55, SL 3ATR, trailing 3ATR, filtr 0 (IS obj -0.10)
+Wyniki OOS wg lat: 2009: n=6 E=0.09R, 2010: n=7 E=-0.09R, 2011: n=6 E=0.85R, 2012: n=8 E=0.17R, 2013: n=6 E=-0.15R, 2014: n=9 E=-0.29R, 2015: n=9 E=-0.19R, 2016: n=5 E=-0.17R, 2017: n=4 E=-0.70R
+Powody odrzucenia: E[R] OOS -0.040 < 0,05; t OOS -0.22 < 1,65; zyskowne lata OOS 3/9 < 55%; dodatnie kombinacje siatki 50 % < 60%
+
+### DailyTrend / Energy
+Wybory walk-forward: 2009: D1 kanał 20, SL 3ATR, trailing 3ATR, filtr 0 (IS obj 0.87); 2010: D1 kanał 20, SL 3ATR, trailing 3ATR, filtr 0 (IS obj 1.06); 2011: D1 kanał 55, SL 3ATR, trailing 3ATR, filtr 0 (IS obj 1.14); 2012: D1 kanał 55, SL 3ATR, trailing 3ATR, filtr 0 (IS obj 0.93); 2013: D1 kanał 100, SL 3ATR, trailing 3ATR, filtr 1 (IS obj 0.07); 2014: D1 kanał 100, SL 3ATR, trailing 3ATR, filtr 0 (IS obj -0.05); 2015: D1 kanał 55, SL 3ATR, trailing 3ATR, filtr 1 (IS obj 0.21); 2016: D1 kanał 55, SL 2ATR, trailing 3ATR, filtr 1 (IS obj 0.19); 2017: D1 kanał 55, SL 3ATR, trailing 3ATR, filtr 0 (IS obj 0.10)
+Wyniki OOS wg lat: 2009: n=15 E=0.09R, 2010: n=18 E=-0.11R, 2011: n=8 E=0.11R, 2012: n=7 E=0.31R, 2013: n=7 E=-0.79R, 2014: n=6 E=1.33R, 2015: n=4 E=0.76R, 2016: n=8 E=-0.68R, 2017: n=7 E=-0.29R
+Powody odrzucenia: E[R] OOS 0.005 < 0,05; t OOS 0.03 < 1,65; dodatnie kombinacje siatki 25 % < 60%
+
+### DailyTrend / Index
+Wybory walk-forward: 2009: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 1 (IS obj 0.48); 2010: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 0 (IS obj 0.36); 2011: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 0 (IS obj -0.24); 2012: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 0 (IS obj -0.61); 2013: D1 kanał 100, SL 2ATR, trailing 5ATR, filtr 0 (IS obj 0.11); 2014: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 1 (IS obj -0.10); 2015: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 1 (IS obj -1.04); 2016: D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 1 (IS obj -0.93); 2017: D1 kanał 100, SL 3ATR, trailing 5ATR, filtr 1 (IS obj -2.97)
+Wyniki OOS wg lat: 2009: n=9 E=0.28R, 2010: n=14 E=-0.17R, 2011: n=8 E=-0.62R, 2012: n=15 E=0.63R, 2013: n=23 E=-0.26R, 2014: n=17 E=-0.89R, 2015: n=14 E=-0.59R, 2016: n=25 E=-0.14R, 2017: n=13 E=0.17R
+Powody odrzucenia: E[R] OOS -0.188 < 0,05; t OOS -1.40 < 1,65; zyskowne lata OOS 3/9 < 55%; dodatnie kombinacje siatki 0 % < 60%; E[R] przy kosztach x1,5 = -0.156 ≤ 0
+
+### DailyTrend / Bond
+Wybory walk-forward: 2009: D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 0 (IS obj -0.26); 2010: D1 kanał 100, SL 3ATR, trailing 3ATR, filtr 0 (IS obj -0.84); 2011: D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 0 (IS obj -0.22); 2012: D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 1 (IS obj -0.44); 2013: D1 kanał 55, SL 2ATR, trailing 3ATR, filtr 0 (IS obj -0.50); 2014: D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 0 (IS obj -0.26); 2015: D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 0 (IS obj -0.31); 2016: D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 0 (IS obj -0.32); 2017: D1 kanał 55, SL 3ATR, trailing 5ATR, filtr 0 (IS obj -0.27)
+Wyniki OOS wg lat: 2009: n=6 E=-0.69R, 2010: n=4 E=-0.58R, 2011: n=4 E=-0.77R, 2012: n=3 E=-0.89R, 2013: n=8 E=-0.72R, 2014: n=4 E=-1.01R, 2015: n=2 E=-1.54R, 2016: n=4 E=-0.45R, 2017: n=5 E=-0.84R
+Powody odrzucenia: za mało transakcji OOS (40 < 60); E[R] OOS -0.777 < 0,05; t OOS -5.77 < 1,65; zyskowne lata OOS 0/9 < 55%; dodatnie kombinacje siatki 0 % < 60%; E[R] przy kosztach x1,5 = -0.663 ≤ 0
+
+### DailyTrend / Commodity
+Wybory walk-forward: 2009: D1 kanał 20, SL 2ATR, trailing 5ATR, filtr 1 (IS obj 1.47); 2010: D1 kanał 20, SL 2ATR, trailing 5ATR, filtr 1 (IS obj 1.17); 2011: D1 kanał 20, SL 2ATR, trailing 5ATR, filtr 1 (IS obj 0.84); 2012: D1 kanał 100, SL 3ATR, trailing 3ATR, filtr 1 (IS obj -0.57); 2013: D1 kanał 100, SL 3ATR, trailing 3ATR, filtr 1 (IS obj -0.93); 2014: D1 kanał 100, SL 2ATR, trailing 3ATR, filtr 0 (IS obj -0.66); 2015: D1 kanał 20, SL 2ATR, trailing 3ATR, filtr 0 (IS obj 0.58); 2016: D1 kanał 55, SL 2ATR, trailing 5ATR, filtr 0 (IS obj 0.45); 2017: D1 kanał 55, SL 2ATR, trailing 5ATR, filtr 0 (IS obj 0.34)
+Wyniki OOS wg lat: 2009: n=14 E=-0.21R, 2010: n=17 E=-0.04R, 2011: n=18 E=-0.44R, 2012: n=10 E=-0.04R, 2013: n=9 E=-0.57R, 2014: n=12 E=0.41R, 2015: n=25 E=-0.52R, 2016: n=11 E=0.17R, 2017: n=9 E=-0.51R
+Powody odrzucenia: E[R] OOS -0.223 < 0,05; t OOS -1.84 < 1,65; zyskowne lata OOS 2/9 < 55%; dodatnie kombinacje siatki 58 % < 60%; E[R] przy kosztach x1,5 = -0.092 ≤ 0
+

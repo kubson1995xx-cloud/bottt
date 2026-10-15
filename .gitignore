@@ -1,0 +1,8 @@
+bin/
+obj/
+*.algo
+*.algo.metadata
+/data/
+*.user
+.vs/
+TestResults/

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Most APEX dla cTrader: łączy konto cTrader z aplikacją APEX Desktop (protokół APEX Bridge przez WebSocket).
+       Do pliku .algo kompilowane są wyłącznie typy protokołu z Apex.Core – most nie zawiera logiki handlowej. -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>10.0</LangVersion>
+    <RootNamespace>cAlgo.Robots</RootNamespace>
+    <AlgoPublish>False</AlgoPublish>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="cTrader.Automate" Version="1.0.21" />
+    <Compile Include="..\..\..\..\Apex.Core\Bridge\Protocol.cs" Link="Shared\Protocol.cs" />
+    <Compile Include="..\..\..\..\Apex.Core\Model\Enums.cs" Link="Shared\Enums.cs" />
+    <Compile Include="..\..\..\..\Apex.Core\Model\Market.cs" Link="Shared\Market.cs" />
+  </ItemGroup>
+</Project>

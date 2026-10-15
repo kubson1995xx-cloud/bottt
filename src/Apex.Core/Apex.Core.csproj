@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Rdzeń APEX: silnik, strategie, ryzyko, protokół mostów. Bez zależności od platform.
+       net6.0 – ładowalny zarówno przez cTrader (.NET 6), jak i przez APEX Desktop (.NET 8). -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>10.0</LangVersion>
+    <RootNamespace>Apex.Core</RootNamespace>
+    <AssemblyName>Apex.Core</AssemblyName>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>
