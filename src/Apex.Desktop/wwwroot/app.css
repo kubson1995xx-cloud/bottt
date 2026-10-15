@@ -630,3 +630,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 }
 @media (max-width: 560px) { .ai-kv { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ai-ev { grid-template-columns: 54px 14px 1fr; } }
 @media (prefers-reduced-motion: reduce) { .ai-step.run .ai-step-dot, .badge.accent .dot { animation: none; } }
+.modal input[type="text"], .modal input[type="password"], .modal select {
+  width: 100%; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-1); font: inherit;
+}
+.modal input:focus-visible, .modal select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

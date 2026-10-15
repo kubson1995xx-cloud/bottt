@@ -60,7 +60,13 @@ Handel na koncie rzeczywistym wymaga **wszystkich** poniższych kroków, wykonan
 
 Dodatkowo na koncie LIVE strategie eksperymentalne są wyłączone (podwójnie: profil i silnik), a test wykonania jest niedostępny. Wycofanie zgody: **Zablokuj konto LIVE** albo `LiveTradingFeature: false`.
 
+## Moduł AI Lab
+
+Ustawienia AI Lab znajdują się w osobnym pliku `ailab\ailab.config.json` i są zmieniane w zakładce **AI & Auto-Updates**. Zasady bezpieczeństwa (ścieżki chronione i zabronione) – tylko w pliku i tylko rozszerzająco. Opis: [`AI_AUTO_UPDATES.md`](AI_AUTO_UPDATES.md).
+Wydania zatwierdzone w AI Lab: `wydania\<wersja>\`, aktywne wskazuje `wydania\aktualne.txt` (czytany przez `Uruchom APEX.cmd`). Usunięcie tego pliku = powrót do instalacji pierwotnej.
+
 ## Zmienne środowiskowe i argumenty
 
 - `APEX_DATA_DIR` – inny katalog danych.
 - `ApexDesktop.exe --data <katalog> --port <port> --no-browser`.
+- `ApexAiLab.exe --data <katalog APEX> --port <port>`; `APEX_AILAB_EXE` – ścieżka AI Lab dla APEX Desktop; `APEX_AILAB_OPENAI_URL`, `APEX_AILAB_ANTHROPIC_URL` – inne adresy API (np. serwer pośredniczący firmy).

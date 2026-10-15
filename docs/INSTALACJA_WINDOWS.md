@@ -8,6 +8,7 @@
 | **Most cTrader** (`ApexBridge.algo`) | cBot łączący cTrader Desktop z APEX Desktop (dane rynkowe, konto, wykonywanie zleceń). |
 | **Most MetaTrader 5** (`ApexBridge.mq5`) | Expert Advisor łączący MT5 z APEX Desktop. |
 | **APEX natywny dla cTrader** (`ApexTradingAI.algo`) | Alternatywa „wszystko w jednym” – cały silnik w cBocie, bez APEX Desktop (panel na wykresie). |
+| **APEX AI Lab** (`ApexAiLab.exe`) | Opcjonalny, osobny moduł AI & Auto-Updates (analizy, agenci Codex/Claude, wydania po akceptacji) – patrz [`AI_AUTO_UPDATES.md`](AI_AUTO_UPDATES.md). |
 
 Zalecany sposób pracy: **APEX Desktop + most cTrader** (pełny panel, kilka kont i platform naraz).
 
@@ -27,7 +28,8 @@ Zalecany sposób pracy: **APEX Desktop + most cTrader** (pełny panel, kilka kon
    ```
 
    Skrypt uruchamia testy automatyczne (120 testów, ok. 1–2 min). **Jeśli którykolwiek test nie przejdzie, pakiet nie zostanie zbudowany.**
-3. Wynik: folder `dist\` z plikami `Uruchom APEX.cmd`, `APEX-Desktop\`, `cTrader\`, `MT5\`, `Dokumentacja\`.
+3. Wynik: folder `dist\` z plikami `Uruchom APEX.cmd`, `APEX-Desktop\`, `APEX-AiLab\`, `cTrader\`, `MT5\`, `Dokumentacja\`.
+   Skrót `Uruchom APEX.cmd` uruchamia wydanie zatwierdzone w AI Lab (jeśli istnieje), w przeciwnym razie instalację z pakietu.
 
 Opcje: `-Wyjscie C:\APEX` (inny folder docelowy), `-PominTesty` (niezalecane).
 

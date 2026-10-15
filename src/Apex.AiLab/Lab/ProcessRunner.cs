@@ -206,6 +206,9 @@ namespace Apex.AiLab.Lab
             if (IsWindows && (path.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)))
             {
                 string dir = Path.GetDirectoryName(path)!;
+                // Claude Code z npm zawiera natywny plik exe – uruchamiamy go bezpośrednio.
+                string nativeClaude = Path.Combine(dir, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+                if (name == "claude" && File.Exists(nativeClaude)) return new CommandSpec { FileName = nativeClaude };
                 string? js = name switch
                 {
                     "codex" => Path.Combine(dir, "node_modules", "@openai", "codex", "bin", "codex.js"),
