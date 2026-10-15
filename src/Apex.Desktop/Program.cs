@@ -158,6 +158,19 @@ namespace Apex.Desktop
                 }
             });
 
+            // AI Decision Center – wyłącznie odczyt (brak jakichkolwiek poleceń handlowych).
+            app.MapGet("/api/accounts/{key}/decisions", (string key, long? since) =>
+            {
+                var rt = accounts.Get(key);
+                return rt == null ? Results.NotFound() : Results.Json(rt.DecisionsSnapshot(since ?? 0));
+            });
+            app.MapGet("/api/accounts/{key}/instrument/{symbol}", (string key, string symbol) =>
+            {
+                var rt = accounts.Get(key);
+                var d = rt?.InstrumentDetail(symbol);
+                return d == null ? Results.NotFound() : Results.Json(d);
+            });
+
             app.MapPost("/api/pairing/regenerate", () =>
             {
                 config.Update(c => c.PairingKey = ConfigStore.NewPairingKey());

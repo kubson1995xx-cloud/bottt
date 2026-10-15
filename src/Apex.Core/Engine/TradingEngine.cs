@@ -121,6 +121,51 @@ namespace Apex.Core.Engine
         public StrategyBook Book => _book;
         public EngineConfig Config => _cfg;
 
+        /// <summary>
+        /// Opcjonalny, pasywny rejestrator decyzji (AI Decision Center). Silnik tylko zgłasza do niego zdarzenia;
+        /// błędy rejestratora są tłumione i nie mają wpływu na handel.
+        /// </summary>
+        public DecisionRecorder? Decisions { get; set; }
+
+        private void Trace(Action<DecisionRecorder> a)
+        {
+            var d = Decisions;
+            if (d == null) return;
+            try { a(d); }
+            catch (Exception) { /* wizualizacja nigdy nie może zatrzymać silnika */ }
+        }
+
+        private void TraceEval(UniverseEntry u, IStrategy strat, DateTime utc, DateTime barTime, DecisionStage stage, string outcome,
+            bool skipped, List<DecisionGate> gates, StrategyInput? input = null, SignalCandidate? c = null)
+        {
+            Trace(d => d.Add(new DecisionEvent
+            {
+                TimeUtc = utc,
+                Symbol = u.Symbol,
+                AssetClass = u.AssetClass,
+                Strategy = strat.Id,
+                SignalTf = strat.SignalTf.ToString(),
+                FilterTf = strat.FilterTf?.ToString(),
+                BarTime = barTime,
+                SignalId = c?.SignalId,
+                Stage = stage,
+                Verdict = c != null ? DecisionVerdict.Pending : DecisionVerdict.Wait,
+                Direction = c?.Direction.ToString(),
+                Outcome = outcome,
+                StrategyReason = c?.Reason,
+                SignalRegime = input != null ? RegimeSnapshot.From(input.SignalRegime, strat.SignalTf) : null,
+                FilterRegime = input != null ? RegimeSnapshot.From(input.FilterRegime, strat.FilterTf) : null,
+                ReferencePrice = c?.ReferencePrice,
+                StopDistance = c?.StopDistance,
+                TakeProfitDistance = c?.TakeProfitDistance,
+                PlannedRewardRisk = c?.PlannedRewardRisk,
+                Gates = gates,
+            }, skipped));
+        }
+
+        private void TraceUpdate(SignalCandidate c, DateTime utc, Action<DecisionEvent> change, Action<StrategyCounters>? counters = null) =>
+            Trace(d => d.Update(c.SignalId, change, counters, utc));
+
         private sealed class PoolItem
         {
             public SignalCandidate Candidate = null!;
@@ -414,8 +459,11 @@ namespace Apex.Core.Engine
             }
             else if (_pool.Count > 0)
             {
+                foreach (var item in _pool.Values)
+                    TraceUpdate(item.Candidate, utc, e => { e.Verdict = DecisionVerdict.Wait; e.Outcome = "Sygnał porzucony: nowe wejścia są wstrzymane (tryb bota lub limit ryzyka). WAIT."; }, k => k.Filtered++);
                 _pool.Clear();
             }
+            Trace(d => d.Cycle(utc));
 
             if (utc - _lastPruneUtc > TimeSpan.FromHours(6))
             {
@@ -693,7 +741,12 @@ namespace Apex.Core.Engine
                     if (_lastEval.TryGetValue(key, out var prev) && prev >= last.Value) continue;
                     _lastEval[key] = last.Value;
 
-                    if (ownSymbols.Contains(u.Symbol) || _ledger.HasPendingFor(u.Symbol)) continue;
+                    if (ownSymbols.Contains(u.Symbol) || _ledger.HasPendingFor(u.Symbol))
+                    {
+                        TraceEval(u, strat, utc, last.Value, DecisionStage.Data, "Pozycja bota na tym instrumencie już istnieje – nowe wejście pominięte (zarządzanie pozycją działa niezależnie).", true,
+                            new List<DecisionGate> { new() { Name = "Jedna pozycja na instrument", Passed = false, Detail = "pozycja lub niepotwierdzone zlecenie bota" } });
+                        continue;
+                    }
                     try
                     {
                         EvaluateStrategy(u, strat, utc);
@@ -708,27 +761,74 @@ namespace Apex.Core.Engine
 
         private void EvaluateStrategy(UniverseEntry u, IStrategy strat, DateTime utc)
         {
-            if (!_features.TryGet(u.Symbol, strat.SignalTf, utc, out var fs, out int i)) return;
-            if (i + 1 < strat.RequiredSignalBars) return;
+            var gates = new List<DecisionGate>();
+            var barTime = _features.LastClosedBarTime(u.Symbol, strat.SignalTf, utc) ?? utc;
+            if (!_features.TryGet(u.Symbol, strat.SignalTf, utc, out var fs, out int i))
+            {
+                gates.Add(new DecisionGate { Name = "Dane rynkowe", Passed = false, Detail = $"brak świec {strat.SignalTf}" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Brak danych świecowych – ocena pominięta.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Dane rynkowe", Passed = true, Detail = $"{i + 1} zamkniętych świec {strat.SignalTf}" });
+            if (i + 1 < strat.RequiredSignalBars)
+            {
+                gates.Add(new DecisionGate { Name = "Kompletność historii", Passed = false, Detail = $"{i + 1} < wymagane {strat.RequiredSignalBars}" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Za krótka historia do policzenia wskaźników – WAIT.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Kompletność historii", Passed = true, Detail = $"≥ {strat.RequiredSignalBars} świec" });
             var decisionTime = fs.Bars.Times[i] + strat.SignalTf.Duration();
             // Świeca sprzed długiej przerwy w danych (np. po rozłączeniu) – nie handlujemy starego sygnału.
             if (utc - decisionTime > TimeSpan.FromMinutes(Math.Max(20, (int)strat.SignalTf / 2.0)) && !_cfg.IsBacktest)
             {
                 if (_market.IsMarketOpen(u.Symbol, utc, out _)) WarnData(u.Symbol, utc, $"dane {strat.SignalTf} nieaktualne (ostatnia świeca zamknięta {decisionTime:HH:mm} UTC)");
+                gates.Add(new DecisionGate { Name = "Aktualność danych", Passed = false, Detail = $"ostatnia świeca zamknięta {decisionTime:yyyy-MM-dd HH:mm} UTC" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Dane nieaktualne – stary sygnał nie jest handlowany.", true, gates);
                 return;
             }
+            gates.Add(new DecisionGate { Name = "Aktualność danych", Passed = true, Detail = $"świeca zamknięta {decisionTime:HH:mm} UTC" });
             string? dataErr = ValidateRecentBars(fs, i, 30);
-            if (dataErr != null) { WarnData(u.Symbol, utc, dataErr); return; }
+            if (dataErr != null)
+            {
+                WarnData(u.Symbol, utc, dataErr);
+                gates.Add(new DecisionGate { Name = "Poprawność świec", Passed = false, Detail = dataErr });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Błędne dane – instrument pominięty.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Poprawność świec", Passed = true, Detail = "ostatnie 30 świec poprawne" });
 
             var spec = _market.GetSpec(u.Symbol);
-            if (spec == null) return;
+            if (spec == null)
+            {
+                gates.Add(new DecisionGate { Name = "Specyfikacja instrumentu", Passed = false, Detail = "brak specyfikacji" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Brak specyfikacji instrumentu – WAIT.", true, gates);
+                return;
+            }
             var input = BuildInput(u.Symbol, spec, strat, fs, i, utc);
-            if (input == null) return;
+            if (input == null)
+            {
+                gates.Add(new DecisionGate { Name = "Interwał filtrujący", Passed = false, Detail = $"brak danych {strat.FilterTf}" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Indicators, "Brak danych interwału filtrującego – WAIT.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Wskaźniki i reżim", Passed = input.SignalRegime.IsTradeable, Detail = input.SignalRegime.PolishName + (strat.FilterTf.HasValue ? " / filtr: " + input.FilterRegime.PolishName : "") });
             var c = strat.Evaluate(input);
-            if (c == null) return;
-            if (_ledger.IsKnown(c.SignalId) || _pool.ContainsKey(c.SignalId)) return;
+            if (c == null)
+            {
+                gates.Add(new DecisionGate { Name = "Warunki strategii", Passed = false, Detail = "reguły wejścia strategii nie są spełnione na tej świecy" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Strategy, "Brak sygnału – warunki strategii niespełnione. WAIT.", false, gates, input);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Warunki strategii", Passed = true, Detail = c.Reason });
+            if (_ledger.IsKnown(c.SignalId) || _pool.ContainsKey(c.SignalId))
+            {
+                gates.Add(new DecisionGate { Name = "Unikalność sygnału", Passed = false, Detail = "ten sygnał był już obsłużony" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Strategy, "Sygnał już obsłużony (ochrona przed duplikacją) – WAIT.", true, gates, input);
+                return;
+            }
             _pool[c.SignalId] = new PoolItem { Candidate = c, FirstSeenUtc = utc };
             _journal.Signal($"{utc:yyyy-MM-dd HH:mm} SYGNAŁ {c.Symbol} {c.Direction} {c.Strategy} – {c.Reason}");
+            TraceEval(u, strat, utc, barTime, DecisionStage.Strategy, $"Sygnał {(c.Direction == TradeDirection.Long ? "KUPNA" : "SPRZEDAŻY")} – oczekuje na ranking i kontrolę ryzyka.", false, gates, input, c);
         }
 
         private static string? ValidateRecentBars(FeatureSet fs, int i, int n)
@@ -783,9 +883,29 @@ namespace Apex.Core.Engine
                     {
                         _pool.Remove(kv.Key);
                         LogSignal(c, null, "odrzucony: " + reject);
+                        TraceUpdate(c, utc, e =>
+                        {
+                            e.Stage = DecisionStage.Ranking;
+                            e.Verdict = DecisionVerdict.Wait;
+                            e.Outcome = "Odrzucony przez filtry przed wejściem: " + reject + ". WAIT.";
+                            e.Gates.Add(new DecisionGate { Name = "Filtry przed wejściem", Passed = false, Detail = reject });
+                        }, k => k.Filtered++);
+                    }
+                    else
+                    {
+                        Trace(d => d.SetOutcome(c.SignalId, "Sygnał czeka: " + reject + " (w oknie ważności sygnału).", utc));
                     }
                     continue;
                 }
+                TraceUpdate(c, utc, e =>
+                {
+                    e.Stage = DecisionStage.Ranking;
+                    e.Score = r!.Score;
+                    e.Units = r.Sizing.Units;
+                    e.RiskAmount = r.Sizing.RiskAmount;
+                    e.CostToRisk = r.Sizing.CostToRisk;
+                    e.Gates.Add(new DecisionGate { Name = "Filtry przed wejściem", Passed = true, Detail = $"rynek otwarty, spread i koszt OK (koszt {r.Sizing.CostToRisk:P0} ryzyka), wolumen {r.Sizing.Units:G6}, ryzyko {r.Sizing.RiskAmount:F2}" });
+                });
                 ranked.Add(r!);
                 _pool.Remove(kv.Key);
             }
@@ -793,14 +913,26 @@ namespace Apex.Core.Engine
             int opened = 0;
             foreach (var r in ranked.OrderByDescending(x => x.Score.Total))
             {
-                if (opened >= _cfg.MaxNewPositionsPerCycle) { LogSignal(r.C, r.Score, "pominięty: limit nowych pozycji w cyklu"); continue; }
+                if (opened >= _cfg.MaxNewPositionsPerCycle)
+                {
+                    LogSignal(r.C, r.Score, "pominięty: limit nowych pozycji w cyklu");
+                    TraceUpdate(r.C, utc, e => { e.Verdict = DecisionVerdict.Wait; e.Outcome = "Pominięty: limit nowych pozycji w jednym cyklu (lepsze okazje miały pierwszeństwo). WAIT."; e.Gates.Add(new DecisionGate { Name = "Limit nowych pozycji w cyklu", Passed = false, Detail = $"{_cfg.MaxNewPositionsPerCycle} na cykl" }); }, k => k.Filtered++);
+                    continue;
+                }
                 own = OwnPositions();
                 var openRisks = BuildOpenRisks(own);
                 // Korelacja liczona względem aktualnych pozycji (także otwartych w tym cyklu).
                 (r.MaxCorr, r.MaxCorrWith) = MaxCorrelation(r.C, own, utc);
                 if (!double.IsNaN(r.MaxCorr))
                     r.Score = OpportunityScorer.Score(r.C, r.Sizing.CostToRisk, r.MaxCorr, _cfg.Scoring);
-                if (r.Score.Total < _cfg.Scoring.MinScore) { LogSignal(r.C, r.Score, $"odrzucony: ocena {r.Score.Total:F1} < {_cfg.Scoring.MinScore}"); continue; }
+                var scoreNow = r.Score;
+                TraceUpdate(r.C, utc, e => { e.Score = scoreNow; e.MinScore = _cfg.Scoring.MinScore; e.Gates.Add(new DecisionGate { Name = "Ocena okazji (ranking)", Passed = scoreNow.Total >= _cfg.Scoring.MinScore, Detail = $"{scoreNow.Total:F1} / min. {_cfg.Scoring.MinScore:F0}" + (double.IsNaN(r.MaxCorr) ? "" : $", korelacja {r.MaxCorr:F2} z {r.MaxCorrWith}") }); });
+                if (r.Score.Total < _cfg.Scoring.MinScore)
+                {
+                    LogSignal(r.C, r.Score, $"odrzucony: ocena {r.Score.Total:F1} < {_cfg.Scoring.MinScore}");
+                    TraceUpdate(r.C, utc, e => { e.Verdict = DecisionVerdict.Wait; e.Outcome = $"Ocena okazji {scoreNow.Total:F1} poniżej progu {_cfg.Scoring.MinScore:F0}. WAIT."; }, k => k.Filtered++);
+                    continue;
+                }
 
                 double margin = _broker.EstimateMargin(r.C.Symbol, r.C.Direction, r.Sizing.Units);
                 var proposal = new TradeProposal
@@ -817,6 +949,14 @@ namespace Apex.Core.Engine
                     MaxCorrelationWith = r.MaxCorrWith,
                 };
                 var check = _risk.EvaluateNewTrade(proposal, acc, openRisks);
+                var failures = check.Failures.ToList();
+                TraceUpdate(r.C, utc, e =>
+                {
+                    e.Stage = DecisionStage.Risk;
+                    e.RiskFailures = failures;
+                    e.Gates.Add(new DecisionGate { Name = "RiskEngine", Passed = failures.Count == 0, Detail = failures.Count == 0 ? $"wszystkie limity spełnione (depozyt {margin:F2}, wartość {proposal.Notional:F0})" : string.Join("; ", failures) });
+                    if (failures.Count > 0) { e.Verdict = DecisionVerdict.Wait; e.Outcome = "Zablokowany przez RiskEngine: " + string.Join("; ", failures) + ". WAIT."; }
+                }, failures.Count > 0 ? k => k.RiskBlocked++ : null);
                 if (!check.Allowed) { LogSignal(r.C, r.Score, "zablokowany przez ryzyko: " + check); continue; }
                 if (Execute(r, utc)) opened++;
                 acc = _broker.GetAccount();
@@ -933,6 +1073,9 @@ namespace Apex.Core.Engine
             string sid = c.SignalId;
             if (!_ledger.TryReserve(sid, c.Symbol, utc)) return false;
             _dirty = true;
+            // Zapis z wyprzedzeniem: rezerwacja sygnału trafia na dysk PRZED wysłaniem zlecenia,
+            // więc awaria tuż po wysłaniu nie pozwoli wysłać tego samego sygnału ponownie po restarcie.
+            SaveState(utc, force: true);
 
             double slPips = Math.Round(r.Spec.PriceToPips(c.StopDistance), 1);
             double? tpPips = c.TakeProfitDistance.HasValue ? Math.Round(r.Spec.PriceToPips(c.TakeProfitDistance.Value), 1) : (double?)null;
@@ -969,6 +1112,14 @@ namespace Apex.Core.Engine
                         }
                         var plan = CreatePlan(pos, c, r.Sizing.RiskAmount, r.Score.Total, utc);
                         _plans[pos.Id] = plan;
+                        TraceUpdate(c, utc, e =>
+                        {
+                            e.Stage = DecisionStage.Execution;
+                            e.Verdict = c.Direction == TradeDirection.Long ? DecisionVerdict.Buy : DecisionVerdict.Sell;
+                            e.PositionId = pos.Id;
+                            e.Outcome = $"{(c.Direction == TradeDirection.Long ? "BUY" : "SELL")} wykonane: pozycja #{pos.Id}, wolumen {pos.VolumeUnits:G6}, wejście {pos.EntryPrice}, SL {(pos.StopLoss.HasValue ? pos.StopLoss.Value.ToString(CultureInfo.InvariantCulture) : "ustawiany")}.";
+                            e.Gates.Add(new DecisionGate { Name = "Wykonanie zlecenia", Passed = true, Detail = $"potwierdzone u brokera, ryzyko {r.Sizing.RiskAmount:F2}" });
+                        }, k => k.Executed++);
                         _pendingInfo.Remove(sid);
                         LogSignal(c, r.Score, $"WYKONANY #{pos.Id} wol. {pos.VolumeUnits} SL {slPips} pips ryzyko {r.Sizing.RiskAmount:F2}");
                         _journal.TradeOpened(plan, pos.VolumeUnits, $"ocena {r.Score.Total:F1}; {r.Score.Describe()}");
@@ -977,6 +1128,8 @@ namespace Apex.Core.Engine
                             AddError($"#{pos.Id} {c.Symbol} otwarta bez SL – natychmiastowe zabezpieczenie.");
                             ProtectPositions(new List<PositionInfo> { pos }, utc);
                         }
+                        _dirty = true;
+                        SaveState(utc, force: true);
                         return true;
                     }
                 case OrderStatus.Rejected:
@@ -984,11 +1137,15 @@ namespace Apex.Core.Engine
                     _pendingInfo.Remove(sid);
                     RegisterBrokerError(outcome);
                     _symbolCooldown[c.Symbol] = utc.AddMinutes(30);
+                    _dirty = true;
+                    SaveState(utc, force: true);
                     LogSignal(c, r.Score, $"ODRZUCONY przez serwer: {outcome.Error} {outcome.Message}");
+                    TraceUpdate(c, utc, e => { e.Stage = DecisionStage.Execution; e.Verdict = DecisionVerdict.Wait; e.Outcome = $"Serwer odrzucił zlecenie ({outcome.Error}). WAIT."; e.Gates.Add(new DecisionGate { Name = "Wykonanie zlecenia", Passed = false, Detail = $"{outcome.Error}: {outcome.Message}" }); }, k => k.ExecutionFailed++);
                     return false;
                 default:
                     RegisterBrokerError(outcome);
                     LogSignal(c, r.Score, $"NIEPEWNA odpowiedź ({outcome.Error}) – weryfikuję stan przed kolejnym działaniem");
+                    TraceUpdate(c, utc, e => { e.Stage = DecisionStage.Execution; e.Outcome = $"Niepewna odpowiedź serwera ({outcome.Error}) – silnik weryfikuje faktyczny stan pozycji przed kolejnym działaniem."; e.Gates.Add(new DecisionGate { Name = "Wykonanie zlecenia", Passed = false, Detail = "stan niepewny – weryfikacja" }); });
                     return false;
             }
         }

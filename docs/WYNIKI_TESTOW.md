@@ -1,0 +1,54 @@
+# Wyniki testów
+
+Data: 2026-10-15. Środowisko: Linux, .NET 8 SDK (kompilacja i testy). Pakiet Windows (win-x64) zbudowany krzyżowo w tym samym środowisku.
+Uruchomienie: `dotnet test tests/Apex.Tests` albo automatycznie w `tools\windows\Zbuduj-APEX.ps1`.
+
+## Testy automatyczne – 120/120 zaliczonych
+
+Dwa kolejne pełne przebiegi: **120 zaliczonych, 0 niezaliczonych, 0 pominiętych** (ok. 53 s).
+
+| Grupa | Przypadki | Co sprawdza |
+|---|---:|---|
+| Silnik (`EngineTests`) | 24 | wejście z SL i etykietą; ryzyko ≤ budżet; brak duplikatów przy powtarzanych cyklach; restart z zapisanym stanem i z utraconym stanem; niepewna odpowiedź (pozycja jest / pozycji nie ma); odrzucenie bez ponawiania; rozłączenie i powrót; natychmiastowe zabezpieczenie pozycji bez SL; LIVE: strategia eksperymentalna nie handluje, strażnik blokuje START; strategia odrzucona nie handluje; test wykonania tylko DEMO i pełny przebieg; pozycje ręczne i innych botów nietknięte (także przy awaryjnym stopie); dzienny limit; maks. obsunięcie → awaryjne zatrzymanie; za krótka historia; rynek zamknięty; kryptowaluta błędnie oznaczona przez brokera jako indeks; wstrzymanie wejść; zmiana konta |
+| AI Decision Center (`DecisionRecorderTests`) | 9 | **identyczne zlecenia, zmiany SL i zamknięcia z wizualizacją i bez niej** (5 scenariuszy, w tym odrzucenie, niepewne odpowiedzi, brak SL); zapis rzeczywistej decyzji BUY z bramkami; blokada RiskEngine jako WAIT; odporność na mały bufor |
+| RiskManager | 14 | domyślne limity zgodne ze specyfikacją; limit pozycji, dźwignia, budżet, najgorszy scenariusz dnia, blokada przy pozycji bez SL, koncentracja walutowa, korelacja, depozyt; blokada dzienna zdejmowana tylko w nowym dniu; blokada DD tylko ręcznie; odrzucanie absurdalnych ustawień |
+| Wielkość pozycji (`SizingTests`) | 9 | ryzyko z prowizją ≤ budżet; zaokrąglanie wyłącznie w dół; odrzucenie gdy minimalny wolumen > budżet; nieznana prowizja = brak handlu; błędny SL; typy prowizji; minimalna odległość SL brokera |
+| Klasyfikacja i kryptowaluty | 21 | wykrywanie kryptowalut (BTCUSD, ETHUSD, XBTEUR, DOGEUSDT, SOL/USD, LNKUSD, „DeFi token”…); brak fałszywych trafień dla EURUSD, USDRON, XAUUSD, US500, GER40, ropy, akcji, kakao; nierozpoznany = Unknown |
+| Strażnik konta | 5 | DEMO dozwolone; LIVE domyślnie zablokowane; LIVE wymaga jednocześnie zgody, numeru na liście i dokładnej frazy; brak konta; lista brokerów |
+| Zarządzanie pozycją | 6 | break-even; SL nigdy nie jest luzowany; limit czasu; wyjście strategii; częściowe zamknięcie raz i z poszanowaniem min. wolumenu; awaryjny SL po właściwej stronie ceny |
+| Rejestr sygnałów | 4 | sygnał rezerwowany raz; czyszczenie nie usuwa oczekujących; format komentarza; deterministyczny identyfikator |
+| Wskaźniki | 7 | SMA, EMA (inicjalizacja SMA), RSI (skrajne i płaskie), ATR Wildera, korelacja, ER, ranga procentowa |
+| Wiadomości | 3 | parser (strefy czasowe, „All”, błędne wpisy); blokada tylko powiązanych instrumentów i tylko w oknie; puste dane |
+| Wybór instrumentów | 3 | krypto nigdy nie wybrane (także w trybie ręcznym); klasy bez strategii pomijane; sufiksy brokerów |
+| Protokół mostu | 4 | serializacja camelCase; odporność na błędny JSON; strony i czasy; nieznana prowizja unieważnia specyfikację |
+| Profil strategii | 2 | profil domyślny poprawny i bez fałszywych statusów „Validated”; LIVE wyklucza strategie eksperymentalne |
+| **Integracyjne** (prawdziwy proces APEX Desktop) | 9 | ochrona API (token, nagłówek Host, Content-Type); odrzucenie WebSocket z przeglądarki (Origin); zły klucz parowania; połączenie + wykluczenie BTCUSD z subskrypcji; duplikat konta odrzucony; ponowne połączenie po rozłączeniu; konto LIVE: START, test wykonania i odblokowanie zablokowane, 0 zleceń; **test wykonania end-to-end (otwarcie z SL/TP → zmiana SL → zamknięcie) z pozycjami obcymi nietkniętymi także po awaryjnym stopie**; uzgadnianie handshake TCP (ścieżka MT5) |
+
+## Usterki znalezione przez testy i poprawione
+
+1. **Zapis stanu przed wysłaniem zlecenia.** Wcześniej stan zapisywał się najwyżej co 5 s. Awaria tuż po wysłaniu zlecenia mogła zgubić rezerwację sygnału. Teraz rezerwacja trafia na dysk **przed** wysłaniem zlecenia, a plan pozycji zaraz po wykonaniu. Test: `Restart_WithSavedState_RestoresPlanAndDoesNotDuplicate`. RiskManager, strategie i limity pozostały bez zmian.
+2. Klasyfikator: opis z fragmentem „defi” (np. „Definitive Healthcare”) wyklucza instrument. To świadomie pozostawione zachowanie (fail-closed), udokumentowane testem `AmbiguousDescription_IsExcluded_FailClosed`.
+
+## Testy end-to-end z symulatorem platformy (ręczne, wcześniej w tej sesji)
+
+APEX Desktop + `tools/Apex.PlatformSimulator` (konto DEMO, dane syntetyczne, tryb przyspieszony):
+- połączenie mostu, wybór instrumentów, wykluczenie BTCUSD;
+- test wykonania: **ZALICZONY** (otwarcie z SL i TP → potwierdzenie zmiany SL → zamknięcie → wpis w dzienniku);
+- AI Decision Center wyświetlał rzeczywiste zdarzenia silnika (brak sygnału, nieaktualne dane, sygnał SELL odfiltrowany), bez błędów JavaScript.
+
+## Kompilacja
+
+| Artefakt | Wynik |
+|---|---|
+| Apex.Core, APEX Desktop, backtester, symulator, testy | 0 błędów |
+| `ApexBridge.algo` (cTrader) | 0 ostrzeżeń, 0 błędów |
+| `ApexTradingAI.algo` (cTrader natywny) | 0 ostrzeżeń, 0 błędów |
+| `ApexDesktop.exe` (win-x64, samodzielny, jeden plik) | zbudowany (93 MB) |
+| `Zbuduj-APEX.ps1` | składnia poprawna; pełny przebieg (bez testów) wykonany w PowerShell 7.4 |
+| `ApexBridge.mq5` (MT5) | **nie kompilowany** – brak MetaEditora w środowisku |
+
+## Czego NIE przetestowano (wymaga Twojego komputera)
+
+- Uruchomienia `ApexDesktop.exe` na Windows 11 i mostu w prawdziwym cTrader Desktop na koncie Pepperstone DEMO. Protokół i silnik przetestowano symulatorem, ale nie z serwerem cTrader. Pierwszym krokiem na Windows jest **test wykonania** z [`PROCEDURA_DEMO_PEPPERSTONE.md`](PROCEDURA_DEMO_PEPPERSTONE.md).
+- Kompilacji i działania mostu MT5.
+- Pobierania kalendarza wiadomości: w tym środowisku dostęp do serwera kalendarza był zablokowany (proxy). Parser przetestowano na danych testowych.

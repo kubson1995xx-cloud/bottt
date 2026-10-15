@@ -7,9 +7,11 @@
 //| (brak MetaEditora). Przed użyciem skompiluj go w MetaEditorze    |
 //| (F7) i przetestuj WYŁĄCZNIE na koncie DEMO.                      |
 //|                                                                  |
-//| Wymagane: Narzędzia → Opcje → Doradcy → "Zezwalaj na handel      |
-//| algorytmiczny". Gniazda do 127.0.0.1 nie wymagają listy URL.     |
-//| Jeśli terminal zgłosi błąd 4014, dodaj 127.0.0.1 w opcjach.      |
+//| Wymagane: Narzędzia → Opcje → Doradcy:                           |
+//|  - "Zezwalaj na handel algorytmiczny",                            |
+//|  - "Zezwalaj na WebRequest dla wymienionych URL" + dodaj adres    |
+//|    127.0.0.1 (MT5 dopuszcza gniazda tylko do adresów z listy;     |
+//|    bez tego SocketConnect zwraca błąd 4014).                      |
 //+------------------------------------------------------------------+
 #property copyright "APEX Trading AI"
 #property version   "1.00"
@@ -183,7 +185,9 @@ void Connect()
    if(g_socket == INVALID_HANDLE) { Print("APEX Bridge: SocketCreate błąd ", GetLastError()); g_nextConnect = TimeLocal() + 5; return; }
    if(!SocketConnect(g_socket, InpHost, (uint)InpPort, 3000))
    {
-      Print("APEX Bridge: brak połączenia z APEX Desktop ", InpHost, ":", InpPort, " (błąd ", GetLastError(), ")");
+      int err = GetLastError();
+      Print("APEX Bridge: brak połączenia z APEX Desktop ", InpHost, ":", InpPort, " (błąd ", err, ")");
+      if(err == 4014) Print("APEX Bridge: dodaj ", InpHost, " w Narzędzia → Opcje → Doradcy → \"Zezwalaj na WebRequest dla wymienionych URL\".");
       SocketClose(g_socket);
       g_socket = INVALID_HANDLE;
       g_nextConnect = TimeLocal() + 5;

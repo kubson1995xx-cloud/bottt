@@ -14,6 +14,7 @@ const S = {
 
 const VIEW_TITLES = {
   dashboard: 'Pulpit',
+  decisions: 'AI Decision Center',
   positions: 'Pozycje i wyniki',
   strategies: 'Strategie',
   instruments: 'Instrumenty',
@@ -177,6 +178,14 @@ function render(force) {
   if (!S.data) return;
   renderChrome();
   const view = document.getElementById('view-' + S.view);
+  // AI Decision Center zarządza własnym widokiem (animacje) i własnym odpytywaniem – tylko odczyt.
+  if (S.view === 'decisions' && window.ApexDC) {
+    if (!view.firstChild) view.appendChild(window.ApexDC.mount());
+    window.ApexDC.setAccount(currentAccount());
+    window.ApexDC.start();
+    return;
+  }
+  if (window.ApexDC) window.ApexDC.stop();
   // Nie przebudowujemy widoku, gdy użytkownik edytuje formularz.
   const active = document.activeElement;
   const editing = active && view.contains(active) && (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA');

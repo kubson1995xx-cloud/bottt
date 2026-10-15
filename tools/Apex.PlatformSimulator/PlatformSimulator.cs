@@ -23,6 +23,13 @@ namespace Apex.PlatformSimulator
         public double Balance { get; set; } = 10_000;
         public int Seed { get; set; } = 7;
         public int QuoteIntervalMs { get; set; } = 500;
+        /// <summary>Długość generowanej historii H1 (godziny). 6000 h ≈ 250 świec D1.</summary>
+        public int HistoryHours { get; set; } = 6000;
+        /// <summary>
+        /// Tryb przyspieszonego czasu WYŁĄCZNIE do testów interfejsu: co N sekund zamykana jest kolejna świeca H1
+        /// (z czasem otwarcia +1h). 0 = wyłączony (świece zamykane w rzeczywistym czasie).
+        /// </summary>
+        public int TimelapseSeconds { get; set; }
     }
 
     public sealed class SimSymbol
@@ -93,7 +100,7 @@ namespace Apex.PlatformSimulator
             Add("SpotCrude", "Crude Oil WTI", "SpotCrude", "USD", 2, 0.01, 78.5, 0.03, 0.35, volMin: 1, lot: 1, commissionKind: "None", commission: 0);
             Add("BTCUSD", "Bitcoin vs US Dollar", "BTC", "USD", 2, 1, 64000, 30, 450, volMin: 0.01, lot: 1, commissionKind: "None", commission: 0);
             Add("AAPL.US", "Apple Inc", "AAPL", "USD", 2, 0.01, 190, 0.04, 0.9, volMin: 1, lot: 1, commissionKind: "UsdPerLot", commission: 0.02);
-            GenerateHistory(1500);
+            GenerateHistory(o.HistoryHours);
         }
 
         public ConcurrentQueue<string> Received { get; } = new();
@@ -189,6 +196,7 @@ namespace Apex.PlatformSimulator
             var recv = Task.Run(() => ReceiveLoop(ct), ct);
             var lastAccount = DateTime.MinValue;
             var lastHour = DateTime.UtcNow.Hour;
+            var lastTimelapse = DateTime.UtcNow;
             try
             {
                 while (!ct.IsCancellationRequested && _ws!.State == WebSocketState.Open)
@@ -198,7 +206,15 @@ namespace Apex.PlatformSimulator
                     Tick();
                     await SendQuotes().ConfigureAwait(false);
                     var now = DateTime.UtcNow;
-                    if (now.Hour != lastHour)
+                    if (_o.TimelapseSeconds > 0)
+                    {
+                        if ((now - lastTimelapse).TotalSeconds >= _o.TimelapseSeconds)
+                        {
+                            lastTimelapse = now;
+                            await TimelapseBar().ConfigureAwait(false);
+                        }
+                    }
+                    else if (now.Hour != lastHour)
                     {
                         lastHour = now.Hour;
                         await CloseHourBar().ConfigureAwait(false);
@@ -388,6 +404,28 @@ namespace Apex.PlatformSimulator
             }
         }
 
+        /// <summary>Tryb przyspieszony: kolejna świeca H1 (czas otwarcia = poprzednia + 1h) dla wszystkich instrumentów.</summary>
+        private async Task TimelapseBar()
+        {
+            foreach (var s in _symbols.Values)
+            {
+                Bar bar;
+                lock (_lock)
+                {
+                    var last = s.H1[^1];
+                    double o = last.Close;
+                    double c = o + s.HourVol * Gauss() * 0.6;
+                    double h = Math.Max(o, c) + Math.Abs(s.HourVol * Gauss() * 0.3);
+                    double l = Math.Min(o, c) - Math.Abs(s.HourVol * Gauss() * 0.3);
+                    bar = new Bar(last.OpenTime.AddHours(1), Math.Round(o, s.Digits), Math.Round(h, s.Digits), Math.Round(l, s.Digits), Math.Round(c, s.Digits), 100);
+                    s.H1.Add(bar);
+                    s.Price = c;
+                }
+                if (_subscribed.Contains(s.Name) && _tfs.Contains("H1"))
+                    await SendAsync(new BarsMsg { Symbol = s.Name, Tf = "H1", Snapshot = false, Bars = new List<double[]> { ToArr(bar) } }).ConfigureAwait(false);
+            }
+        }
+
         /// <summary>Wysyła nową zamkniętą świecę (scenariusze testowe).</summary>
         public Task PushBar(string symbol, string tf, Bar bar)
         {
@@ -543,8 +581,12 @@ namespace Apex.PlatformSimulator
                 Key = Arg("--key") ?? "",
                 AccountNumber = long.TryParse(Arg("--account"), out var a) ? a : 900001,
                 IsLive = args.Contains("--live"),
+                Seed = int.TryParse(Arg("--seed"), out var seed) ? seed : 7,
+                HistoryHours = int.TryParse(Arg("--history-hours"), out var hh) ? hh : 6000,
+                TimelapseSeconds = int.TryParse(Arg("--timelapse"), out var tl) ? tl : 0,
             };
-            Console.WriteLine($"Symulator platformy → {o.Url} (konto {o.AccountNumber}, {(o.IsLive ? "LIVE (symulowane)" : "DEMO")})");
+            Console.WriteLine($"Symulator platformy → {o.Url} (konto {o.AccountNumber}, {(o.IsLive ? "LIVE (symulowane)" : "DEMO")})" +
+                (o.TimelapseSeconds > 0 ? $" – TRYB PRZYSPIESZONY: nowa świeca H1 co {o.TimelapseSeconds} s (tylko testy UI)" : ""));
             await using var sim = new PlatformSimulator(o);
             using var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

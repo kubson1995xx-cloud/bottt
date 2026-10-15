@@ -12,6 +12,7 @@ using Apex.Core.Bridge;
 using Apex.Core.Engine;
 using Apex.Core.Model;
 using Apex.Core.Performance;
+using Apex.Core.Regime;
 using Apex.Core.Risk;
 using Apex.Core.Safety;
 using Apex.Desktop.Bridge;
@@ -43,6 +44,7 @@ namespace Apex.Desktop.Runtime
         private string? _testSymbol;
         private volatile object? _status;
         private string _lastBuildError = "";
+        private readonly DecisionRecorder _decisions = new(800);
 
         public AccountRuntime(string key, string platform, ConfigStore config, NewsCalendar news, AppLog log)
         {
@@ -313,6 +315,7 @@ namespace Apex.Desktop.Runtime
                     News = cfg.News,
                 };
                 var engine = new TradingEngine(engineCfg, book, _adapter, _adapter, _adapter, _store, _log, _journal, _news);
+                engine.Decisions = _decisions; // pasywny rejestrator dla AI Decision Center (tylko odczyt)
                 engine.SetGuard(guard);
                 _engine = engine;
                 RecomputeUniverse();
@@ -513,6 +516,131 @@ namespace Apex.Desktop.Runtime
                 requiredLivePhrase = s?.Account is { IsLive: true } a ? AccountGuard.RequiredLivePhrase(a.Number) : null,
             };
         }
+
+        // ------------------------------------------------------------------ AI Decision Center (tylko odczyt)
+
+        private static readonly StrategyId[] AllStrategies =
+        {
+            StrategyId.TrendPullback, StrategyId.DonchianBreakout, StrategyId.MeanReversion,
+            StrategyId.MomentumImpulse, StrategyId.IndexDipBuy, StrategyId.DailyTrend,
+        };
+
+        /// <summary>Migawka dla AI Decision Center: nowe zdarzenia decyzyjne, skaner rynku i liczniki strategii.</summary>
+        public object DecisionsSnapshot(long since)
+        {
+            var (events, lastSeq) = _decisions.Since(since);
+            var s = _adapter.Session;
+            var engine = _engine;
+            var st = _status;
+            var scanner = _decisions.Scanner().ToDictionary(x => x.Symbol, StringComparer.OrdinalIgnoreCase);
+            var ownSymbols = new HashSet<string>(_adapter.GetPositions().Where(p => engine != null && p.Label == engine.Config.Label).Select(p => p.Symbol), StringComparer.OrdinalIgnoreCase);
+            var instruments = new List<object>();
+            foreach (var u in _universe.Where(x => x.Selected))
+            {
+                scanner.TryGetValue(u.Symbol, out var sc);
+                var q = s?.Quote(u.Symbol);
+                double[] closes = Array.Empty<double>();
+                double changePct = double.NaN;
+                if (s != null && s.Bars.TryGet(u.Symbol, Tf.H1, DateTime.UtcNow, out var fs, out int i) && i >= 1)
+                {
+                    int from = Math.Max(0, i - 47);
+                    closes = fs.Close.Skip(from).Take(i - from + 1).ToArray();
+                    int j = Math.Max(0, i - 24);
+                    if (fs.Close[j] > 0) changePct = (fs.Close[i] / fs.Close[j] - 1) * 100;
+                }
+                instruments.Add(new
+                {
+                    symbol = u.Symbol,
+                    assetClass = u.AssetClass.ToString(),
+                    className = u.AssetClass.PolishName(),
+                    bid = q?.q.B,
+                    ask = q?.q.A,
+                    marketOpen = q?.q.O ?? false,
+                    quoteAgeSec = q.HasValue ? (DateTime.UtcNow - q.Value.received).TotalSeconds : (double?)null,
+                    closes,
+                    change24h = double.IsNaN(changePct) ? (double?)null : Math.Round(changePct, 3),
+                    hasPosition = ownSymbols.Contains(u.Symbol),
+                    lastVerdict = sc?.LastVerdict.ToString(),
+                    lastStage = sc?.LastStage.ToString(),
+                    lastOutcome = sc?.LastOutcome,
+                    lastStrategy = sc?.LastStrategy.ToString(),
+                    lastEvaluationUtc = sc?.LastEvaluationUtc,
+                    evaluations = sc?.Evaluations ?? 0,
+                    regime = sc?.Regime,
+                });
+            }
+            var counters = _decisions.Counters();
+            var profile = engine?.Book.Profile.Entries ?? new List<ProfileEntry>();
+            var strategies = AllStrategies.Select(id =>
+            {
+                var entries = profile.Where(e => e.Strategy == id).ToList();
+                var activeClasses = engine == null ? new List<string>() : engine.Book.Classes.Where(c => engine.Book.For(c).Any(x => x.Id == id)).Select(c => c.PolishName()).ToList();
+                bool userDisabled = engine != null && !engine.IsStrategyEnabled(id);
+                string status = activeClasses.Count > 0 ? (userDisabled ? "UserDisabled" : entries.Any(e => e.Enabled && e.Status == ValidationStatus.Validated) ? "Validated" : "Experimental") : "Rejected";
+                counters.TryGetValue(id, out var k);
+                return new
+                {
+                    id = id.ToString(),
+                    code = id.Code(),
+                    name = id.PolishName(),
+                    status,
+                    activeClasses,
+                    evidence = entries.FirstOrDefault(e => e.Enabled && e.Status != ValidationStatus.Rejected)?.Evidence ?? entries.FirstOrDefault()?.Evidence ?? "",
+                    counters = k ?? new StrategyCounters(),
+                };
+            }).ToList();
+            return new
+            {
+                lastSeq,
+                startedUtc = _decisions.StartedUtc,
+                lastCycleUtc = _decisions.LastCycleUtc,
+                cycles = _decisions.Cycles,
+                connected = _adapter.IsConnected,
+                engineReady = engine != null,
+                events,
+                instruments,
+                strategies,
+                scoring = engine == null ? null : new
+                {
+                    minScore = engine.Config.Scoring.MinScore,
+                    weights = new
+                    {
+                        mtfAlignment = engine.Config.Scoring.WeightMtfAlignment,
+                        trendStrength = engine.Config.Scoring.WeightTrendStrength,
+                        momentum = engine.Config.Scoring.WeightMomentum,
+                        volatility = engine.Config.Scoring.WeightVolatility,
+                        cost = engine.Config.Scoring.WeightCost,
+                        rewardRisk = engine.Config.Scoring.WeightRewardRisk,
+                        regimeFit = engine.Config.Scoring.WeightRegimeFit,
+                    },
+                    totalWeight = engine.Config.Scoring.TotalWeight,
+                },
+                risk = st,
+            };
+        }
+
+        /// <summary>Szczegóły instrumentu do wykresu: świece H1 i EMA liczone z tych samych danych co w silniku.</summary>
+        public object? InstrumentDetail(string symbol)
+        {
+            var s = _adapter.Session;
+            if (s == null || !_universe.Any(u => u.Selected && string.Equals(u.Symbol, symbol, StringComparison.OrdinalIgnoreCase))) return null;
+            var now = DateTime.UtcNow;
+            object? Series(Tf tf, int count)
+            {
+                if (!s.Bars.TryGet(symbol, tf, now, out var fs, out int i) || i < 1) return null;
+                int from = Math.Max(0, i - count + 1);
+                var ema50 = fs.Ema(50);
+                var ema200 = fs.Ema(200);
+                var reg = MarketRegimeDetector.Assess(fs, i, new RegimeSettings());
+                var bars = new List<double?[]>();
+                for (int j = from; j <= i; j++)
+                    bars.Add(new double?[] { BridgeProtocol.ToUnixMs(fs.Bars.Times[j]), fs.Open[j], fs.High[j], fs.Low[j], fs.Close[j], Clean(ema50[j]), Clean(ema200[j]) });
+                return new { tf = tf.ToString(), bars, regime = RegimeSnapshot.From(reg, tf), atr = Clean(Apex.Core.Indicators.Ta.At(fs.Atr(14), i)) };
+            }
+            return new { symbol, h1 = Series(Tf.H1, 160), h4 = Series(Tf.H4, 120), d1 = Series(Tf.D1, 120) };
+        }
+
+        private static double? Clean(double v) => double.IsNaN(v) || double.IsInfinity(v) ? null : Math.Round(v, 8);
 
         public void Dispose()
         {
