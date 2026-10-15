@@ -383,6 +383,10 @@ namespace Apex.Backtester.Research
         }
 
         /// <summary>Portfel z połączenia profili z kilku rund (wpisy włączone w którejkolwiek rundzie).</summary>
+        /// <summary>Opcjonalny plik JSON z podsumowaniem portfela (do automatycznych porównań, np. moduł AI Lab).</summary>
+        public string? SummaryPath { get; set; }
+        private readonly List<object> _portfolioSummary = new();
+
         public int RunPortfolioOnly(IEnumerable<string> profilePaths)
         {
             var merged = new StrategyProfile { Version = "merged", Entries = new List<ProfileEntry>() };
@@ -394,6 +398,9 @@ namespace Apex.Backtester.Research
             }
             RunPortfolio(merged);
             File.WriteAllText(Path.Combine(_outDir, $"portfolio_log{_tag}.txt"), _log.ToString());
+            if (!string.IsNullOrWhiteSpace(SummaryPath))
+                File.WriteAllText(SummaryPath!, System.Text.Json.JsonSerializer.Serialize(new { profile = merged.Version, enabledEntries = merged.Entries.Count(e => e.Enabled), runs = _portfolioSummary },
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
             return 0;
         }
 
@@ -497,6 +504,7 @@ namespace Apex.Backtester.Research
                 Log("Żadna strategia nie spełniła kryteriów – portfel pusty. Bot w tej konfiguracji pozostaje bez pozycji.");
                 return;
             }
+            Directory.CreateDirectory(Path.Combine(_outDir, "trades"));
             var classes = enabled.Select(e => e.AssetClass).Distinct().ToList();
             var symbols = classes.SelectMany(SymbolsOf).Distinct().Select(_loader.Load).ToList();
             foreach (var (name, from, to) in new[] { ("badawczy 2005–2017", ResearchFrom, ResearchTo), ("HOLDOUT 2018–2020.05", HoldoutFrom, HoldoutTo) })
@@ -526,6 +534,20 @@ namespace Apex.Backtester.Research
                     string tag = (name.StartsWith("HOLD") ? "holdout" : "research") + "_min" + minScore + _tag;
                     File.WriteAllLines(Path.Combine(_outDir, "trades", $"portfolio_{tag}.csv"), new[] { TradeRecord.CsvHeader }.Concat(res.Trades.Select(t => t.ToCsv())));
                     File.WriteAllLines(Path.Combine(_outDir, "trades", $"equity_{tag}.csv"), new[] { "date,equity" }.Concat(res.DailyEquity.Select(e => $"{e.Time:yyyy-MM-dd},{e.Equity.ToString("F2", CultureInfo.InvariantCulture)}")));
+                    _portfolioSummary.Add(new
+                    {
+                        period = name.StartsWith("HOLD") ? "holdout" : "research",
+                        minScore,
+                        trades = st.Trades,
+                        winRate = st.WinRate,
+                        expectancyR = st.ExpectancyR,
+                        tStat = st.TStat,
+                        profitFactor = double.IsInfinity(st.ProfitFactor) ? 999 : st.ProfitFactor,
+                        netProfit = st.NetProfit,
+                        endEquity = res.EndEquity,
+                        maxEquityDrawdownPct = res.MaxEquityDrawdownPct,
+                        sharpe,
+                    });
                     if (minScore == 50.0) MonteCarlo(res.Trades, name);
                 }
             }

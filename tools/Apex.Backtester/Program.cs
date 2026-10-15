@@ -30,10 +30,10 @@ namespace Apex.Backtester
                 case "research":
                     return new ResearchPipeline(loader, outDir, GetArg(args, "--only"), GetArg(args, "--tag")).Run();
                 case "portfolio":
-                    return new ResearchPipeline(loader, outDir, null, GetArg(args, "--tag"))
+                    return new ResearchPipeline(loader, outDir, null, GetArg(args, "--tag")) { SummaryPath = GetArg(args, "--summary") }
                         .RunPortfolioOnly((GetArg(args, "--profiles") ?? Path.Combine(outDir, "profile_validated.json")).Split(','));
                 default:
-                    Console.WriteLine("Użycie: Apex.Backtester smoke|research|portfolio [--data dir] [--out dir] [--symbol S] [--only Strategia|Klasa] [--tag r2] [--profiles a.json,b.json]");
+                    Console.WriteLine("Użycie: Apex.Backtester smoke|research|portfolio [--data dir] [--out dir] [--symbol S] [--only Strategia|Klasa] [--tag r2] [--profiles a.json,b.json] [--summary wynik.json]");
                     return 1;
             }
         }

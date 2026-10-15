@@ -6,7 +6,8 @@
 .DESCRIPTION
     1. Sprawdza .NET 8 SDK.
     2. Uruchamia testy automatyczne (jednostkowe + integracyjne). Błąd testów = brak pakietu.
-    3. Publikuje APEX Desktop jako samodzielny plik ApexDesktop.exe (win-x64, nie wymaga instalacji .NET).
+    3. Publikuje APEX Desktop jako samodzielny plik ApexDesktop.exe (win-x64, nie wymaga instalacji .NET)
+       oraz moduł APEX AI Lab (ApexAiLab.exe – osobny proces).
     4. Buduje cBoty cTrader (ApexBridge.algo – most, ApexTradingAI.algo – wersja natywna "wszystko w jednym").
     5. Kopiuje most MetaTrader 5 (ApexBridge.mq5 – do kompilacji w MetaEditor).
     6. Kopiuje dokumentację i tworzy skrót "Uruchom APEX.cmd".
@@ -49,6 +50,12 @@ $desktop = Join-Path $Wyjscie "APEX-Desktop"
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IsTransformWebConfigDisabled=true -o $desktop
 Sprawdz "Publikacja APEX Desktop"
 
+Krok "APEX AI Lab (osobny proces – analizy i agenci AI, wdrożenia tylko po akceptacji)"
+$ailab = Join-Path $Wyjscie "APEX-AiLab"
+& dotnet publish (Join-Path $repo "src\Apex.AiLab\Apex.AiLab.csproj") -c Release -r win-x64 --self-contained true `
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IsTransformWebConfigDisabled=true -o $ailab
+Sprawdz "Publikacja APEX AI Lab"
+
 Krok "cBoty cTrader"
 $ctrader = Join-Path $Wyjscie "cTrader"
 New-Item -ItemType Directory -Force -Path $ctrader | Out-Null
@@ -71,16 +78,27 @@ Copy-Item (Join-Path $repo "docs\*.md") $docs -Force
 Copy-Item (Join-Path $repo "README.md") $docs -Force
 Copy-Item (Join-Path $repo "reports\RAPORT_BADAN.md") $docs -Force
 
+# Skrypt startowy (tylko ASCII). Jeśli w AI Lab zatwierdzono wydanie, uruchamiane jest to wydanie;
+# w przeciwnym razie (lub gdy plik wydania nie istnieje) – instalacja pierwotna z tego pakietu.
 $cmd = @"
 @echo off
-rem Uruchamia APEX Desktop (panel otworzy się w przeglądarce Edge w trybie aplikacji).
-start "" "%~dp0APEX-Desktop\ApexDesktop.exe"
+chcp 65001 >nul
+setlocal
+rem Start APEX Desktop. If an AI Lab release was approved, that release is started instead.
+set "EXE=%~dp0APEX-Desktop\ApexDesktop.exe"
+set "DATA=%LOCALAPPDATA%\APEX Trading AI"
+if defined APEX_DATA_DIR set "DATA=%APEX_DATA_DIR%"
+set "REL="
+if exist "%DATA%\wydania\aktualne.txt" set /p REL=<"%DATA%\wydania\aktualne.txt"
+if defined REL if exist "%REL%" set "EXE=%REL%"
+start "" "%EXE%"
 "@
 Set-Content -Path (Join-Path $Wyjscie "Uruchom APEX.cmd") -Value $cmd -Encoding ASCII
 
 Krok "Gotowe"
 Write-Host "Pakiet: $Wyjscie" -ForegroundColor Green
 Write-Host "  Uruchom APEX.cmd              – start APEX Desktop"
+Write-Host "  APEX-AiLab\ApexAiLab.exe      – moduł AI & Auto-Updates (uruchamiany z panelu APEX)"
 Write-Host "  cTrader\ApexBridge.algo       – most cTrader (dwuklik = instalacja w cTrader)"
 Write-Host "  cTrader\ApexTradingAI.algo    – wersja natywna (bez APEX Desktop)"
 Write-Host "  MT5\ApexBridge.mq5            – most MetaTrader 5 (kompilacja w MetaEditor)"

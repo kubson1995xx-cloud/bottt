@@ -15,5 +15,6 @@
     <ProjectReference Include="..\..\src\Apex.Core\Apex.Core.csproj" />
     <ProjectReference Include="..\..\src\Apex.Desktop\Apex.Desktop.csproj" />
     <ProjectReference Include="..\..\tools\Apex.PlatformSimulator\Apex.PlatformSimulator.csproj" />
+    <ProjectReference Include="..\..\src\Apex.AiLab\Apex.AiLab.csproj" />
   </ItemGroup>
 </Project>
