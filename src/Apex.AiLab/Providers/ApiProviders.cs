@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -30,7 +31,8 @@ Na końcu:
 === PODSUMOWANIE ===
 <tytuł zmiany w pierwszej linii, potem: co zmieniono, dlaczego, oczekiwany efekt, ryzyka, jakie testy dodano>
 === KONIEC ===
-Nie usuwaj plików. Nie używaj innych formatów (diff, łatki). Jeśli uznasz, że zmiana nie jest uzasadniona danymi – nie zmieniaj plików i wyjaśnij to w podsumowaniu.";
+Nie usuwaj plików. Nie używaj innych formatów (diff, łatki). Jeśli uznasz, że zmiana nie jest uzasadniona danymi – nie zmieniaj plików i wyjaśnij to w podsumowaniu.
+Dozwolone ścieżki: src/, tests/, docs/, config/, tools/ (bez bin/, obj/, .git, plików projektów i skryptów). Pliki zapisywane są w UTF-8.";
 
         public sealed class ParsedResponse
         {
@@ -84,28 +86,89 @@ Nie usuwaj plików. Nie używaj innych formatów (diff, łatki). Jeśli uznasz, 
             return res;
         }
 
-        /// <summary>Walidacja ścieżki: względna, w repozytorium, bez "..", bez ścieżek zabronionych. Zwraca znormalizowaną ścieżkę lub null.</summary>
+        /// <summary>Katalogi główne, w których dostawca API może zapisywać pliki.</summary>
+        public static readonly string[] AllowedRoots = { "src", "tests", "docs", "config", "tools" };
+
+        /// <summary>
+        /// Walidacja ścieżki: względna, w repozytorium, tylko w <see cref="AllowedRoots"/>, bez "..", segmentów .git (także pliku .git
+        /// kopii roboczej), składni strumieni ADS (":"), segmentów z końcową kropką/spacją, nazw urządzeń Windows i nazw 8.3,
+        /// bez bin/ i obj/ (pliki ignorowane przez git omijają diff), bez plików budowania i skryptów, bez ścieżek zabronionych –
+        /// sprawdzanych PO pełnej normalizacji. Zwraca znormalizowaną ścieżkę lub null.
+        /// </summary>
         public static string? SafePath(string repoRoot, string relPath, IEnumerable<string> forbidden, out string? problem)
         {
             problem = null;
             string p = relPath.Replace('\\', '/').Trim();
+            string Reject(string why) => $"Odrzucono ścieżkę {relPath}: {why}";
             if (p.Length == 0 || p.StartsWith("/", StringComparison.Ordinal) || Regex.IsMatch(p, @"^[A-Za-z]:") || p.Split('/').Any(seg => seg == ".." || seg == "."))
             {
                 problem = $"Odrzucono ścieżkę spoza repozytorium: {relPath}";
                 return null;
             }
+            if (p.Any(c => char.IsControl(c) || c is ':' or '"' or '<' or '>' or '|' or '?' or '*'))
+            {
+                problem = Reject("niedozwolone znaki (m.in. \":\" – strumienie danych NTFS)");
+                return null;
+            }
+            var segs = p.Split('/');
+            foreach (var seg in segs)
+            {
+                if (seg.Length == 0) { problem = Reject("pusty segment ścieżki"); return null; }
+                if (seg.EndsWith(".", StringComparison.Ordinal) || seg.EndsWith(" ", StringComparison.Ordinal) || seg.StartsWith(" ", StringComparison.Ordinal))
+                { problem = Reject("segment kończący się kropką lub spacją (alias w Windows)"); return null; }
+                if (seg.Equals(".git", StringComparison.OrdinalIgnoreCase)) { problem = Reject("ścieżki .git są niedozwolone"); return null; }
+                if (Regex.IsMatch(seg, @"~\d")) { problem = Reject("nazwa w formacie 8.3 (alias w Windows)"); return null; }
+                if (Regex.IsMatch(seg.Split('.')[0], @"^(?i:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[0-9¹²³]|LPT[0-9¹²³])$"))
+                { problem = Reject("zarezerwowana nazwa urządzenia Windows"); return null; }
+                if (seg.Equals("bin", StringComparison.OrdinalIgnoreCase) || seg.Equals("obj", StringComparison.OrdinalIgnoreCase) || seg.Equals(".vs", StringComparison.OrdinalIgnoreCase) || seg.Equals("TestResults", StringComparison.OrdinalIgnoreCase))
+                { problem = Reject("katalogi bin/, obj/ i wyniki budowania są ignorowane przez git i omijają audyt"); return null; }
+            }
+            if (segs.Length < 2 || !AllowedRoots.Contains(segs[0], StringComparer.Ordinal))
+            {
+                problem = Reject("dozwolone są tylko pliki w " + string.Join(", ", AllowedRoots.Select(r => r + "/")));
+                return null;
+            }
+            if (Pipeline.ChangeAudit.IsBuildOrScriptFile(p) || p.EndsWith(".user", StringComparison.OrdinalIgnoreCase))
+            {
+                problem = Reject("AI nie może zmieniać konfiguracji budowania ani skryptów");
+                return null;
+            }
+            string root = Path.GetFullPath(repoRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string full = Path.GetFullPath(Path.Combine(root, p));
+            var cmp = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!full.StartsWith(root, cmp))
+            {
+                problem = $"Odrzucono ścieżkę spoza repozytorium: {relPath}";
+                return null;
+            }
+            // Ścieżka po normalizacji systemu musi być identyczna z podaną (inaczej Windows mógłby ją zinterpretować inaczej niż audyt).
+            string normalized = Path.GetRelativePath(root, full).Replace('\\', '/');
+            if (!string.Equals(normalized, p, StringComparison.Ordinal))
+            {
+                problem = Reject("ścieżka zmienia się po normalizacji (" + normalized + ")");
+                return null;
+            }
             foreach (var f in forbidden)
-                if (p.StartsWith(f, StringComparison.OrdinalIgnoreCase))
+            {
+                string fn = f.Replace('\\', '/').TrimStart('/');
+                if (fn.Length > 0 && (normalized.StartsWith(fn, StringComparison.OrdinalIgnoreCase) || p.StartsWith(fn, StringComparison.OrdinalIgnoreCase)))
                 {
                     problem = $"Odrzucono zmianę w ścieżce zabronionej: {p}";
                     return null;
                 }
-            string full = Path.GetFullPath(Path.Combine(repoRoot, p));
-            string root = Path.GetFullPath(repoRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (!full.StartsWith(root, StringComparison.Ordinal))
+            }
+            // Żaden istniejący element ścieżki nie może być dowiązaniem (zapis poza kopią roboczą).
+            string cur = root;
+            foreach (var seg in segs)
             {
-                problem = $"Odrzucono ścieżkę spoza repozytorium: {relPath}";
-                return null;
+                cur = Path.Combine(cur, seg);
+                var info = new FileInfo(cur);
+                if ((info.Exists || Directory.Exists(cur)) && (File.GetAttributes(cur) & FileAttributes.ReparsePoint) != 0)
+                {
+                    problem = Reject("element ścieżki jest dowiązaniem");
+                    return null;
+                }
+                if (!info.Exists && !Directory.Exists(cur)) break;
             }
             return p;
         }
@@ -205,6 +268,10 @@ Nie usuwaj plików. Nie używaj innych formatów (diff, łatki). Jeśli uznasz, 
                     res.Usage.LimitMessage = call.error;
                     res.Usage.LimitResetUtc = LimitDetector.ResetTime(call.error, DateTime.UtcNow) ?? DateTime.UtcNow.AddMinutes(30);
                 }
+                // Częściowa odpowiedź tylko do wglądu (katalog zadania, nie kopia robocza) – żadne pliki nie są stosowane.
+                if (!string.IsNullOrEmpty(call.text))
+                    try { File.WriteAllText(Path.Combine(req.JobDir, $"api-odpowiedz-przerwana-{DateTime.UtcNow:HHmmss}.txt"), call.text); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
                 res.Error = Name + ": " + call.error;
                 return res;
             }
@@ -225,10 +292,17 @@ Nie usuwaj plików. Nie używaj innych formatów (diff, łatki). Jeśli uznasz, 
             return res;
         }
 
+        /// <summary>
+        /// Szacunkowy koszt z cen wpisanych przez użytkownika. Tokeny wejściowe z pamięci podręcznej (część InputTokens) są tańsze:
+        /// cena PriceCachedInputPerMTok, a gdy nie jest podana – 10% ceny wejścia (typowy cennik OpenAI/Anthropic).
+        /// </summary>
         public static double? Cost(UsageInfo u, ProviderSettings s)
         {
             if (s.PriceInputPerMTok <= 0 && s.PriceOutputPerMTok <= 0) return null;
-            return u.InputTokens / 1e6 * s.PriceInputPerMTok + u.OutputTokens / 1e6 * s.PriceOutputPerMTok;
+            long cached = Math.Clamp(u.CachedInputTokens, 0, Math.Max(0, u.InputTokens));
+            long fresh = Math.Max(0, u.InputTokens) - cached;
+            double cachedPrice = s.PriceCachedInputPerMTok > 0 ? s.PriceCachedInputPerMTok : s.PriceInputPerMTok * 0.1;
+            return fresh / 1e6 * s.PriceInputPerMTok + cached / 1e6 * cachedPrice + Math.Max(0, u.OutputTokens) / 1e6 * s.PriceOutputPerMTok;
         }
 
         protected static string ErrorText(string body, HttpStatusCode code)
@@ -283,14 +357,35 @@ Nie usuwaj plików. Nie używaj innych formatów (diff, łatki). Jeśli uznasz, 
                 if (us.TryGetProperty("input_tokens_details", out var det)) usage.CachedInputTokens = CodexEvents.Long(det, "cached_tokens");
             }
             var sb = new StringBuilder();
+            string? refusal = null;
             if (root.TryGetProperty("output", out var output) && output.ValueKind == JsonValueKind.Array)
                 foreach (var item in output.EnumerateArray())
                     if (CodexEvents.Str(item, "type") == "message" && item.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
                         foreach (var c in content.EnumerateArray())
-                            if (CodexEvents.Str(c, "type") == "output_text") sb.Append(CodexEvents.Str(c, "text"));
+                        {
+                            string ct2 = CodexEvents.Str(c, "type");
+                            if (ct2 == "output_text") sb.Append(CodexEvents.Str(c, "text"));
+                            else if (ct2 == "refusal") refusal = CodexEvents.Str(c, "refusal");
+                        }
             string status = CodexEvents.Str(root, "status");
-            if (sb.Length == 0) return ("", usage, "pusta odpowiedź modelu (status: " + status + ")", resp.StatusCode);
-            return (sb.ToString(), usage, status == "incomplete" ? "odpowiedź niekompletna (limit długości) – zwiększ maks. długość odpowiedzi" : null, resp.StatusCode);
+            return (sb.ToString(), usage, OpenAiResponseError(status, root, refusal, sb.Length), resp.StatusCode);
+        }
+
+        /// <summary>
+        /// Sukces wyłącznie dla zakończonej odpowiedzi (status "completed" – lub brak pola status), bez odmowy i bez incomplete_details.
+        /// Każde inne zakończenie = błąd, a AI Lab nie zapisuje żadnych plików z częściowej odpowiedzi.
+        /// </summary>
+        public static string? OpenAiResponseError(string status, JsonElement root, string? refusal, int textLength)
+        {
+            if (refusal != null) return "model odmówił wykonania zadania" + (refusal.Length > 0 ? ": " + CodexEvents.Trim(refusal, 300) : "") + " – nie zapisano żadnych plików";
+            string reason = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("incomplete_details", out var det) && det.ValueKind == JsonValueKind.Object ? CodexEvents.Str(det, "reason") : "";
+            if (status == "incomplete" || reason.Length > 0)
+                return reason is "max_output_tokens" or ""
+                    ? "odpowiedź niekompletna (limit długości) – zwiększ maks. długość odpowiedzi; nie zapisano żadnych plików"
+                    : "odpowiedź niekompletna (" + reason + ") – nie zapisano żadnych plików";
+            if (status.Length > 0 && status != "completed") return "odpowiedź przerwana (status: " + status + ") – nie zapisano żadnych plików";
+            if (textLength == 0) return "pusta odpowiedź modelu (status: " + status + ")";
+            return null;
         }
     }
 
@@ -334,8 +429,24 @@ Nie usuwaj plików. Nie używaj innych formatów (diff, łatki). Jeśli uznasz, 
                 foreach (var c in content.EnumerateArray())
                     if (CodexEvents.Str(c, "type") == "text") sb.Append(CodexEvents.Str(c, "text"));
             string stop = CodexEvents.Str(root, "stop_reason");
-            if (sb.Length == 0) return ("", usage, "pusta odpowiedź modelu (stop_reason: " + stop + ")", resp.StatusCode);
-            return (sb.ToString(), usage, stop == "max_tokens" ? "odpowiedź ucięta (limit długości) – zwiększ maks. długość odpowiedzi" : null, resp.StatusCode);
+            return (sb.ToString(), usage, StopReasonError(stop, sb.Length), resp.StatusCode);
+        }
+
+        /// <summary>
+        /// Sukces wyłącznie dla stop_reason "end_turn" lub "stop_sequence". Każdy inny powód (refusal, max_tokens,
+        /// model_context_window_exceeded, pause_turn, tool_use, brak pola) = błąd – bloki plików z częściowej odpowiedzi nie są zapisywane.
+        /// </summary>
+        public static string? StopReasonError(string stop, int textLength)
+        {
+            if (stop is "end_turn" or "stop_sequence")
+                return textLength == 0 ? "pusta odpowiedź modelu (stop_reason: " + stop + ")" : null;
+            return stop switch
+            {
+                "max_tokens" => "odpowiedź ucięta (limit długości) – zwiększ maks. długość odpowiedzi; nie zapisano żadnych plików",
+                "refusal" => "model odmówił wykonania zadania (stop_reason: refusal) – nie zapisano żadnych plików",
+                "" => "odpowiedź bez stop_reason – traktowana jako przerwana; nie zapisano żadnych plików",
+                _ => "odpowiedź przerwana (stop_reason: " + stop + ") – nie zapisano żadnych plików",
+            };
         }
     }
 }

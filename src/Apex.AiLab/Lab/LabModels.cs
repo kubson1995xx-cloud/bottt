@@ -74,7 +74,12 @@ namespace Apex.AiLab.Lab
         public int Added { get; set; }
         public int Removed { get; set; }
         public bool Protected { get; set; }
+        /// <summary>M / A / D / T (zmiana typu) oraz I – plik ignorowany przez git, ale wpływający na kompilację (ukryty przed diffem).</summary>
         public string Status { get; set; } = "M";
+        /// <summary>Zmiana binarna (git numstat "-") – treści nie da się sprawdzić regułami audytu.</summary>
+        public bool Binary { get; set; }
+        /// <summary>Tryb pliku po zmianie (np. 100644, 100755, 120000 = dowiązanie, 160000 = podmoduł); pusty = nieznany.</summary>
+        public string Mode { get; set; } = "";
     }
 
     public enum FindingSeverity

@@ -14,12 +14,21 @@ namespace Apex.AiLab.Pipeline
 @"## Zasady (obowiązkowe)
 1. Pracujesz w izolowanej kopii repozytorium APEX Trading AI. Twoja zmiana NIE trafi do działającego bota bez akceptacji użytkownika.
    Po Twojej pracy AI Lab niezależnie wykona: audyt zmian, kompilację, wszystkie testy (także integracyjne) i backtest portfela.
-2. Kryptowaluty są całkowicie wykluczone. Konto REAL/LIVE pozostaje zablokowane – nie zmieniaj niczego, co dotyczy dopuszczenia konta LIVE.
+2. Kryptowaluty są całkowicie wykluczone. Konto REAL/LIVE pozostaje zablokowane – nie zmieniaj niczego, co dotyczy dopuszczenia konta LIVE
+   (AccountGuard, HostConfig, IsLive/AllowLive/LiveTradingFeature, AccountSnapshot, ACCOUNT_TRADE_MODE, odblokowanie LIVE w panelu).
+   Każda dodana lub usunięta linia z takim odwołaniem (także w JS panelu) powoduje odrzucenie zmiany.
 3. Nigdy: martingale, grid, uśrednianie stratnych pozycji, zwiększanie pozycji po stracie, transakcje bez SL, ukryta dźwignia.
-4. RiskEngine (src/Apex.Core/Risk), limity bezpieczeństwa, strażnik konta, rejestr wykonania, mosty platform i aktywne strategie
-   (profil config/profile_default.json oraz kod strategii o statusie innym niż Rejected) to moduły chronione.
-   Zmieniaj je tylko wtedy, gdy dane jednoznacznie tego wymagają – każda taka zmiana wymaga osobnego potwierdzenia użytkownika.
-5. Nie zmieniaj katalogu src/Apex.AiLab ani skryptów budowy. Nie usuwaj i nie wyłączaj testów. Każda zmiana logiki = nowe lub zaktualizowane testy.
+4. Moduły chronione (zmiana wymaga osobnego, wpisanego potwierdzenia użytkownika): cały src/Apex.Core (RiskEngine, limity, strażnik,
+   wykonanie, model rynku, silnik, aktywne strategie wg profilu), src/Apex.Desktop (poza panelem wwwroot), mosty src/Platforms,
+   katalog config/, tests/Apex.Tests/TestSupport.cs, symulator platformy oraz każda zmiana ISTNIEJĄCYCH plików testów.
+   Zwykłe zatwierdzenie (bez frazy) wystarcza tylko dla: zmian plików strategii nieaktywnych w profilu (bez nowych typów i przestrzeni nazw), nowych plików strategii
+   w src/Apex.Core/Strategies/ z przestrzenią nazw podrzędną (np. Apex.Core.Strategies.Nowa), NOWYCH plików testów, panelu i dokumentacji.
+   Zmieniaj moduły chronione tylko wtedy, gdy dane jednoznacznie tego wymagają.
+5. Zmiany zawsze odrzucane: src/Apex.AiLab, tools/windows, tools/Apex.Backtester (backtester ocenia zmiany), AccountGuard.cs, HostConfig.cs,
+   pliki projektów i budowania (*.csproj, *.sln, *.props, *.targets, Directory.Build.*, NuGet.config, global.json, .gitattributes,
+   .gitignore, .editorconfig), skrypty (*.ps1, *.cmd, *.bat, *.sh, *.py), pliki binarne, dowiązania, kodowanie inne niż UTF-8,
+   [ModuleInitializer], refleksja, kod unsafe i global using w src/. Nie usuwaj i nie wyłączaj testów (także Skip).
+   Każda zmiana logiki = nowe testy w NOWYCH plikach testów.
 6. Uczciwość statystyczna: nie dopasowuj parametrów do okresu odłożonego (2018–2020.05), nie nadawaj strategiom statusu Validated,
    nie twórz fikcyjnych wyników. Zmiana parametrów strategii musi wynikać z procedury walk-forward opisanej w docs/METODOLOGIA_TESTOW.md.
    Jeżeli dane nie uzasadniają zmiany – NIE zmieniaj kodu, tylko opisz wnioski.
@@ -40,8 +49,10 @@ namespace Apex.AiLab.Pipeline
             {
                 sb.AppendLine("## Jak pracować");
                 sb.AppendLine("- Zacznij od README.md, docs/METODOLOGIA_TESTOW.md i reports/RAPORT_BADAN.md.");
-                sb.AppendLine("- Pakiety NuGet są już przywrócone: kompiluj `dotnet build tests/Apex.Tests/Apex.Tests.csproj -c Release --no-restore`,");
-                sb.AppendLine("  testuj `dotnet test tests/Apex.Tests/Apex.Tests.csproj -c Release --no-build --no-restore`. Sieć może być niedostępna.");
+                sb.AppendLine($"- Pakiety NuGet są już przywrócone: kompiluj `{Providers.ClaudeCodeProvider.BuildCommand}`,");
+                sb.AppendLine($"  testuj `{Providers.ClaudeCodeProvider.TestCommand}` (opcjonalnie z `--filter <wyrażenie>`).");
+                sb.AppendLine("  Używaj dokładnie tych poleceń – inne warianty (dodatkowe właściwości MSBuild, uruchamianie backtestera) są zablokowane.");
+                sb.AppendLine("  Sieć może być niedostępna. Backtest wykonuje AI Lab po Twojej pracy.");
                 sb.AppendLine("- Nie wykonuj commitów – AI Lab sam zapisze zmiany na gałęzi zadania.");
                 sb.AppendLine("- Na końcu odpowiedz podsumowaniem: pierwsza linia = krótki tytuł zmiany; dalej co, dlaczego, oczekiwany efekt, ryzyka, dodane testy.");
                 sb.AppendLine();
