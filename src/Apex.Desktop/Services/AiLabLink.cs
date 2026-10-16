@@ -35,13 +35,25 @@ namespace Apex.Desktop.Services
             if (!File.Exists(p)) return null;
             try
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(p));
+                using var doc = JsonDocument.Parse(ReadShared(p));
                 int port = doc.RootElement.TryGetProperty("HttpPort", out var hp) && hp.TryGetInt32(out int v) ? v : 5079;
                 string token = doc.RootElement.TryGetProperty("ApiToken", out var t) ? t.GetString() ?? "" : "";
                 return token.Length >= 32 ? (port, token) : null;
             }
             catch (JsonException) { return null; }
             catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
+
+        /// <summary>
+        /// Odczyt pliku AI Lab bez blokowania jego zapisu atomowego (FileShare.ReadWrite | FileShare.Delete) –
+        /// inaczej na Windows zamiana pliku przez AI Lab mogłaby się nie udać w trakcie odczytu.
+        /// </summary>
+        private static string ReadShared(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
         }
 
         /// <summary>Lokalizacja programu AI Lab: zapisana przez AI Lab, obok APEX Desktop w pakiecie lub z zmiennej APEX_AILAB_EXE.</summary>
@@ -65,9 +77,10 @@ namespace Apex.Desktop.Services
             try
             {
                 string p = Path.Combine(LabDir, "ailab.path");
-                return File.Exists(p) ? File.ReadAllText(p).Trim() : null;
+                return File.Exists(p) ? ReadShared(p).Trim() : null;
             }
             catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
         }
 
         public async Task<object> StatusAsync()

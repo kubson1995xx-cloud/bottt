@@ -179,6 +179,12 @@ namespace Apex.AiLab.Lab
         public string MergeCommit { get; set; } = "";
         public bool ProtectedConfirmed { get; set; }
         public List<string> Notes { get; set; } = new();
+        /// <summary>Baza wdrożenia: commit wydania aktywnego w chwili zatwierdzenia albo baza zadania (instalacja pierwotna).</summary>
+        public string DeployBase { get; set; } = "";
+        /// <summary>Kompilacja scalonej wersji (baza wdrożenia + zmiana) przed budową wydania.</summary>
+        public List<string> MergedBuildSteps { get; set; } = new();
+        /// <summary>Testy regresyjne scalonej wersji przed budową wydania.</summary>
+        public TestResult? MergedTests { get; set; }
     }
 
     /// <summary>Zadanie AI Lab: analiza → (agent → audyt → kompilacja → testy → backtest → przegląd) → propozycja zmiany.</summary>
@@ -214,6 +220,14 @@ namespace Apex.AiLab.Lab
         public DeploymentInfo? Deployment { get; set; }
         public string? UserDecisionNote { get; set; }
         public DateTime? DecisionUtc { get; set; }
+        /// <summary>Status sprzed ostatniej próby wdrożenia – przywracany, gdy wdrożenie się nie uda.</summary>
+        public JobStatus? StatusBeforeDeploy { get; set; }
+        /// <summary>Baza wdrożenia, względem której ponownie zaudytowano wdrażaną różnicę.</summary>
+        public string? ShippedAuditBase { get; set; }
+        /// <summary>Ustalenia ponownego audytu wdrażanej różnicy (baza wdrożenia → scalona wersja).</summary>
+        public List<AuditFinding>? ShippedFindings { get; set; }
+        /// <summary>Wdrażana różnica dotyka modułów chronionych – wymagana fraza zmian chronionych.</summary>
+        public bool ShippedProtected { get; set; }
     }
 
     public sealed class LabEvent

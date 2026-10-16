@@ -56,7 +56,9 @@ namespace Apex.AiLab.Pipeline
                 if (!Directory.Exists(Path.Combine(RepoDir, ".git")))
                 {
                     Directory.CreateDirectory(_labDir);
-                    var r = await RunGit(_labDir, ct, "clone", "--no-hardlinks", sourceRepo, RepoDir).ConfigureAwait(false);
+                    // Bez konwersji końców linii (Git for Windows domyślnie ma core.autocrlf=true): kopie robocze, diff i audyt
+                    // działają identycznie na Windows i Linux.
+                    var r = await RunGit(_labDir, ct, "clone", "-c", "core.autocrlf=false", "--no-hardlinks", sourceRepo, RepoDir).ConfigureAwait(false);
                     if (!r.Ok) throw new InvalidOperationException("Nie udało się skopiować repozytorium: " + r.Tail(6));
                 }
                 else
@@ -64,6 +66,8 @@ namespace Apex.AiLab.Pipeline
                     await GitOut(RepoDir, ct, "remote", "set-url", "origin", sourceRepo).ConfigureAwait(false);
                     await GitOut(RepoDir, ct, "fetch", "origin", "--prune").ConfigureAwait(false);
                 }
+                // Także dla istniejących kopii laboratorium – przed utworzeniem jakiejkolwiek kopii roboczej.
+                await GitOut(RepoDir, ct, "config", "core.autocrlf", "false").ConfigureAwait(false);
                 await GitOut(RepoDir, ct, "config", "user.name", "APEX AI Lab").ConfigureAwait(false);
                 await GitOut(RepoDir, ct, "config", "user.email", "ailab@apex.local").ConfigureAwait(false);
                 // Pliki zadania agenta nie trafiają do zmian.
@@ -164,24 +168,39 @@ namespace Apex.AiLab.Pipeline
                 if (!protectIds.Contains(d.Name)) await RemoveWorktreeAsync(d.Name, ct).ConfigureAwait(false);
         }
 
-        /// <summary>Łączy gałąź zadania z gałęzią wdrożeń w osobnej kopii roboczej. Konflikt = przerwanie (bez zmian).</summary>
-        public async Task<(bool ok, string commitOrError)> MergeForDeployAsync(string jobId, string baseCommit, CancellationToken ct)
+        /// <summary>
+        /// Łączy ZAUDYTOWANY commit zadania z gałęzią wdrożeń w osobnej kopii roboczej. Przed scaleniem kopia wdrożeń jest
+        /// ustawiana dokładnie na bazę wdrożenia (<paramref name="deployBase"/> – commit aktywnego wydania; domyślnie
+        /// <paramref name="baseCommit"/>), więc zmiany odrzucone, nieudane i wycofane nigdy nie trafiają do kolejnego wydania.
+        /// Gdy podano <paramref name="auditedCommit"/>, gałąź ai/&lt;id&gt; musi wskazywać dokładnie ten commit (inaczej odmowa).
+        /// Konflikt = przerwanie i powrót kopii wdrożeń do bazy.
+        /// </summary>
+        public async Task<(bool ok, string commitOrError)> MergeForDeployAsync(string jobId, string baseCommit, CancellationToken ct,
+            string? deployBase = null, string? auditedCommit = null)
         {
             await _gate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                if (!Directory.Exists(DeployDir))
+                string? tip = await ResolveCommitAsync("refs/heads/ai/" + jobId, ct).ConfigureAwait(false);
+                if (tip == null) return (false, $"Brak gałęzi ai/{jobId} – nie ma czego wdrożyć.");
+                if (auditedCommit != null)
                 {
-                    var exists = await RunGit(RepoDir, ct, "rev-parse", "--verify", DeployBranch).ConfigureAwait(false);
-                    var add = exists.Ok
-                        ? await RunGit(RepoDir, ct, "worktree", "add", DeployDir, DeployBranch).ConfigureAwait(false)
-                        : await RunGit(RepoDir, ct, "worktree", "add", "-b", DeployBranch, DeployDir, baseCommit).ConfigureAwait(false);
-                    if (!add.Ok) return (false, "Nie udało się przygotować kopii wdrożeń: " + add.Tail(6));
+                    string? audited = await ResolveCommitAsync(auditedCommit, ct).ConfigureAwait(false);
+                    if (audited == null || !string.Equals(audited, tip, StringComparison.OrdinalIgnoreCase))
+                        return (false, $"Gałąź ai/{jobId} wskazuje commit {Short(tip)}, a zaudytowano {Short(auditedCommit)} – po audycie pojawiły się niesprawdzone zmiany. Wdrożenie wstrzymane.");
                 }
-                var m = await RunGit(DeployDir, ct, "merge", "--no-ff", "-m", "Wdrożenie zmiany AI Lab " + jobId + " (zatwierdzone przez użytkownika)", "ai/" + jobId).ConfigureAwait(false);
+                string target = string.IsNullOrWhiteSpace(deployBase) ? baseCommit : deployBase!;
+                var (reset, baseOrError) = await ResetDeployCoreAsync(target, ct).ConfigureAwait(false);
+                if (!reset) return (false, baseOrError);
+                if (await IsAncestorAsync(tip, baseOrError, ct).ConfigureAwait(false))
+                    return (false, "Ta zmiana jest już zawarta w bazie wdrożenia – nie ma czego wdrażać.");
+
+                // Scalany jest konkretny commit (SHA), nie ruchomy wierzchołek gałęzi.
+                var m = await RunGit(DeployDir, ct, "merge", "--no-ff", "--no-edit", "-m", "Wdrożenie zmiany AI Lab " + jobId + " (zatwierdzone przez użytkownika)", tip).ConfigureAwait(false);
                 if (!m.Ok)
                 {
-                    await RunGit(DeployDir, ct, "merge", "--abort").ConfigureAwait(false);
+                    await RunGit(DeployDir, CancellationToken.None, "merge", "--abort").ConfigureAwait(false);
+                    await ResetDeployCoreAsync(baseOrError, CancellationToken.None).ConfigureAwait(false);
                     return (false, "Konflikt podczas łączenia zmian – zmiana nie została wdrożona: " + m.Tail(6));
                 }
                 return (true, await GitOut(DeployDir, ct, "rev-parse", "HEAD").ConfigureAwait(false));
@@ -191,6 +210,156 @@ namespace Apex.AiLab.Pipeline
                 _gate.Release();
             }
         }
+
+        /// <summary>Ustawia gałąź wdrożeń i jej kopię roboczą dokładnie na wskazany commit (po nieudanym wdrożeniu lub wycofaniu).</summary>
+        public async Task<(bool ok, string commitOrError)> ResetDeployAsync(string commit, CancellationToken ct)
+        {
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return await ResetDeployCoreAsync(commit, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        /// <summary>Pełny SHA commitu (null, gdy nie istnieje).</summary>
+        public async Task<string?> ResolveCommitAsync(string rev, CancellationToken ct, string? dir = null)
+        {
+            if (string.IsNullOrWhiteSpace(rev) || !Directory.Exists(dir ?? RepoDir)) return null;
+            var r = await RunGit(dir ?? RepoDir, ct, "rev-parse", "--verify", "--quiet", rev + "^{commit}").ConfigureAwait(false);
+            string sha = r.Ok ? string.Join("\n", r.Output).Trim() : "";
+            return sha.Length >= 7 ? sha : null;
+        }
+
+        /// <summary>Czy <paramref name="ancestor"/> jest przodkiem (lub tym samym commitem) <paramref name="descendant"/>. Brak commitu = nie.</summary>
+        public async Task<bool> IsAncestorAsync(string ancestor, string descendant, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(ancestor) || string.IsNullOrWhiteSpace(descendant)) return false;
+            var r = await RunGit(RepoDir, ct, "merge-base", "--is-ancestor", ancestor, descendant).ConfigureAwait(false);
+            return r.Ok;
+        }
+
+        /// <summary>
+        /// Zmiany między dwoma commitami (np. aktywne wydanie → scalone wydanie): lista plików i pełny diff do ponownego audytu.
+        /// Bez wykrywania zmian nazw – przeniesienie pliku to usunięcie + dodanie, więc audyt widzi obie ścieżki.
+        /// </summary>
+        public async Task<(List<ChangedFile> files, string diff)> ChangesBetweenAsync(string fromCommit, string toCommit, CancellationToken ct)
+        {
+            var files = new Dictionary<string, ChangedFile>(StringComparer.Ordinal);
+            string numstat = await GitFull(RepoDir, ct, "-c", "core.quotepath=false", "diff", "--numstat", "-z", "--no-renames", fromCommit, toCommit).ConfigureAwait(false);
+            foreach (var rec in numstat.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var p = rec.Trim('\n', '\r').Split('\t');
+                if (p.Length < 3 || p[2].Length == 0) continue;
+                var cf = new ChangedFile { Path = p[2] };
+                int.TryParse(p[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int a);
+                int.TryParse(p[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int d);
+                cf.Added = a;
+                cf.Removed = d;
+                files[cf.Path] = cf;
+            }
+            string status = await GitFull(RepoDir, ct, "-c", "core.quotepath=false", "diff", "--name-status", "-z", "--no-renames", fromCommit, toCommit).ConfigureAwait(false);
+            var parts = status.Split('\0');
+            for (int i = 0; i + 1 < parts.Length; i += 2)
+            {
+                string code = parts[i].Trim('\n', '\r');
+                string path = parts[i + 1];
+                if (code.Length == 0 || path.Length == 0) continue;
+                if (!files.TryGetValue(path, out var cf)) files[path] = cf = new ChangedFile { Path = path };
+                cf.Status = code.Substring(0, 1);
+            }
+            string diff = await GitFull(RepoDir, ct, "-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "--unified=3", fromCommit, toCommit).ConfigureAwait(false);
+            return (files.Values.OrderBy(f => f.Path, StringComparer.Ordinal).ToList(), diff);
+        }
+
+        /// <summary>Treść pliku w danym commicie (null, gdy brak).</summary>
+        public async Task<string?> ShowFileAsync(string commit, string path, CancellationToken ct)
+        {
+            var git = Git();
+            if (git == null || string.IsNullOrWhiteSpace(commit)) return null;
+            var r = await ProcessRunner.RunAsync(git, new[] { "show", commit + ":" + path }, RepoDir, timeout: TimeSpan.FromMinutes(2), ct: ct, keepLines: 1_000_000).ConfigureAwait(false);
+            return r.Ok ? string.Join("\n", r.Output) : null;
+        }
+
+        /// <summary>Trwała referencja wydania (refs/apex-wydania/&lt;wersja&gt;) – commit wydania nie zniknie po przestawieniu gałęzi wdrożeń.</summary>
+        public async Task<bool> MarkReleaseAsync(string version, string commit, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(version) || string.IsNullOrWhiteSpace(commit)) return false;
+            string safe = new string(version.Select(c => char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '_').ToArray());
+            var r = await RunGit(RepoDir, ct, "update-ref", "refs/apex-wydania/" + safe, commit).ConfigureAwait(false);
+            return r.Ok;
+        }
+
+        /// <summary>
+        /// Kopia wdrożeń = dokładnie <paramref name="commit"/>: gałąź apex-wdrozone przestawiona, pliki śledzone przywrócone,
+        /// pliki nieśledzone i wyniki poprzednich kompilacji usunięte (żadne stare .algo nie trafi do nowego wydania).
+        /// </summary>
+        private async Task<(bool ok, string commitOrError)> ResetDeployCoreAsync(string commit, CancellationToken ct)
+        {
+            if (!Directory.Exists(Path.Combine(RepoDir, ".git"))) return (false, "Brak kopii repozytorium laboratorium – najpierw uruchom zadanie agenta.");
+            string? target = await ResolveCommitAsync(commit, ct).ConfigureAwait(false);
+            if (target == null) return (false, $"Commit bazy wdrożenia {Short(commit)} nie istnieje w kopii laboratorium.");
+            await RunGit(RepoDir, ct, "config", "core.autocrlf", "false").ConfigureAwait(false);
+            string error = "";
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                await RunGit(RepoDir, ct, "worktree", "prune").ConfigureAwait(false);
+                if (Directory.Exists(DeployDir) && (attempt > 0 || await ResolveCommitAsync("HEAD", ct, DeployDir).ConfigureAwait(false) == null))
+                    await RemoveDeployDirAsync(ct).ConfigureAwait(false); // uszkodzona lub niespójna kopia – tworzona od nowa
+                ProcessResult r;
+                if (!Directory.Exists(DeployDir))
+                    r = await RunGit(RepoDir, ct, "worktree", "add", "-f", "-B", DeployBranch, DeployDir, target).ConfigureAwait(false);
+                else
+                {
+                    // Ewentualne przerwane scalenie po awarii, potem twarde przestawienie gałęzi.
+                    await RunGit(DeployDir, ct, "merge", "--abort").ConfigureAwait(false);
+                    await RunGit(DeployDir, ct, "reset", "-q", "--hard").ConfigureAwait(false);
+                    r = await RunGit(DeployDir, ct, "checkout", "-q", "-f", "-B", DeployBranch, target).ConfigureAwait(false);
+                }
+                if (!r.Ok) { error = r.Tail(6); continue; }
+                var clean = await RunGit(DeployDir, ct, "clean", "-q", "-ffdx").ConfigureAwait(false);
+                if (!clean.Ok) { error = clean.Tail(6); continue; }
+                string? head = await ResolveCommitAsync("HEAD", ct, DeployDir).ConfigureAwait(false);
+                var st = await RunGit(DeployDir, ct, "status", "--porcelain", "--untracked-files=all").ConfigureAwait(false);
+                if (string.Equals(head, target, StringComparison.OrdinalIgnoreCase) && st.Ok && st.Output.All(string.IsNullOrWhiteSpace))
+                    return (true, target);
+                error = "kopia wdrożeń nie odpowiada commitowi " + Short(target) + (st.Output.Count > 0 ? ": " + string.Join("; ", st.Output.Take(5)) : "");
+            }
+            return (false, "Nie udało się przygotować kopii wdrożeń: " + error);
+        }
+
+        private async Task RemoveDeployDirAsync(CancellationToken ct)
+        {
+            await RunGit(RepoDir, ct, "worktree", "remove", "--force", "--force", DeployDir).ConfigureAwait(false);
+            if (Directory.Exists(DeployDir))
+            {
+                try
+                {
+                    // Pliki tylko do odczytu blokują usuwanie na Windows; dowiązań nie śledzimy (nie wychodzimy poza kopię).
+                    var opts = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = true };
+                    foreach (var f in Directory.EnumerateFiles(DeployDir, "*", opts))
+                        if ((File.GetAttributes(f) & FileAttributes.ReadOnly) != 0) File.SetAttributes(f, FileAttributes.Normal);
+                    Directory.Delete(DeployDir, true);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            await RunGit(RepoDir, ct, "worktree", "prune").ConfigureAwait(false);
+        }
+
+        /// <summary>git z pełnym wyjściem (bez obcinania do ostatnich linii) – do diffów audytu.</summary>
+        private async Task<string> GitFull(string dir, CancellationToken ct, params string[] args)
+        {
+            var git = Git() ?? throw new InvalidOperationException("Nie znaleziono programu git. Zainstaluj Git for Windows (winget install Git.Git).");
+            var r = await ProcessRunner.RunAsync(git, args, dir, timeout: TimeSpan.FromMinutes(10), ct: ct, keepLines: 2_000_000).ConfigureAwait(false);
+            if (!r.Ok) throw new InvalidOperationException($"git {string.Join(" ", args)}: {r.Tail(6)}");
+            return string.Join("\n", r.Output);
+        }
+
+        private static string Short(string sha) => sha.Length > 10 ? sha.Substring(0, 10) : sha;
 
         public async Task<string> ExportPatchAsync(string jobId, string baseCommit, string file, CancellationToken ct)
         {

@@ -30,7 +30,7 @@ namespace Apex.AiLab.Analysis
             if (!File.Exists(cfg)) return null;
             try
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(cfg));
+                using var doc = JsonDocument.Parse(ReadShared(cfg));
                 string token = doc.RootElement.TryGetProperty("ApiToken", out var t) ? t.GetString() ?? "" : "";
                 int port = doc.RootElement.TryGetProperty("HttpPort", out var p) && p.TryGetInt32(out int pp) ? pp : 5077;
                 // Zawsze pętla zwrotna; port z konfiguracji APEX Desktop.
@@ -38,6 +38,18 @@ namespace Apex.AiLab.Analysis
             }
             catch (JsonException) { return null; }
             catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
+
+        /// <summary>
+        /// Odczyt pliku APEX Desktop bez blokowania jego zapisu atomowego (FileShare.ReadWrite | FileShare.Delete) –
+        /// inaczej na Windows zamiana pliku przez APEX Desktop (np. blokada LIVE) mogłaby się nie udać w trakcie odczytu.
+        /// </summary>
+        private static string ReadShared(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(fs, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
         }
 
         private async Task<string?> GetAsync(string path, CancellationToken ct)
