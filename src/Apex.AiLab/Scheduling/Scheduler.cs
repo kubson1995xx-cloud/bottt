@@ -35,8 +35,22 @@ namespace Apex.AiLab.Scheduling
         {
             var c = _cfg.Config;
             if (!c.AutomationEnabled) return null;
-            return ScheduleMath.NextDueUtc(c.Schedule, _store.LastScheduledRunUtc ?? c.Schedule.EnabledSinceUtc, nowUtc);
+            return ScheduleMath.NextDueUtc(c.Schedule, Anchor(_store.LastScheduledRunUtc, c.Schedule.EnabledSinceUtc), nowUtc);
         }
+
+        /// <summary>
+        /// Punkt odniesienia harmonogramu: późniejszy z (ostatnie zaplanowane uruchomienie, włączenie automatyzacji). Po ponownym
+        /// włączeniu automatyzacji zaległy termin sprzed wyłączenia nie uruchamia analizy natychmiast.
+        /// </summary>
+        public static DateTime? Anchor(DateTime? lastScheduledUtc, DateTime? enabledSinceUtc)
+        {
+            if (lastScheduledUtc == null) return enabledSinceUtc;
+            if (enabledSinceUtc == null) return lastScheduledUtc;
+            return lastScheduledUtc.Value >= enabledSinceUtc.Value ? lastScheduledUtc : enabledSinceUtc;
+        }
+
+        /// <summary>Czy trwa zadanie AI Lab albo wdrożenie (Deploying ustawia Deployer, nie JobRunner).</summary>
+        private bool Busy() => _runner.RunningJobId != null || _store.AnyRunning();
 
         public void Start(CancellationToken ct)
         {
@@ -65,15 +79,19 @@ namespace Apex.AiLab.Scheduling
                 else if (n == 0) { /* Desktop chwilowo niedostępny – ponowimy przy następnym cyklu */ }
             }
 
-            if (!c.AutomationEnabled || _runner.RunningJobId != null) return;
+            if (!c.AutomationEnabled || Busy()) return;
 
-            // Harmonogram.
+            // Harmonogram. Termin oznaczamy jako wykorzystany dopiero po udanym starcie zadania – inaczej przepadałby do następnego okresu.
             var due = NextScheduledUtc(nowUtc);
             if (due.HasValue && nowUtc >= due.Value)
             {
-                _store.MarkScheduledRun(nowUtc);
                 var id = _runner.Start(TriggerKind.Schedule, "zaplanowana analiza", runAgent: false, provider: null);
-                LastMessage = id != null ? $"Zaplanowana analiza rozpoczęta ({id})." : "Zaplanowana analiza pominięta – inne zadanie w toku.";
+                if (id != null)
+                {
+                    _store.MarkScheduledRun(nowUtc);
+                    LastMessage = $"Zaplanowana analiza rozpoczęta ({id}).";
+                }
+                else LastMessage = "Zaplanowana analiza odłożona – inne zadanie lub wdrożenie w toku (ponowię próbę).";
                 return;
             }
 
@@ -95,9 +113,18 @@ namespace Apex.AiLab.Scheduling
                 string key = f.Kind + ":" + f.Title;
                 var last = _store.LastTrigger(key);
                 if (last.HasValue && (nowUtc - last.Value).TotalHours < c.Schedule.MinHoursBetweenAgentRuns) continue;
-                _store.MarkTrigger(key, nowUtc);
-                var id = _runner.Start(f.Kind, f.Title + " – " + f.Detail, runAgent: true, provider: null);
-                LastMessage = id != null ? $"Wyzwalacz „{f.Title}” – rozpoczęto zadanie {id}." : "Wyzwalacz pominięty – inne zadanie w toku.";
+                // Analiza trwała – w międzyczasie mogło ruszyć zadanie ręczne lub wdrożenie. Wyzwalacz oznaczamy dopiero po udanym starcie.
+                var id = Busy() ? null : _runner.Start(f.Kind, f.Title + " – " + f.Detail, runAgent: true, provider: null);
+                if (id != null)
+                {
+                    _store.MarkTrigger(key, nowUtc);
+                    LastMessage = $"Wyzwalacz „{f.Title}” – rozpoczęto zadanie {id}.";
+                }
+                else
+                {
+                    LastMessage = "Wyzwalacz odłożony – inne zadanie lub wdrożenie w toku (ponowię próbę po jego zakończeniu).";
+                    _lastTriggerCheck = DateTime.MinValue; // ponowna analiza zaraz po zwolnieniu (pętla czeka, dopóki trwa inne zadanie)
+                }
                 return;
             }
         }

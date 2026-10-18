@@ -89,42 +89,11 @@ namespace Apex.AiLab.Analysis
                     r.TotalTrades += trades.Count;
                     foreach (var g in trades.GroupBy(t => (t.Strategy, t.AssetClass)))
                     {
-                        var rs = g.OrderBy(t => t.ExitUtc).TakeLast(60).Select(t => t.R).ToList();
-                        double mean = rs.Average();
-                        double sd = rs.Count > 1 ? Math.Sqrt(rs.Sum(x => (x - mean) * (x - mean)) / (rs.Count - 1)) : 0;
-                        double upper = rs.Count > 1 ? mean + 1.645 * sd / Math.Sqrt(rs.Count) : double.NaN;
                         expectations.TryGetValue(g.Key.Strategy + ":" + g.Key.AssetClass, out var exp);
-                        var st = new StrategyLiveStats
-                        {
-                            Account = key,
-                            Strategy = g.Key.Strategy,
-                            AssetClass = g.Key.AssetClass,
-                            Status = exp.status ?? "",
-                            Trades = g.Count(),
-                            WinRate = g.Count(t => t.NetProfit > 0) / (double)g.Count(),
-                            ExpectancyR = mean,
-                            UpperBoundR = upper,
-                            NetProfit = g.Sum(t => t.NetProfit),
-                            BacktestExpectancyR = exp.er,
-                            Suspended = suspended.Contains(g.Key.Strategy + ":" + g.Key.AssetClass),
-                        };
+                        var (st, finding) = EvaluateStrategy(key, g.Key.Strategy, g.Key.AssetClass, g, exp.er, exp.status,
+                            suspended.Contains(g.Key.Strategy + ":" + g.Key.AssetClass), MinTradesForDegradation);
                         r.Strategies.Add(st);
-                        if (st.Trades >= MinTradesForDegradation && !double.IsNaN(upper) && upper < 0)
-                            r.Findings.Add(new AnalysisFinding
-                            {
-                                Kind = TriggerKind.StrategyDegradation,
-                                Level = "critical",
-                                Title = $"Strategia {st.Strategy}/{st.AssetClass} traci na żywo",
-                                Detail = $"{st.Trades} transakcji, średnio {mean:F3}R (górna granica 95%: {upper:F3}R < 0)" + (exp.er.HasValue ? $"; backtest OOS {exp.er.Value:F3}R" : "") + ".",
-                            });
-                        else if (st.Trades >= MinTradesForDegradation && exp.er.HasValue && sd > 0 && mean < exp.er.Value - 2 * sd / Math.Sqrt(rs.Count))
-                            r.Findings.Add(new AnalysisFinding
-                            {
-                                Kind = TriggerKind.StrategyDegradation,
-                                Level = "warning",
-                                Title = $"Strategia {st.Strategy}/{st.AssetClass} wyraźnie poniżej backtestu",
-                                Detail = $"Na żywo {mean:F3}R vs backtest OOS {exp.er.Value:F3}R ({st.Trades} transakcji).",
-                            });
+                        if (finding != null) r.Findings.Add(finding);
                     }
                     foreach (var s in Strings(engine, "suspended"))
                         r.Findings.Add(new AnalysisFinding { Kind = TriggerKind.StrategyDegradation, Level = "warning", Title = "Monitor wyników wstrzymał strategię", Detail = $"[{key}] {s}" });
@@ -154,6 +123,59 @@ namespace Apex.AiLab.Analysis
             r.Markdown = BuildMarkdown(r);
             _store.SaveAnalysis(r);
             return r;
+        }
+
+        /// <summary>Liczba ostatnich transakcji, na których liczone są wszystkie miary strategii na żywo.</summary>
+        public const int StatsWindow = 60;
+
+        /// <summary>
+        /// Statystyki strategii na żywo – liczba transakcji, skuteczność, E[R], górna granica i wynik netto liczone na TYM SAMYM oknie
+        /// ostatnich ≤ 60 transakcji (łączna liczba i wynik podawane osobno). Zwraca też wniosek o pogorszeniu (albo null).
+        /// </summary>
+        public static (StrategyLiveStats stats, AnalysisFinding? finding) EvaluateStrategy(string account, string strategy, string assetClass,
+            IEnumerable<JournalTrade> trades, double? backtestEr, string? status, bool suspended, int minTrades)
+        {
+            var all = trades.OrderBy(t => t.ExitUtc).ToList();
+            var window = all.Count > StatsWindow ? all.GetRange(all.Count - StatsWindow, StatsWindow) : all;
+            var rs = window.Select(t => t.R).ToList();
+            double mean = rs.Count > 0 ? rs.Average() : 0;
+            double sd = rs.Count > 1 ? Math.Sqrt(rs.Sum(x => (x - mean) * (x - mean)) / (rs.Count - 1)) : 0;
+            double upper = rs.Count > 1 ? mean + 1.645 * sd / Math.Sqrt(rs.Count) : double.NaN;
+            var st = new StrategyLiveStats
+            {
+                Account = account,
+                Strategy = strategy,
+                AssetClass = assetClass,
+                Status = status ?? "",
+                Trades = window.Count,
+                WinRate = window.Count > 0 ? window.Count(t => t.NetProfit > 0) / (double)window.Count : 0,
+                ExpectancyR = mean,
+                UpperBoundR = upper,
+                NetProfit = window.Sum(t => t.NetProfit),
+                BacktestExpectancyR = backtestEr,
+                Suspended = suspended,
+                TotalTrades = all.Count,
+                TotalNetProfit = all.Sum(t => t.NetProfit),
+            };
+            string sample = st.TotalTrades > st.Trades ? $"{st.Trades} ostatnich transakcji (z {st.TotalTrades} łącznie)" : $"{st.Trades} transakcji";
+            AnalysisFinding? finding = null;
+            if (st.Trades >= minTrades && !double.IsNaN(upper) && upper < 0)
+                finding = new AnalysisFinding
+                {
+                    Kind = TriggerKind.StrategyDegradation,
+                    Level = "critical",
+                    Title = $"Strategia {st.Strategy}/{st.AssetClass} traci na żywo",
+                    Detail = $"{sample}, średnio {mean:F3}R (górna granica 95%: {upper:F3}R < 0), skuteczność {st.WinRate:P0}" + (backtestEr.HasValue ? $"; backtest OOS {backtestEr.Value:F3}R" : "") + ".",
+                };
+            else if (st.Trades >= minTrades && backtestEr.HasValue && sd > 0 && mean < backtestEr.Value - 2 * sd / Math.Sqrt(rs.Count))
+                finding = new AnalysisFinding
+                {
+                    Kind = TriggerKind.StrategyDegradation,
+                    Level = "warning",
+                    Title = $"Strategia {st.Strategy}/{st.AssetClass} wyraźnie poniżej backtestu",
+                    Detail = $"Na żywo {mean:F3}R vs backtest OOS {backtestEr.Value:F3}R ({sample}).",
+                };
+            return (st, finding);
         }
 
         /// <summary>Porównanie ostatniej migawki z migawkami sprzed 5–30 dni: zmiana rodziny reżimu i zmienności.</summary>
@@ -217,10 +239,12 @@ namespace Apex.AiLab.Analysis
             sb.AppendLine().AppendLine("## Wnioski");
             if (r.Findings.Count == 0) sb.AppendLine("- Brak istotnych problemów wykrytych automatycznie.");
             foreach (var f in r.Findings) sb.AppendLine($"- **[{f.Level}] {f.Title}** – {f.Detail}");
-            sb.AppendLine().AppendLine("## Strategie na żywo (ostatnie ≤ 60 transakcji)");
+            sb.AppendLine().AppendLine($"## Strategie na żywo (miary z ostatnich ≤ {StatsWindow} transakcji)");
             if (r.Strategies.Count == 0) sb.AppendLine("- Brak zamkniętych transakcji.");
             foreach (var s in r.Strategies)
-                sb.AppendLine($"- {s.Strategy}/{s.AssetClass} [{s.Account}] status {s.Status}: n={s.Trades}, WR {s.WinRate:P0}, E={s.ExpectancyR:F3}R, górna granica {s.UpperBoundR:F3}R, wynik {s.NetProfit:F2}" +
+                sb.AppendLine($"- {s.Strategy}/{s.AssetClass} [{s.Account}] status {s.Status}: n={s.Trades}" + (s.TotalTrades > s.Trades ? $" (z {s.TotalTrades} łącznie)" : "") +
+                              $", WR {s.WinRate:P0}, E={s.ExpectancyR:F3}R, górna granica {s.UpperBoundR:F3}R, wynik {s.NetProfit:F2}" +
+                              (s.TotalTrades > s.Trades ? $" (łącznie {s.TotalNetProfit:F2})" : "") +
                               (s.BacktestExpectancyR.HasValue ? $", backtest OOS {s.BacktestExpectancyR.Value:F3}R" : "") + (s.Suspended ? " – WSTRZYMANA" : ""));
             sb.AppendLine().AppendLine("## Rynek");
             foreach (var m in r.MarketSummary) sb.AppendLine("- " + m);

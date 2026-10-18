@@ -101,6 +101,10 @@ namespace Apex.AiLab.Lab
         public double DurationSec { get; set; }
         public List<string> Errors { get; set; } = new();
         public List<string> Steps { get; set; } = new();
+        /// <summary>Przekroczony limit czasu kompilacji (wynik niemiarodajny – nie trafia do pamięci wersji bazowej).</summary>
+        public bool TimedOut { get; set; }
+        /// <summary>Kompilacja przerwana na żądanie użytkownika.</summary>
+        public bool Cancelled { get; set; }
     }
 
     public sealed class TestResult
@@ -114,6 +118,12 @@ namespace Apex.AiLab.Lab
         public double DurationSec { get; set; }
         public int? BaselineTotal { get; set; }
         public int? BaselinePassed { get; set; }
+        /// <summary>Wynik każdego testu z pliku TRX: pełna nazwa testu → wynik (Passed, Failed, NotExecuted…). Porównanie z wersją bazową po nazwach.</summary>
+        public Dictionary<string, string> Outcomes { get; set; } = new();
+        /// <summary>Przekroczony limit czasu testów.</summary>
+        public bool TimedOut { get; set; }
+        /// <summary>Testy przerwane na żądanie użytkownika.</summary>
+        public bool Cancelled { get; set; }
     }
 
     public sealed class BacktestMetrics
@@ -243,13 +253,19 @@ namespace Apex.AiLab.Lab
         public string Strategy { get; set; } = "";
         public string AssetClass { get; set; } = "";
         public string Status { get; set; } = "";
+        /// <summary>Liczba transakcji w oknie, na którym liczone są wszystkie miary (ostatnie ≤ 60).</summary>
         public int Trades { get; set; }
         public double WinRate { get; set; }
         public double ExpectancyR { get; set; }
         public double UpperBoundR { get; set; }
+        /// <summary>Wynik netto w tym samym oknie co pozostałe miary.</summary>
         public double NetProfit { get; set; }
         public double? BacktestExpectancyR { get; set; }
         public bool Suspended { get; set; }
+        /// <summary>Wszystkie zamknięte transakcje strategii w dzienniku (także spoza okna).</summary>
+        public int TotalTrades { get; set; }
+        /// <summary>Wynik netto wszystkich transakcji w dzienniku.</summary>
+        public double TotalNetProfit { get; set; }
     }
 
     public sealed class MarketSnapshotEntry
@@ -295,13 +311,21 @@ namespace Apex.AiLab.Lab
         public DateTime TimeUtc { get; set; }
         public ProviderId Provider { get; set; }
         public string JobId { get; set; } = "";
-        /// <summary>agent | review | test</summary>
+        /// <summary>
+        /// agent | agent-limit | repair | review | test. Do limitu uruchomień agenta liczy się tylko "agent";
+        /// "agent-limit" = próba odrzucona przez limit dostawcy (bez pracy), "repair" = runda poprawek w ramach tego samego zadania.
+        /// </summary>
         public string Kind { get; set; } = "agent";
         public long InputTokens { get; set; }
         public long CachedInputTokens { get; set; }
         public long OutputTokens { get; set; }
         public double? CostUsd { get; set; }
         public bool LimitReached { get; set; }
+        /// <summary>
+        /// Rozliczenie za tokeny (API) w chwili uruchomienia: dostawcy API zawsze, Codex/Claude Code przy logowaniu kluczem API / kontem Console.
+        /// null = zapis sprzed tej zmiany (rozliczenie ustalane wg rodzaju dostawcy).
+        /// </summary>
+        public bool? ApiBilled { get; set; }
     }
 
     public sealed class ProviderLimitState
