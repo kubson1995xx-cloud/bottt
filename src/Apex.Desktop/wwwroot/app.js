@@ -15,7 +15,6 @@ const S = {
 const VIEW_TITLES = {
   dashboard: 'Pulpit',
   decisions: 'AI Decision Center',
-  ai: 'AI & Auto-Updates',
   positions: 'Pozycje i wyniki',
   strategies: 'Strategie',
   instruments: 'Instrumenty',
@@ -187,13 +186,6 @@ function render(force) {
     return;
   }
   if (window.ApexDC) window.ApexDC.stop();
-  // AI & Auto-Updates – osobny moduł AI Lab z własnym odpytywaniem (przez /api/ai/*).
-  if (S.view === 'ai' && window.ApexAI) {
-    if (!view.firstChild) view.appendChild(window.ApexAI.mount());
-    window.ApexAI.start();
-    return;
-  }
-  if (window.ApexAI) window.ApexAI.stop();
   // Nie przebudowujemy widoku, gdy użytkownik edytuje formularz.
   const active = document.activeElement;
   const editing = active && view.contains(active) && (active.tagName === 'INPUT' || active.tagName === 'SELECT' || active.tagName === 'TEXTAREA');

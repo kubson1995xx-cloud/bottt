@@ -5,14 +5,16 @@
 
 .DESCRIPTION
     1. Sprawdza .NET 8 SDK.
-    2. Uruchamia testy automatyczne (jednostkowe + integracyjne). Błąd testów = brak pakietu.
-    3. Publikuje APEX Desktop jako samodzielny plik ApexDesktop.exe (win-x64, nie wymaga instalacji .NET)
-       oraz moduł APEX AI Lab (ApexAiLab.exe – osobny proces).
-    4. Buduje cBoty cTrader (ApexBridge.algo – most, ApexTradingAI.algo – wersja natywna "wszystko w jednym").
-    5. Kopiuje most MetaTrader 5 (ApexBridge.mq5 – do kompilacji w MetaEditor).
-    6. Kopiuje dokumentację i tworzy skrót "Uruchom APEX.cmd".
+    2. Uruchamia testy automatyczne (jednostkowe + integracyjne). Blad testow = brak pakietu.
+    3. Publikuje APEX Desktop jako samodzielny plik ApexDesktop.exe (win-x64, nie wymaga instalacji .NET).
+    4. Buduje cBoty cTrader (ApexBridge.algo - most, ApexTradingAI.algo - wersja natywna "wszystko w jednym").
+    5. Kopiuje most MetaTrader 5 (ApexBridge.mq5 - do kompilacji w MetaEditor).
+    6. Kopiuje dokumentacje i tworzy skrot "Uruchom APEX.cmd".
 
-    Skrypt NIE usuwa żadnych plików – istniejące pliki w katalogu wyjściowym są nadpisywane.
+    Skrypt NIE usuwa zadnych plikow - istniejace pliki w katalogu wyjsciowym sa nadpisywane.
+
+    Plik celowo zawiera wylacznie znaki ASCII: Windows PowerShell 5.1 czyta skrypty bez BOM w stronie kodowej
+    systemu (np. 1250), a polskie litery i polpauzy zapisane w UTF-8 psuja wtedy cudzyslowy i parsowanie.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tools\windows\Zbuduj-APEX.ps1
@@ -29,7 +31,7 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 if ([string]::IsNullOrWhiteSpace($Wyjscie)) { $Wyjscie = Join-Path $repo "dist" }
 
 function Krok([string]$tekst) { Write-Host ""; Write-Host "=== $tekst ===" -ForegroundColor Cyan }
-function Sprawdz([string]$co) { if ($LASTEXITCODE -ne 0) { throw "$co – błąd (kod $LASTEXITCODE). Pakiet NIE został zbudowany." } }
+function Sprawdz([string]$co) { if ($LASTEXITCODE -ne 0) { throw "$co - blad (kod $LASTEXITCODE). Pakiet NIE zostal zbudowany." } }
 
 Krok "Sprawdzanie .NET 8 SDK"
 $sdki = & dotnet --list-sdks 2>$null
@@ -39,7 +41,7 @@ if (-not ($sdki | Where-Object { $_ -match '^8\.' })) {
 Write-Host ($sdki | Where-Object { $_ -match '^8\.' } | Select-Object -First 1)
 
 if (-not $PominTesty) {
-    Krok "Testy automatyczne (ok. 1–2 min)"
+    Krok "Testy automatyczne (ok. 1-2 min)"
     & dotnet test (Join-Path $repo "tests\Apex.Tests\Apex.Tests.csproj") -c Release
     Sprawdz "Testy"
 }
@@ -49,12 +51,6 @@ $desktop = Join-Path $Wyjscie "APEX-Desktop"
 & dotnet publish (Join-Path $repo "src\Apex.Desktop\Apex.Desktop.csproj") -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IsTransformWebConfigDisabled=true -o $desktop
 Sprawdz "Publikacja APEX Desktop"
-
-Krok "APEX AI Lab (osobny proces – analizy i agenci AI, wdrożenia tylko po akceptacji)"
-$ailab = Join-Path $Wyjscie "APEX-AiLab"
-& dotnet publish (Join-Path $repo "src\Apex.AiLab\Apex.AiLab.csproj") -c Release -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IsTransformWebConfigDisabled=true -o $ailab
-Sprawdz "Publikacja APEX AI Lab"
 
 Krok "cBoty cTrader"
 $ctrader = Join-Path $Wyjscie "cTrader"
@@ -74,32 +70,18 @@ Copy-Item (Join-Path $repo "src\Platforms\MT5\ApexBridge.mq5") $mt5 -Force
 Krok "Dokumentacja"
 $docs = Join-Path $Wyjscie "Dokumentacja"
 New-Item -ItemType Directory -Force -Path $docs | Out-Null
-Copy-Item (Join-Path $repo "docs\*.md") $docs -Force
+Copy-Item (Join-Path $repo "docs\*.md") $docs -Force -Exclude "AI_*.md"
 Copy-Item (Join-Path $repo "README.md") $docs -Force
 Copy-Item (Join-Path $repo "reports\RAPORT_BADAN.md") $docs -Force
 
-# Skrypt startowy (tylko ASCII). Jeśli w AI Lab zatwierdzono wydanie, uruchamiane jest to wydanie;
-# w przeciwnym razie (lub gdy plik wydania nie istnieje) – instalacja pierwotna z tego pakietu.
-$cmd = @"
-@echo off
-chcp 65001 >nul
-setlocal
-rem Start APEX Desktop. If an AI Lab release was approved, that release is started instead.
-set "EXE=%~dp0APEX-Desktop\ApexDesktop.exe"
-set "DATA=%LOCALAPPDATA%\APEX Trading AI"
-if defined APEX_DATA_DIR set "DATA=%APEX_DATA_DIR%"
-set "REL="
-if exist "%DATA%\wydania\aktualne.txt" set /p REL=<"%DATA%\wydania\aktualne.txt"
-if defined REL if exist "%REL%" set "EXE=%REL%"
-start "" "%EXE%"
-"@
-Set-Content -Path (Join-Path $Wyjscie "Uruchom APEX.cmd") -Value $cmd -Encoding ASCII
+# Skrypt startowy (tylko ASCII, konce linii CRLF).
+$cmd = "@echo off`r`nrem Start APEX Desktop z tego pakietu.`r`nstart `"`" `"%~dp0APEX-Desktop\ApexDesktop.exe`"`r`n"
+[System.IO.File]::WriteAllText((Join-Path $Wyjscie "Uruchom APEX.cmd"), $cmd, [System.Text.Encoding]::ASCII)
 
 Krok "Gotowe"
 Write-Host "Pakiet: $Wyjscie" -ForegroundColor Green
-Write-Host "  Uruchom APEX.cmd              – start APEX Desktop"
-Write-Host "  APEX-AiLab\ApexAiLab.exe      – moduł AI & Auto-Updates (uruchamiany z panelu APEX)"
-Write-Host "  cTrader\ApexBridge.algo       – most cTrader (dwuklik = instalacja w cTrader)"
-Write-Host "  cTrader\ApexTradingAI.algo    – wersja natywna (bez APEX Desktop)"
-Write-Host "  MT5\ApexBridge.mq5            – most MetaTrader 5 (kompilacja w MetaEditor)"
-Write-Host "  Dokumentacja\                 – instrukcje (zacznij od INSTALACJA_WINDOWS.md)"
+Write-Host "  Uruchom APEX.cmd              - start APEX Desktop"
+Write-Host "  cTrader\ApexBridge.algo       - most cTrader (dwuklik = instalacja w cTrader)"
+Write-Host "  cTrader\ApexTradingAI.algo    - wersja natywna (bez APEX Desktop)"
+Write-Host "  MT5\ApexBridge.mq5            - most MetaTrader 5 (kompilacja w MetaEditor)"
+Write-Host "  Dokumentacja\                 - instrukcje (zacznij od INSTALACJA_WINDOWS.md)"

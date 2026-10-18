@@ -178,13 +178,6 @@ namespace Apex.Desktop
                 return Results.Json(new { message = "Nowy klucz parowania: " + config.Config.PairingKey });
             });
 
-            // AI & Auto-Updates – osobny proces AI Lab; Desktop tylko przekazuje zapytania panelu i uruchamia moduł na żądanie.
-            var aiLab = new AiLabLink(dataDir, log);
-            app.MapGet("/api/ai-module", async () => Results.Json(await aiLab.StatusAsync()));
-            app.MapPost("/api/ai-module/start", () => Results.Json(new { message = aiLab.Start() }));
-            app.Map("/api/ai/{**path}", (HttpContext ctx, string path) => aiLab.ProxyAsync(ctx, path));
-            _ = Task.Run(aiLab.AutostartAsync);
-
             app.MapPost("/api/news/refresh", async () =>
             {
                 await newsService.RefreshAsync(CancellationToken.None);
