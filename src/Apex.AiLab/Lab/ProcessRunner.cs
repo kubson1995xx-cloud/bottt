@@ -57,18 +57,13 @@ namespace Apex.AiLab.Lab
                 CreateNoWindow = true,
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8,
+                // Bez tego Windows koduje wejście stroną kodową konsoli (np. 852) – codex odrzuca polecenie jako nieprawidłowy UTF-8,
+                // a Claude dostaje zniekształcone polskie znaki. UTF8Encoding(false): bez BOM na początku strumienia.
+                StandardInputEncoding = Utf8NoBom,
             };
             foreach (var a in cmd.PrefixArgs) psi.ArgumentList.Add(a);
             foreach (var a in args) psi.ArgumentList.Add(a);
-            psi.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
-            psi.Environment["DOTNET_NOLOGO"] = "1";
-            psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
-            if (env != null)
-                foreach (var kv in env)
-                {
-                    if (kv.Value == null) psi.Environment.Remove(kv.Key);
-                    else psi.Environment[kv.Key] = kv.Value;
-                }
+            ApplyEnvironment(psi, env);
 
             using var p = new Process { StartInfo = psi, EnableRaisingEvents = true };
             var outDone = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -122,6 +117,99 @@ namespace Apex.AiLab.Lab
             return res;
         }
 
+        /// <summary>UTF-8 bez znacznika BOM (wejście procesów potomnych, dokładny odczyt wyjścia).</summary>
+        public static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+        private static void ApplyEnvironment(ProcessStartInfo psi, IDictionary<string, string?>? env)
+        {
+            psi.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+            psi.Environment["DOTNET_NOLOGO"] = "1";
+            psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
+            if (env != null)
+                foreach (var kv in env)
+                {
+                    if (kv.Value == null) psi.Environment.Remove(kv.Key);
+                    else psi.Environment[kv.Key] = kv.Value;
+                }
+        }
+
+        /// <summary>
+        /// Uruchamia proces i zwraca PEŁNE wyjście standardowe bajt w bajt (UTF-8), bez dzielenia na linie i bez limitu liczby linii.
+        /// Do danych, które muszą być kompletne i dokładne (diff audytu, listy plików git -z): <see cref="RunAsync"/> zachowuje tylko
+        /// ostatnie linie i dzieli tekst także na samotnym CR – część zmiany mogłaby ominąć audyt.
+        /// </summary>
+        public static async Task<CaptureResult> CaptureAsync(CommandSpec cmd, IEnumerable<string> args, string workDir,
+            IDictionary<string, string?>? env = null, TimeSpan? timeout = null, CancellationToken ct = default, long maxBytes = 512L * 1024 * 1024)
+        {
+            var res = new CaptureResult();
+            var sw = Stopwatch.StartNew();
+            var psi = new ProcessStartInfo(cmd.FileName)
+            {
+                WorkingDirectory = workDir,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardErrorEncoding = Encoding.UTF8,
+                StandardInputEncoding = Utf8NoBom,
+            };
+            foreach (var a in cmd.PrefixArgs) psi.ArgumentList.Add(a);
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            ApplyEnvironment(psi, env);
+
+            using var p = new Process { StartInfo = psi };
+            try
+            {
+                if (!p.Start()) { res.StartFailed = true; res.StartError = "nie udało się uruchomić procesu"; return res; }
+            }
+            catch (Win32Exception ex)
+            {
+                res.StartFailed = true;
+                res.StartError = ex.Message;
+                return res;
+            }
+            try { p.StandardInput.Close(); } catch (IOException) { }
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            if (timeout.HasValue) cts.CancelAfter(timeout.Value);
+            var output = new MemoryStream();
+            var readOut = Task.Run(async () =>
+            {
+                var buf = new byte[81920];
+                var stream = p.StandardOutput.BaseStream;
+                int n;
+                while ((n = await stream.ReadAsync(buf.AsMemory(0, buf.Length), cts.Token).ConfigureAwait(false)) > 0)
+                {
+                    if (output.Length + n > maxBytes) { res.TooLarge = true; cts.Cancel(); break; }
+                    output.Write(buf, 0, n);
+                }
+            });
+            var readErr = p.StandardError.ReadToEndAsync(cts.Token);
+            try
+            {
+                await p.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+                // Po zakończeniu procesu czekamy na koniec strumieni (ograniczenie czasu: potomek mógłby trzymać potok otwarty).
+                var both = Task.WhenAll(readOut, readErr);
+                if (await Task.WhenAny(both, Task.Delay(TimeSpan.FromSeconds(30), CancellationToken.None)).ConfigureAwait(false) != both)
+                    res.TimedOut = true; // wyjście niekompletne – wynik nie może być użyty
+                else
+                    await both.ConfigureAwait(false);
+                res.ExitCode = p.ExitCode;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!res.TooLarge) { if (ct.IsCancellationRequested) res.Cancelled = true; else res.TimedOut = true; }
+                try { p.Kill(entireProcessTree: true); } catch (InvalidOperationException) { } catch (Win32Exception) { }
+                try { p.WaitForExit(5000); } catch (InvalidOperationException) { }
+            }
+            // Bufor czytamy tylko po zakończeniu odczytu (przy przerwaniu wynik i tak jest nieważny – Ok = false).
+            if (readOut.IsCompleted) res.Stdout = Utf8NoBom.GetString(output.GetBuffer(), 0, (int)output.Length);
+            if (readErr.IsCompletedSuccessfully) res.Stderr = readErr.Result;
+            res.DurationSec = sw.Elapsed.TotalSeconds;
+            return res;
+        }
+
         /// <summary>Uruchomienie w nowym oknie konsoli (Windows) – dla logowania wymagającego interakcji użytkownika.</summary>
         public static bool StartInteractive(CommandSpec cmd, IEnumerable<string> args, string workDir)
         {
@@ -129,14 +217,14 @@ namespace Apex.AiLab.Lab
             {
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
-                    var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = true, WorkingDirectory = workDir };
-                    psi.ArgumentList.Add("/c");
-                    psi.ArgumentList.Add("start");
-                    psi.ArgumentList.Add("APEX AI Lab – logowanie");
-                    psi.ArgumentList.Add("cmd.exe");
-                    psi.ArgumentList.Add("/k");
-                    psi.ArgumentList.Add(Quote(cmd.FileName));
-                    foreach (var a in cmd.PrefixArgs.Concat(args)) psi.ArgumentList.Add(a);
+                    // ShellExecute cmd.exe otwiera własne okno konsoli (bez pośrednictwa "start"). Wiersz poleceń budujemy sami:
+                    // ArgumentList cytuje po zasadach CRT (\"), których cmd nie rozumie – ścieżka ze spacją psuła logowanie.
+                    var psi = new ProcessStartInfo("cmd.exe")
+                    {
+                        UseShellExecute = true,
+                        WorkingDirectory = workDir,
+                        Arguments = BuildInteractiveArguments(cmd, args),
+                    };
                     Process.Start(psi);
                     return true;
                 }
@@ -146,9 +234,50 @@ namespace Apex.AiLab.Lab
                 return true;
             }
             catch (Win32Exception) { return false; }
+            catch (ArgumentException) { return false; }
         }
 
-        private static string Quote(string s) => s.Contains(' ') ? "\"" + s + "\"" : s;
+        /// <summary>
+        /// Argumenty dla cmd.exe: <c>/k "&lt;program&gt; &lt;argumenty&gt;"</c>. Każdy element jest w cudzysłowie (bez ucieczek CRT),
+        /// a całość w dodatkowej parze cudzysłowów, którą cmd /k usuwa (zachowanie dla więcej niż dwóch cudzysłowów).
+        /// Znaki specjalne cmd (&amp; | &lt; &gt; ^ % ") i znaki sterujące są odrzucane – nie da się ich bezpiecznie przekazać.
+        /// </summary>
+        public static string BuildInteractiveArguments(CommandSpec cmd, IEnumerable<string> args)
+        {
+            var parts = new List<string>();
+            foreach (var a in new[] { cmd.FileName }.Concat(cmd.PrefixArgs).Concat(args))
+            {
+                if (a.Length == 0 || a.Any(ch => ch is '&' or '|' or '<' or '>' or '^' or '%' or '"' || char.IsControl(ch)))
+                    throw new ArgumentException("Niedozwolony znak w poleceniu logowania: " + a);
+                // Końcowe ukośniki przed zamykającym cudzysłowem podwajamy (inaczej program odczyta \" jako znak cudzysłowu).
+                int trailing = a.Length - a.TrimEnd('\\').Length;
+                parts.Add("\"" + a + new string('\\', trailing) + "\"");
+            }
+            return "/k \"" + string.Join(" ", parts) + "\"";
+        }
+    }
+
+    /// <summary>Wynik <see cref="ProcessRunner.CaptureAsync"/>: pełne wyjście standardowe procesu.</summary>
+    public sealed class CaptureResult
+    {
+        public int ExitCode { get; set; } = -1;
+        public bool TimedOut { get; set; }
+        public bool Cancelled { get; set; }
+        public bool StartFailed { get; set; }
+        /// <summary>Wyjście przekroczyło limit rozmiaru – proces przerwano, wynik niekompletny.</summary>
+        public bool TooLarge { get; set; }
+        public string StartError { get; set; } = "";
+        public string Stdout { get; set; } = "";
+        public string Stderr { get; set; } = "";
+        public double DurationSec { get; set; }
+        public bool Ok => ExitCode == 0 && !TimedOut && !Cancelled && !StartFailed && !TooLarge;
+
+        public string Problem(int maxLines = 6) =>
+            StartFailed ? StartError
+            : TooLarge ? "wynik przekracza dopuszczalny rozmiar"
+            : TimedOut ? "przekroczony limit czasu"
+            : Cancelled ? "przerwano"
+            : string.Join("\n", Stderr.Replace("\r", "").Split('\n').Where(l => l.Trim().Length > 0).TakeLast(maxLines));
     }
 
     /// <summary>Wyszukiwanie programów (git, dotnet, codex, claude) w PATH i typowych lokalizacjach instalacji.</summary>

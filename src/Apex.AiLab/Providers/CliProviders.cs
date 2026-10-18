@@ -175,8 +175,12 @@ namespace Apex.AiLab.Providers
     public sealed class ClaudeCodeProvider : IAiProvider
     {
         private readonly Func<ProviderSettings> _settings;
+        private ProviderStatus? _lastStatus;
 
         public ClaudeCodeProvider(Func<ProviderSettings> settings) => _settings = settings;
+
+        /// <summary>Ostatni odczytany stan logowania (StatusAsync) – m.in. czy rozliczenie jest subskrypcyjne.</summary>
+        public ProviderStatus? LastStatus => _lastStatus;
 
         public ProviderId Id => ProviderId.ClaudeCode;
         public string Name => "Claude Code";
@@ -184,15 +188,28 @@ namespace Apex.AiLab.Providers
 
         private CommandSpec? Exe() => ExecutableLocator.Find("claude", _settings().ExecutablePath);
 
-        /// <summary>Narzędzia dozwolone agentowi: odczyt/edycja plików w kopii roboczej, kompilacja i testy .NET, podgląd git.</summary>
+        /// <summary>
+        /// Dokładne polecenia kompilacji i testów projektu testów (bez dowolnych argumentów: -p:PostBuildEvent=… wykonałby polecenie).
+        /// AlgoPublish=false jako właściwość globalna: kompilacja agenta nie zainstaluje pliku .algo w cTrader, nawet gdyby agent
+        /// zmienił plik projektu (taka zmiana i tak zostanie zablokowana przez audyt).
+        /// </summary>
+        public const string BuildCommand = "dotnet build tests/Apex.Tests/Apex.Tests.csproj -c Release --no-restore -p:AlgoPublish=false";
+        public const string TestCommand = "dotnet test tests/Apex.Tests/Apex.Tests.csproj -c Release --no-build --no-restore";
+
+        /// <summary>
+        /// Narzędzia dozwolone agentowi: odczyt/edycja plików w kopii roboczej, DOKŁADNE polecenia kompilacji i testów projektu testów,
+        /// podgląd git bez dodatkowych argumentów (git diff --output=… zapisałby plik poza kopią). Bez uruchamiania backtestera (mógłby
+        /// zapisać wyniki w dowolnym katalogu) i bez ogólnych "dotnet build/test:*" (dowolne właściwości MSBuild = dowolne polecenia).
+        /// </summary>
         public static readonly string[] AllowedTools =
         {
             "Read", "Edit", "Write", "Glob", "Grep", "TodoWrite",
-            "Bash(dotnet build:*)", "Bash(dotnet test:*)", "Bash(dotnet run --project tools/Apex.Backtester:*)",
-            "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)",
+            "Bash(" + BuildCommand + ")", "Bash(" + TestCommand + ")", "Bash(" + TestCommand + " --filter:*)",
+            "Bash(git status)", "Bash(git diff)", "Bash(git diff --stat)", "Bash(git log --oneline -n 20)",
         };
 
-        public static readonly string[] ReadOnlyTools = { "Read", "Glob", "Grep", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git status:*)" };
+        /// <summary>Przegląd: wyłącznie odczyt (bez Edit/Write i bez poleceń zapisujących).</summary>
+        public static readonly string[] ReadOnlyTools = { "Read", "Glob", "Grep", "Bash(git status)", "Bash(git diff)", "Bash(git diff --stat)", "Bash(git log --oneline -n 20)" };
 
         public static readonly string[] DisallowedTools = { "WebFetch", "WebSearch" };
 
@@ -226,8 +243,13 @@ namespace Apex.AiLab.Providers
             {
                 st.Detail = "Nie można odczytać stanu logowania: " + auth.Tail(3);
             }
+            _lastStatus = st;
             return st;
         }
+
+        /// <summary>Czy przekazać --max-budget-usd: limit ustawiony i logowanie NIE jest subskrypcją (stan nieznany = limit stosujemy).</summary>
+        public static bool BudgetApplies(ProviderStatus? status, ProviderSettings settings) =>
+            settings.MaxBudgetUsdPerRun > 0 && !(status is { LoggedIn: true, UsesSubscription: true });
 
         public string StartLogin(bool console)
         {
@@ -259,7 +281,13 @@ namespace Apex.AiLab.Providers
             args.Add("--disallowedTools");
             args.AddRange(DisallowedTools);
             if (!string.IsNullOrWhiteSpace(req.Model)) { args.Add("--model"); args.Add(req.Model); }
-            if (req.Settings.MaxBudgetUsdPerRun > 0) { args.Add("--max-budget-usd"); args.Add(req.Settings.MaxBudgetUsdPerRun.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+            // Limit kosztu dotyczy tylko rozliczenia API (Console). Przy subskrypcji Claude ucinałby pracę agenta, choć nic nie kosztuje.
+            if (req.Settings.MaxBudgetUsdPerRun > 0)
+            {
+                var status = _lastStatus ?? await StatusAsync(ct).ConfigureAwait(false);
+                if (BudgetApplies(status, req.Settings)) { args.Add("--max-budget-usd"); args.Add(req.Settings.MaxBudgetUsdPerRun.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+                else progress("stage", "Limit kosztu na uruchomienie pominięty – logowanie subskrypcją Claude (obowiązują limity planu).");
+            }
 
             string? resultText = null;
             bool isError = false;

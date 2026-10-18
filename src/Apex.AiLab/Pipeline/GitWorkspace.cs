@@ -107,37 +107,57 @@ namespace Apex.AiLab.Pipeline
             }
         }
 
-        /// <summary>Zbiera zmiany względem bazy (bez katalogu .ailab) i zwraca listę plików z liczbą linii.</summary>
+        /// <summary>
+        /// Zbiera zmiany względem bazy (bez katalogu .ailab) i zwraca listę plików z liczbą linii.
+        /// --no-renames: przeniesienie = usunięcie starej ścieżki + dodanie nowej, więc reguły audytu (chronione, zabronione,
+        /// usunięcie testu) obejmują też starą ścieżkę. Wyjście -z (bez cytowania nazw) czytane w całości, bez limitu linii.
+        /// Dodatkowo: pliki ignorowane przez git, które wpływają na kompilację (np. *.csproj.user, obj/*.props), jako status "I".
+        /// </summary>
         public async Task<List<ChangedFile>> CollectChangesAsync(string worktree, string baseCommit, CancellationToken ct)
         {
-            await GitOut(worktree, ct, "add", "-A").ConfigureAwait(false);
-            var files = new Dictionary<string, ChangedFile>(StringComparer.Ordinal);
-            string numstat = await GitOut(worktree, ct, "diff", "--cached", "--numstat", baseCommit).ConfigureAwait(false);
-            foreach (var line in numstat.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            // Plik .git kopii roboczej wskazuje repozytorium git – podmieniony mógłby przekierować polecenia git (i ich konfigurację).
+            string? pointerProblem = GitChangeParsing.CheckWorktreePointer(worktree, RepoDir);
+            if (pointerProblem != null) throw new InvalidOperationException(pointerProblem);
+            var git = Git() ?? throw new InvalidOperationException("Nie znaleziono programu git. Zainstaluj Git for Windows (winget install Git.Git).");
+            async Task<string> Exact(params string[] args)
             {
-                var p = line.Split('\t');
-                if (p.Length < 3) continue;
-                var cf = new ChangedFile { Path = p[2].Trim() };
-                int.TryParse(p[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int a);
-                int.TryParse(p[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int d);
-                cf.Added = a;
-                cf.Removed = d;
-                files[cf.Path] = cf;
+                var all = new[] { "-c", "core.quotepath=false", "-c", "core.fsmonitor=false" }.Concat(args).ToArray();
+                var r = await ProcessRunner.CaptureAsync(git, all, worktree, timeout: TimeSpan.FromMinutes(10), ct: ct).ConfigureAwait(false);
+                if (r.Cancelled) ct.ThrowIfCancellationRequested();
+                if (!r.Ok) throw new InvalidOperationException($"git {string.Join(" ", args)}: {r.Problem()}");
+                return r.Stdout;
             }
-            string status = await GitOut(worktree, ct, "diff", "--cached", "--name-status", baseCommit).ConfigureAwait(false);
-            foreach (var line in status.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var p = line.Split('\t');
-                if (p.Length < 2) continue;
-                string path = p[^1].Trim();
-                if (!files.TryGetValue(path, out var cf)) files[path] = cf = new ChangedFile { Path = path };
-                cf.Status = p[0].Substring(0, 1);
-            }
-            return files.Values.OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
+
+            await GitOut(worktree, ct, "-c", "core.fsmonitor=false", "add", "-A").ConfigureAwait(false);
+            string numstat = await Exact("diff", "--cached", "--no-renames", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "--numstat", "-z", baseCommit).ConfigureAwait(false);
+            string raw = await Exact("diff", "--cached", "--no-renames", "--no-ext-diff", "--ignore-submodules=none", "--raw", "-z", baseCommit).ConfigureAwait(false);
+            var files = GitChangeParsing.ParseChanges(numstat, raw);
+            string ignored = await Exact("ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory").ConfigureAwait(false);
+            foreach (var hidden in GitChangeParsing.HiddenBuildInputs(worktree, ignored))
+                if (!files.Exists(f => f.Path == hidden)) files.Add(new ChangedFile { Path = hidden, Status = "I" });
+            return files.OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
         }
 
-        public Task<string> DiffAsync(string worktree, string baseCommit, CancellationToken ct) =>
-            GitOut(worktree, ct, "diff", "--cached", "--no-color", "--unified=3", baseCommit);
+        /// <summary>
+        /// Pełny diff do audytu i przeglądu: bez wykrywania przeniesień, zawsze jako tekst (atrybuty .gitattributes ani konwertery
+        /// nie ukryją treści), stałe prefiksy a/ b/ niezależnie od konfiguracji użytkownika, odczyt bajt w bajt bez limitu linii.
+        /// </summary>
+        public async Task<string> DiffAsync(string worktree, string baseCommit, CancellationToken ct)
+        {
+            string? pointerProblem = GitChangeParsing.CheckWorktreePointer(worktree, RepoDir);
+            if (pointerProblem != null) throw new InvalidOperationException(pointerProblem);
+            var git = Git() ?? throw new InvalidOperationException("Nie znaleziono programu git. Zainstaluj Git for Windows (winget install Git.Git).");
+            var args = new[]
+            {
+                "-c", "core.quotepath=false", "-c", "core.fsmonitor=false",
+                "diff", "--cached", "--no-color", "--unified=3", "--no-renames", "--text", "--no-textconv", "--no-ext-diff",
+                "--ignore-submodules=none", "--submodule=short", "--src-prefix=a/", "--dst-prefix=b/", baseCommit,
+            };
+            var r = await ProcessRunner.CaptureAsync(git, args, worktree, timeout: TimeSpan.FromMinutes(10), ct: ct).ConfigureAwait(false);
+            if (r.Cancelled) ct.ThrowIfCancellationRequested();
+            if (!r.Ok) throw new InvalidOperationException("git diff: " + r.Problem());
+            return r.Stdout;
+        }
 
         public async Task<string> CommitAsync(string worktree, string message, CancellationToken ct)
         {

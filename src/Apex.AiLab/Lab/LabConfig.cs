@@ -39,11 +39,13 @@ namespace Apex.AiLab.Lab
         public string? ApiKeyProtected { get; set; }
         /// <summary>Cena za 1 mln tokenów wejściowych (USD) – wpisywana przez użytkownika; 0 = nieznana.</summary>
         public double PriceInputPerMTok { get; set; }
+        /// <summary>Cena za 1 mln tokenów wejściowych z pamięci podręcznej (cache) – 0 = 10% ceny wejścia (typowy cennik).</summary>
+        public double PriceCachedInputPerMTok { get; set; }
         public double PriceOutputPerMTok { get; set; }
         public int TimeoutMinutes { get; set; } = 45;
         /// <summary>Ręczna ścieżka do programu (codex/claude), gdy nie ma go w PATH.</summary>
         public string? ExecutablePath { get; set; }
-        /// <summary>Claude Code: limit kosztu jednego uruchomienia przy rozliczeniu API (0 = brak).</summary>
+        /// <summary>Claude Code: limit kosztu jednego uruchomienia przy rozliczeniu API (0 = brak). Przy logowaniu subskrypcją nie jest przekazywany.</summary>
         public double MaxBudgetUsdPerRun { get; set; }
         /// <summary>API: maksymalna długość odpowiedzi (tokeny).</summary>
         public int MaxOutputTokens { get; set; } = 32000;
@@ -102,28 +104,41 @@ namespace Apex.AiLab.Lab
     public sealed class PolicySettings
     {
         /// <summary>
-        /// Moduły chronione: RiskEngine, limity bezpieczeństwa, strażnik konta/LIVE, wykonanie zleceń, aktywne strategie (profil), mosty.
+        /// Moduły chronione: cały silnik (src/Apex.Core – RiskEngine, limity, strażnik, wykonanie, model rynku, aktywne strategie),
+        /// APEX Desktop (poza panelem wwwroot), mosty platform, konfiguracja, wspólna infrastruktura testów.
         /// Zmiany są dozwolone wyłącznie jako PROPOZYCJE – wdrożenie wymaga dodatkowego, wpisanego potwierdzenia.
+        /// Wbudowane (niekonfigurowalne) wyjątki dla całych katalogów – patrz <see cref="Apex.AiLab.Pipeline.ChangeAudit"/>:
+        /// pliki strategii nieaktywnych w profilu, nowe pliki w src/Apex.Core/Strategies/ i panel src/Apex.Desktop/wwwroot/.
+        /// Wpis bardziej szczegółowy (dłuższy) zawsze wygrywa z wyjątkiem.
         /// </summary>
         public List<string> ProtectedPaths { get; set; } = DefaultProtected.ToList();
 
-        /// <summary>Ścieżki, których AI nie może zmieniać nigdy (moduł AI Lab – agent nie modyfikuje własnych zabezpieczeń).</summary>
+        /// <summary>
+        /// Ścieżki, których AI nie może zmieniać nigdy: moduł AI Lab (agent nie modyfikuje własnych zabezpieczeń), skrypty budowy,
+        /// backtester (sędzia zmian) oraz pliki decydujące o dopuszczeniu konta LIVE.
+        /// </summary>
         public List<string> ForbiddenPaths { get; set; } = DefaultForbidden.ToList();
 
         public static readonly string[] DefaultProtected =
         {
+            "src/Apex.Core/",
             "src/Apex.Core/Risk/",
             "src/Apex.Core/Safety/",
             "src/Apex.Core/Execution/",
             "src/Apex.Core/Adaptive/DefaultProfile.cs",
             "src/Apex.Core/Adaptive/StrategyBook.cs",
+            "src/Apex.Core/Strategies/StrategyModel.cs",
+            "config/",
             "config/profile_default.json",
             "src/Apex.Core/Engine/TradingEngine.cs",
             "src/Apex.Core/Engine/EngineConfig.cs",
+            "src/Apex.Desktop/",
             "src/Apex.Desktop/Services/HostConfig.cs",
             "src/Apex.Desktop/Runtime/AccountRuntime.cs",
             "src/Apex.Desktop/Bridge/",
             "src/Platforms/",
+            "tests/Apex.Tests/TestSupport.cs",
+            "tools/Apex.PlatformSimulator/",
         };
 
         public static readonly string[] DefaultForbidden =
@@ -132,6 +147,9 @@ namespace Apex.AiLab.Lab
             ".git/",
             ".github/",
             "tools/windows/",
+            "tools/Apex.Backtester/",
+            "src/Apex.Core/Safety/AccountGuard.cs",
+            "src/Apex.Desktop/Services/HostConfig.cs",
         };
     }
 
@@ -182,7 +200,7 @@ namespace Apex.AiLab.Lab
             {
                 var p = kv.Value;
                 if (p.TimeoutMinutes < 5 || p.TimeoutMinutes > 240) e.Add($"{kv.Key}: limit czasu 5–240 min.");
-                if (p.PriceInputPerMTok < 0 || p.PriceOutputPerMTok < 0) e.Add($"{kv.Key}: ceny nie mogą być ujemne.");
+                if (p.PriceInputPerMTok < 0 || p.PriceOutputPerMTok < 0 || p.PriceCachedInputPerMTok < 0) e.Add($"{kv.Key}: ceny nie mogą być ujemne.");
                 if (p.MaxRepairRounds < 0 || p.MaxRepairRounds > 3) e.Add($"{kv.Key}: rundy poprawek 0–3.");
                 if (p.MaxOutputTokens < 1000 || p.MaxOutputTokens > 128_000) e.Add($"{kv.Key}: długość odpowiedzi 1000–128000 tokenów.");
                 if (!string.IsNullOrEmpty(p.Model) && (p.Model.Length > 80 || p.Model.Any(c => !(char.IsLetterOrDigit(c) || c is '-' or '.' or '_' or ':' or '/' or '[' or ']'))))
