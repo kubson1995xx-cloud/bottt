@@ -32,17 +32,7 @@ Zakres: APEX Desktop (serwer HTTP, mosty), silnik i RiskEngine, mosty cTrader/MT
 
 ## Moduł AI & Auto-Updates (APEX AI Lab)
 
-| Obszar | Stan |
-|---|---|
-| Izolacja od handlu | Osobny proces; dostęp do APEX Desktop wyłącznie do odczytu (status, dziennik, reżimy). Brak ścieżki wysyłania poleceń handlowych. |
-| Wdrożenie | Tylko po akceptacji użytkownika; nowe wydanie w osobnym folderze, aktywne po ponownym uruchomieniu; wycofanie jednym kliknięciem. Działający proces nigdy nie jest podmieniany. |
-| Zmiany chronione | RiskEngine, limity, bezpieczeństwo, wykonanie, profil, mosty i pliki aktywnych strategii – wymagana fraza `ZATWIERDZAM ZMIANY CHRONIONE`. |
-| Zakazy bezwzględne | Logika dopuszczenia LIVE, kryptowaluty, martingale/grid/uśrednianie, `AccessRights.FullAccess`, sieć/procesy w silniku, wyłączanie/usuwanie testów, zmiany w `src/Apex.AiLab` (AI nie modyfikuje własnych zabezpieczeń). |
-| Agenci | Codex: piaskownica `workspace-write` w kopii roboczej. Claude Code: lista dozwolonych narzędzi (pliki, kompilacja/testy .NET, podgląd git), bez WebFetch/WebSearch. API: brak wykonywania poleceń, walidacja ścieżek (bez `..`, ścieżek bezwzględnych, `.git`). |
-| Weryfikacja niezależna od agenta | Kompilacja, pełne testy (liczba testów nie może spaść), backtest vs wersja bazowa – wykonuje AI Lab, nie agent. |
-| Sekrety | Klucze API: Windows DPAPI (bieżący użytkownik), maskowane w panelu. Logowanie ChatGPT/Claude przechowują oficjalne narzędzia (Codex CLI / Claude Code). Token AI Lab ≥ 256 bitów, porównanie w stałym czasie. |
-| Sieć | AI Lab nasłuchuje tylko na 127.0.0.1, lista dozwolonych nagłówków Host, POST tylko JSON; panel łączy się wyłącznie przez APEX Desktop (token panelu). |
-| Ryzyko rezydualne | Agent CLI działa z uprawnieniami Twojego konta Windows (w granicach piaskownicy narzędzia). Zmiany AI mogą być błędne mimo testów – dlatego decyzja należy do Ciebie, a zmiany strategii warto najpierw obserwować na DEMO. |
+Moduł jest **odłożony**: nie jest budowany w pakiecie, APEX Desktop go nie uruchamia i nie udostępnia do niego żadnych tras. Opis zabezpieczeń zaprojektowanych dla modułu: [`AI_AUTO_UPDATES.md`](AI_AUTO_UPDATES.md), zaległości: [`AI_LAB_ZALEGLOSCI.md`](AI_LAB_ZALEGLOSCI.md).
 
 ## Ryzyka rezydualne (świadomie zaakceptowane lub do decyzji użytkownika)
 

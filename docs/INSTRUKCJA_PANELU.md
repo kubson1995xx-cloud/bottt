@@ -37,17 +37,6 @@ Panel nie generuje sygnałów ani „pewności” – pokazuje to, co silnik fak
 - **Ocena okazji (ranking):** rozkład oceny 0–100 na składniki z rzeczywistymi wagami i progiem minimalnym. **Ocena to ranking jakości, nie prawdopodobieństwo zysku.**
 - **Uzasadnienie decyzji:** dziennik ocen z listą bramek (dane, reżim, strategia, filtry, ranking, RiskEngine, wykonanie), z wynikiem każdej i powodem decyzji WAIT/BUY/SELL.
 
-## AI & Auto-Updates
-
-Panel modułu APEX AI Lab (osobny proces; szczegóły: [`AI_AUTO_UPDATES.md`](AI_AUTO_UPDATES.md)). Gdy moduł nie działa – przycisk **Uruchom moduł AI**.
-
-- **Nagłówek:** stan modułu i automatyzacji, następna zaplanowana analiza, **Analizuj teraz**, **Uruchom agenta teraz** (z wyborem dostawcy), przełącznik **Automatyzacja**.
-- **Przegląd i postęp:** etapy zadania (Analiza → Izolowana kopia → Wersja bazowa → Agent AI → Audyt → Kompilacja → Testy → Backtest → Przegląd) z bieżącym stanem, dziennik pracy agenta na żywo (polecenia, zmienione pliki, plan, komunikaty, zużycie), ostatnia analiza, zużycie limitów, ostatnie propozycje.
-- **Propozycje i historia zmian:** lista zadań ze statusem; szczegóły propozycji – podsumowanie agenta, audyt, kompilacja, testy (vs wersja bazowa), porównanie backtestu, przegląd drugim modelem, pełny diff. Przyciski: **Zatwierdź i przygotuj wdrożenie** (fraza dla zmian chronionych / niepełnej weryfikacji), **Odrzuć**, **Eksportuj łatkę**, **Dodaj gałąź do repozytorium źródłowego**, **Przerwij**.
-- **Połączenia AI:** wymagania (Git, .NET 8 SDK, Node.js), role dostawców (główny, zapasowy, przegląd), karty: Codex (logowanie kontem ChatGPT lub kodem urządzenia, opcjonalnie klucz API), Claude Code (subskrypcja Claude lub Anthropic Console), OpenAI API i Anthropic API (klucz, model, ceny, długość odpowiedzi, rundy poprawek).
-- **Harmonogram i limity:** częstotliwość analiz, wyzwalacze, minimalny odstęp, migawki rynku; limity uruchomień, tokenów i kosztów; bieżące zużycie i wykres tokenów z 14 dni.
-- **Repozytorium i wydania:** repozytorium źródłowe, gałąź bazowa, dane do backtestu, limity czasu, autostart AI Lab; zasady bezpieczeństwa (tylko podgląd); lista wydań i **Przywróć poprzednią wersję**.
-
 ## Pozycje i wyniki
 
 Otwarte pozycje bota (wejście, SL, TP, wynik, strategia), ostatnie zamknięte transakcje (wynik netto, R, powód wyjścia), statystyki (win rate, profit factor, expectancy w R, obsunięcie, Sharpe, średni zysk/strata).

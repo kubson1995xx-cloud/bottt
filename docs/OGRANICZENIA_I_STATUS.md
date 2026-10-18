@@ -10,7 +10,7 @@
 | Most MetaTrader 5 | **Eksperymentalny** – nieskompilowany; wymaga kompilacji i testu na DEMO. |
 | Strategie | **Brak strategii o potwierdzonej przewadze.** Jedna eksperymentalna (tylko DEMO), reszta odrzucona przez testy. |
 | Konto LIVE | **Zablokowane** i niezalecane. Odblokowanie wymaga osobnej, świadomej decyzji (3 kroki + START). |
-| AI & Auto-Updates (AI Lab) | **Gotowe do użycia – opcjonalne, wyłączone domyślnie.** Pełny przebieg (analiza → agent → audyt → kompilacja → testy → backtest → przegląd → wydanie → wycofanie) sprawdzony na prawdziwym kodzie z lokalnym serwerem imitującym OpenAI API. Prawdziwe sesje Codex (konto ChatGPT) i Claude Code nie były uruchamiane w tym środowisku – wymagają Twojego logowania. |
+| AI & Auto-Updates (AI Lab) | **Odłożone** decyzją użytkownika – moduł nie wchodzi w skład pakietu ani panelu. Kod i testy zostają w repozytorium do późniejszego wznowienia ([`HANDOFF.md`](../HANDOFF.md), [`AI_LAB_ZALEGLOSCI.md`](AI_LAB_ZALEGLOSCI.md)). |
 
 **Wniosek: system jest gotowy do uruchomienia i obserwacji na koncie DEMO, a nie do handlu na koncie rzeczywistym.**
 
@@ -31,19 +31,9 @@
 - Wersja natywna cTrader (`ApexTradingAI.algo`) nie ma panelu premium ani AI Decision Center.
 - Panel jest jednoużytkownikowy i lokalny. Nie jest przeznaczony do wystawiania w sieci.
 
-## Ograniczenia modułu AI Lab
-
-- Logowanie kontem ChatGPT (Codex) i subskrypcją Claude wykonujesz sam w oficjalnych narzędziach. AI Lab nie przechowuje tych danych logowania.
-- Limity planów ChatGPT/Claude są rozliczane przez dostawców. AI Lab zna je tylko pośrednio: liczy uruchomienia i tokeny, rozpoznaje komunikaty o wyczerpaniu limitu i czas odnowienia, a ich bieżący stan pokazuje panel dostawcy.
-- Codex na Windows korzysta z własnej piaskownicy narzędzia. Zakres izolacji zależy od wersji Codex CLI.
-- Backtest w AI Lab wymaga lokalnych danych historycznych. Bez nich propozycje mają status „Wymaga uwagi”.
-- Zmiany zaproponowane przez AI mogą być błędne mimo zaliczonych testów. Wielokrotna ocena na tych samych danych prowadzi do dopasowania do historii (licznik użyć okresu odłożonego jest widoczny w panelu).
-- Nowe wydanie zaczyna działać dopiero po ponownym uruchomieniu APEX przez Ciebie.
-
 ## Co trzeba zrobić na Twoim komputerze
 
 1. Zbudować pakiet (`tools\windows\Zbuduj-APEX.ps1`) – testy uruchomią się automatycznie.
 2. Przeprowadzić [procedurę DEMO](PROCEDURA_DEMO_PEPPERSTONE.md), zaczynając od testu wykonania.
 3. (Opcjonalnie) skompilować most MT5 i powtórzyć test wykonania na koncie DEMO MT5.
 4. Obserwować wyniki na DEMO przez co najmniej kilka miesięcy przed jakąkolwiek decyzją o LIVE.
-5. (Opcjonalnie) AI & Auto-Updates: zainstalować Git, Node.js i Codex CLI, zalogować się kontem ChatGPT w zakładce „Połączenia AI”, wskazać repozytorium źródłowe i dane do backtestu, a następnie włączyć automatyzację.

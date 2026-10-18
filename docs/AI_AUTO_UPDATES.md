@@ -1,5 +1,8 @@
 # AI & Auto-Updates (moduł APEX AI Lab)
 
+> **Stan (2026-10-18): moduł odłożony decyzją użytkownika.** Nie wchodzi w skład pakietu ani panelu APEX Desktop.
+> Opis poniżej dotyczy projektu modułu i obowiązuje dopiero po jego wznowieniu. Zaległości: [`AI_LAB_ZALEGLOSCI.md`](AI_LAB_ZALEGLOSCI.md).
+
 AI Lab automatycznie analizuje skuteczność strategii i warunki rynkowe. Okresowo uruchamia agenta AI (Codex lub Claude), który przygotowuje ulepszenia.
 Każdą zmianę AI Lab sam sprawdza: audyt, kompilacja, testy regresyjne, backtest, opcjonalny przegląd drugim modelem.
 Historia zmian i postęp pracy agentów są widoczne w panelu APEX (zakładka **AI & Auto-Updates**).

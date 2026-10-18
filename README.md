@@ -19,22 +19,20 @@ Handluje FX, metalami, energią, indeksami, obligacjami i towarami. **Kryptowalu
                                                          ├─ ochrona wykonania (rejestr sygnałów, weryfikacja niepewnych odpowiedzi)
                                                          ├─ filtr wiadomości makro (kalendarz)
                                                          └─ dziennik, statystyki, AI Decision Center
-                                                                  │ (tylko odczyt)
-                                          APEX AI Lab (osobny proces) – analizy, agenci Codex/Claude w izolowanych
-                                          kopiach, audyt + testy + backtest, wdrożenia WYŁĄCZNIE po Twojej akceptacji
 ```
 
 | Katalog | Zawartość |
 |---|---|
 | `src/Apex.Core` | Silnik niezależny od platformy: wskaźniki, reżim, strategie, ranking, ryzyko, zarządzanie pozycją, rejestr wykonania, protokół mostu. |
-| `src/Apex.Desktop` | APEX Desktop: serwer mostów, panel WWW (PL), AI Decision Center, zakładka AI & Auto-Updates. |
-| `src/Apex.AiLab` | APEX AI Lab: osobny proces – analiza wyników i rynku, agenci AI (Codex z kontem ChatGPT, Claude Code, OpenAI/Anthropic API), weryfikacja i wydania po akceptacji. |
+| `src/Apex.Desktop` | APEX Desktop: serwer mostów, panel WWW (PL), AI Decision Center. |
+| `src/Apex.AiLab` | Moduł automatycznych analiz i aktualizacji przez AI (APEX AI Lab) – **odłożony**, nie wchodzi w skład pakietu ani panelu (stan: [`HANDOFF.md`](HANDOFF.md)). |
 | `src/Platforms/cTrader` | `ApexBridge` (most) i `ApexTradingAI` (wersja natywna „wszystko w jednym”). |
 | `src/Platforms/MT5` | Most MetaTrader 5 (MQL5). |
 | `tools/Apex.Backtester` | Backtester na tym samym silniku: walk-forward, holdout, Monte Carlo, scenariusze kosztów. |
 | `tools/Apex.PlatformSimulator` | Symulator platformy (testy bez brokera, wstrzykiwanie awarii). |
 | `tools/windows/Zbuduj-APEX.ps1` | Budowa pakietu dla Windows (z testami). |
-| `tests/Apex.Tests` | 154 testy: jednostkowe, silnika, integracyjne i modułu AI Lab. |
+| `tests/Apex.Tests` | Testy bota: jednostkowe, silnika i integracyjne (prawdziwy proces APEX Desktop). |
+| `tests/Apex.AiLab.Tests` | Testy odłożonego modułu AI Lab (nie są uruchamiane przy budowie pakietu). |
 | `config`, `reports`, `docs` | Profil strategii, wyniki badań, dokumentacja. |
 
 ## Szybki start (Windows 11)
@@ -54,7 +52,7 @@ Następnie podłącz cTrader (konto **DEMO**) i wykonaj test wykonania. Szczegó
 3. [Procedura DEMO – Pepperstone](docs/PROCEDURA_DEMO_PEPPERSTONE.md)
 4. [Instrukcja panelu (w tym AI Decision Center)](docs/INSTRUKCJA_PANELU.md)
 5. [Konfiguracja: instrumenty, prowizje, profil, konto LIVE](docs/KONFIGURACJA.md)
-6. [AI & Auto-Updates – moduł APEX AI Lab](docs/AI_AUTO_UPDATES.md)
+6. [Stan projektu i przekazanie pracy (HANDOFF)](HANDOFF.md)
 7. [Protokół mostu APEX Bridge v1](docs/PROTOKOL_MOSTU.md)
 8. [Metodologia testów strategii](docs/METODOLOGIA_TESTOW.md) i [raport badań](reports/RAPORT_BADAN.md)
 9. [Wyniki testów](docs/WYNIKI_TESTOW.md)

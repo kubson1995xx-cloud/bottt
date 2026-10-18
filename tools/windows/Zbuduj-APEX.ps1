@@ -70,7 +70,7 @@ Copy-Item (Join-Path $repo "src\Platforms\MT5\ApexBridge.mq5") $mt5 -Force
 Krok "Dokumentacja"
 $docs = Join-Path $Wyjscie "Dokumentacja"
 New-Item -ItemType Directory -Force -Path $docs | Out-Null
-Copy-Item (Join-Path $repo "docs\*.md") $docs -Force -Exclude "AI_*.md"
+Copy-Item (Join-Path $repo "docs\*.md") $docs -Force
 Copy-Item (Join-Path $repo "README.md") $docs -Force
 Copy-Item (Join-Path $repo "reports\RAPORT_BADAN.md") $docs -Force
 
