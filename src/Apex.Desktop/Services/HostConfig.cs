@@ -105,7 +105,15 @@ namespace Apex.Desktop.Services
             {
                 string tmp = Path_ + ".tmp";
                 File.WriteAllText(tmp, JsonSerializer.Serialize(Config, Json));
-                File.Move(tmp, Path_, true);
+                // Inny proces (AI Lab) może chwilowo czytać plik – na Windows zamiana wtedy się nie udaje; kilka krótkich ponowień.
+                for (int attempt = 1; ; attempt++)
+                {
+                    try { File.Move(tmp, Path_, true); break; }
+                    catch (Exception ex) when ((ex is UnauthorizedAccessException || (ex is IOException && ex is not FileNotFoundException && ex is not DirectoryNotFoundException)) && attempt < 6)
+                    {
+                        System.Threading.Thread.Sleep(25 * attempt * attempt);
+                    }
+                }
             }
         }
 

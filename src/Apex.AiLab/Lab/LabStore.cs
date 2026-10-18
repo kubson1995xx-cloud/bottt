@@ -250,20 +250,54 @@ namespace Apex.AiLab.Lab
 
         public static T? ReadJson<T>(string path) where T : class
         {
-            try
+            // Plik może być właśnie podmieniany przez inny wątek lub proces (np. historia wydań) – kilka krótkich ponowień.
+            for (int attempt = 1; ; attempt++)
             {
-                if (!File.Exists(path)) return null;
-                return JsonSerializer.Deserialize<T>(File.ReadAllText(path), LabConfigStore.Json);
+                try
+                {
+                    if (!File.Exists(path)) return null;
+                    return JsonSerializer.Deserialize<T>(ReadShared(path), LabConfigStore.Json);
+                }
+                catch (JsonException) { return null; }
+                catch (FileNotFoundException) { return null; }
+                catch (DirectoryNotFoundException) { return null; }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    if (attempt >= 3) return null;
+                    System.Threading.Thread.Sleep(30 * attempt);
+                }
             }
-            catch (JsonException) { return null; }
-            catch (IOException) { return null; }
         }
 
         public static void WriteJson<T>(string path, T value)
         {
-            string tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(value, LabConfigStore.Json));
-            File.Move(tmp, path, true);
+            // Unikalny plik tymczasowy – dwa zapisy tego samego pliku nie nadpisują sobie nawzajem pliku pośredniego.
+            string tmp = path + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            try
+            {
+                File.WriteAllText(tmp, JsonSerializer.Serialize(value, LabConfigStore.Json));
+                // Windows: zamiana pliku nie uda się, gdy ktoś trzyma go otwartego bez FILE_SHARE_DELETE – ponowienia zamiast błędu.
+                for (int attempt = 1; ; attempt++)
+                {
+                    try { File.Move(tmp, path, true); return; }
+                    catch (Exception ex) when (TransientIo(ex) && attempt < 6) { System.Threading.Thread.Sleep(25 * attempt * attempt); }
+                }
+            }
+            finally
+            {
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
         }
+
+        /// <summary>Odczyt bez blokowania zapisu atomowego innego procesu (FileShare.ReadWrite | FileShare.Delete).</summary>
+        private static string ReadShared(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(fs, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
+        }
+
+        private static bool TransientIo(Exception ex) =>
+            ex is UnauthorizedAccessException || (ex is IOException && ex is not FileNotFoundException && ex is not DirectoryNotFoundException);
     }
 }
