@@ -60,14 +60,14 @@ namespace Apex.AiLab.Scheduling
             {
                 RunsToday = recs.Count(r => r.Kind == "agent" && r.TimeUtc >= day),
                 RunsWeek = recs.Count(r => r.Kind == "agent" && r.TimeUtc >= week),
-                TokensToday = recs.Where(r => r.TimeUtc >= day).Sum(r => r.InputTokens + r.OutputTokens),
-                TokensWeek = recs.Where(r => r.TimeUtc >= week).Sum(r => r.InputTokens + r.OutputTokens),
-                TokensMonth = recs.Where(r => r.TimeUtc >= month).Sum(r => r.InputTokens + r.OutputTokens),
-                CostMonthUsd = recs.Where(r => r.TimeUtc >= month && r.CostUsd.HasValue && IsApiBilled(r.Provider)).Sum(r => r.CostUsd!.Value),
+                TokensToday = recs.Where(r => r.TimeUtc >= day).Sum(CountedTokens),
+                TokensWeek = recs.Where(r => r.TimeUtc >= week).Sum(CountedTokens),
+                TokensMonth = recs.Where(r => r.TimeUtc >= month).Sum(CountedTokens),
+                CostMonthUsd = recs.Where(r => r.TimeUtc >= month && r.CostUsd.HasValue && IsApiBilled(r)).Sum(r => r.CostUsd!.Value),
             };
             foreach (var g in recs.Where(r => r.TimeUtc >= month).GroupBy(r => r.Provider))
             {
-                s.TokensByProviderMonth[g.Key.ToString()] = g.Sum(r => r.InputTokens + r.OutputTokens);
+                s.TokensByProviderMonth[g.Key.ToString()] = g.Sum(CountedTokens);
                 s.RunsByProviderMonth[g.Key.ToString()] = g.Count(r => r.Kind == "agent");
             }
             for (int i = 13; i >= 0; i--)
@@ -75,27 +75,38 @@ namespace Apex.AiLab.Scheduling
                 var d0 = DayStartUtc(nowUtc.AddDays(-i));
                 var d1 = d0.AddDays(1);
                 var dayRecs = recs.Where(r => r.TimeUtc >= d0 && r.TimeUtc < d1).ToList();
-                s.Daily.Add((d0, dayRecs.Sum(r => r.InputTokens + r.OutputTokens), dayRecs.Count(r => r.Kind == "agent")));
+                s.Daily.Add((d0, dayRecs.Sum(CountedTokens), dayRecs.Count(r => r.Kind == "agent")));
             }
             return s;
         }
 
-        /// <summary>Czy koszt jest realnym rozliczeniem API (a nie szacunkiem w ramach subskrypcji).</summary>
+        /// <summary>
+        /// Tokeny liczone do limitów: wejście bez części odczytanej z pamięci podręcznej modelu + wyjście. Agent CLI wielokrotnie
+        /// czyta ten sam kontekst – pełne liczenie tokenów z pamięci podręcznej wyczerpywałoby dzienny limit jednym uruchomieniem.
+        /// </summary>
+        public static long CountedTokens(UsageRecord r) => Math.Max(0, r.InputTokens - r.CachedInputTokens) + r.OutputTokens;
+
+        /// <summary>Czy koszt jest realnym rozliczeniem API (a nie szacunkiem w ramach subskrypcji) – wg rodzaju dostawcy.</summary>
         public static bool IsApiBilled(ProviderId p) => p is ProviderId.OpenAiApi or ProviderId.AnthropicApi;
 
-        /// <summary>Sprawdza, czy można uruchomić agenta danego dostawcy. Zwraca null albo powód blokady (PL).</summary>
-        public string? CanRun(ProviderId provider, DateTime nowUtc, bool manual)
+        /// <summary>Rozliczenie API zapisane przy uruchomieniu (Codex/Claude Code z kluczem API też); starsze zapisy – wg rodzaju dostawcy.</summary>
+        public static bool IsApiBilled(UsageRecord r) => r.ApiBilled ?? IsApiBilled(r.Provider);
+
+        /// <summary>
+        /// Sprawdza, czy można uruchomić agenta danego dostawcy. Zwraca null albo powód blokady (PL).
+        /// apiBilled: bieżący sposób rozliczenia dostawcy (np. Codex zalogowany kluczem API) – null = wg rodzaju dostawcy.
+        /// </summary>
+        public string? CanRun(ProviderId provider, DateTime nowUtc, bool manual, bool? apiBilled = null)
         {
             var cfg = _cfg();
             var b = cfg.Budget;
-            var lim = _store.Limit(provider);
-            if (lim?.LimitedUntilUtc != null && lim.LimitedUntilUtc > nowUtc && b.PauseOnSubscriptionLimit)
-                return $"limit dostawcy {provider} wyczerpany do {lim.LimitedUntilUtc.Value.ToLocalTime():yyyy-MM-dd HH:mm} ({lim.Message})";
+            string? limit = ProviderLimit(provider, nowUtc);
+            if (limit != null) return limit;
             var s = Compute(nowUtc);
             if (b.MaxAgentRunsPerDay >= 0 && s.RunsToday >= b.MaxAgentRunsPerDay) return $"dzienny limit uruchomień agenta ({s.RunsToday}/{b.MaxAgentRunsPerDay})";
             if (b.MaxAgentRunsPerWeek >= 0 && s.RunsWeek >= b.MaxAgentRunsPerWeek) return $"tygodniowy limit uruchomień agenta ({s.RunsWeek}/{b.MaxAgentRunsPerWeek})";
-            if (b.MaxTokensPerDay > 0 && s.TokensToday >= b.MaxTokensPerDay) return $"dzienny limit tokenów ({s.TokensToday:N0}/{b.MaxTokensPerDay:N0})";
-            if (IsApiBilled(provider) && b.MaxUsdPerMonth > 0 && s.CostMonthUsd >= b.MaxUsdPerMonth) return $"miesięczny limit kosztów API ({s.CostMonthUsd:F2}/{b.MaxUsdPerMonth:F2} USD)";
+            string? spend = Spend(s, apiBilled ?? IsApiBilled(provider));
+            if (spend != null) return spend;
             if (!manual)
             {
                 var last = _store.LastAgentRunUtc;
@@ -105,7 +116,38 @@ namespace Apex.AiLab.Scheduling
             return null;
         }
 
-        public void Record(ProviderId p, string jobId, string kind, UsageInfo u, DateTime nowUtc)
+        /// <summary>
+        /// Kontynuacja TEGO SAMEGO zadania (niezależny przegląd drugim modelem, runda poprawek): liczniki uruchomień agenta
+        /// i minimalny odstęp dotyczą rozpoczynania zadań, więc ich tu nie stosujemy. Obowiązują: limit zgłoszony przez dostawcę,
+        /// dzienny limit tokenów i miesięczny limit kosztów (przy rozliczeniu API). Rundy poprawek są ograniczone osobno
+        /// ustawieniem MaxRepairRounds i zapisywane jako "repair" (nie zajmują dziennych uruchomień agenta).
+        /// </summary>
+        public string? CanContinueJob(ProviderId provider, DateTime nowUtc, bool? apiBilled = null) =>
+            ProviderLimit(provider, nowUtc) ?? Spend(Compute(nowUtc), apiBilled ?? IsApiBilled(provider));
+
+        /// <summary>Czy można wykonać niezależny przegląd – patrz <see cref="CanContinueJob"/>.</summary>
+        public string? CanReview(ProviderId provider, DateTime nowUtc, bool? apiBilled = null) => CanContinueJob(provider, nowUtc, apiBilled);
+
+        /// <summary>Limit zgłoszony przez dostawcę (subskrypcja / API) – do czasu odnowienia.</summary>
+        private string? ProviderLimit(ProviderId provider, DateTime nowUtc)
+        {
+            var lim = _store.Limit(provider);
+            if (lim?.LimitedUntilUtc != null && lim.LimitedUntilUtc > nowUtc && _cfg().Budget.PauseOnSubscriptionLimit)
+                return $"limit dostawcy {provider} wyczerpany do {lim.LimitedUntilUtc.Value.ToLocalTime():yyyy-MM-dd HH:mm} ({lim.Message})";
+            return null;
+        }
+
+        /// <summary>Dzienny limit tokenów i miesięczny limit kosztów (ten drugi tylko przy rozliczeniu API).</summary>
+        private string? Spend(Summary s, bool apiBilled)
+        {
+            var b = _cfg().Budget;
+            if (b.MaxTokensPerDay > 0 && s.TokensToday >= b.MaxTokensPerDay) return $"dzienny limit tokenów ({s.TokensToday:N0}/{b.MaxTokensPerDay:N0})";
+            if (apiBilled && b.MaxUsdPerMonth > 0 && s.CostMonthUsd >= b.MaxUsdPerMonth) return $"miesięczny limit kosztów API ({s.CostMonthUsd:F2}/{b.MaxUsdPerMonth:F2} USD)";
+            return null;
+        }
+
+        /// <summary>Zapis zużycia. apiBilled: rozliczenie za tokeny wg bieżącego logowania dostawcy (null = wg rodzaju dostawcy).</summary>
+        public void Record(ProviderId p, string jobId, string kind, UsageInfo u, DateTime nowUtc, bool? apiBilled = null)
         {
             _store.AddUsage(new UsageRecord
             {
@@ -118,6 +160,7 @@ namespace Apex.AiLab.Scheduling
                 OutputTokens = u.OutputTokens,
                 CostUsd = u.CostUsd,
                 LimitReached = u.LimitReached,
+                ApiBilled = apiBilled ?? IsApiBilled(p),
             });
             if (u.LimitReached)
                 _store.SetLimit(new ProviderLimitState
