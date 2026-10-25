@@ -1,6 +1,6 @@
 'use strict';
 /*
- * AI Decision Center – wizualizacja procesu decyzyjnego silnika APEX.
+ * Centrum decyzji – wizualizacja procesu decyzyjnego silnika APEX.
  * WYŁĄCZNIE ODCZYT: dane z /api/accounts/{konto}/decisions i /instrument/{symbol}.
  * Każdy impuls, licznik i wykres odpowiada rzeczywistemu zdarzeniu lub wartości policzonej przez silnik.
  * Moduł nie wysyła żadnych poleceń handlowych.
@@ -45,7 +45,7 @@
     const root = el('div', { class: 'dc' });
     D.els.live = el('span', { class: 'dc-live off' }, el('span', { class: 'pulse' }), el('span', { text: 'łączenie…' }));
     root.appendChild(el('div', { class: 'dc-hero' },
-      el('div', null, el('div', { class: 'dc-title' }, el('span', { text: 'AI Decision Center' })),
+      el('div', null, el('div', { class: 'dc-title' }, el('span', { text: 'Centrum decyzji' })),
         el('div', { class: 'dc-desc', text: 'Na żywo: jak silnik APEX analizuje instrumenty, liczy wskaźniki, ocenia strategie, sprawdza RiskEngine i dochodzi do decyzji BUY, SELL lub WAIT.' })),
       el('div', { style: 'margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px' }, D.els.live,
         el('span', { class: 'dc-readonly' }, icon('shield'), 'Wizualizacja tylko do odczytu – nie wpływa na handel'))));

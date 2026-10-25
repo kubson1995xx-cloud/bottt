@@ -3,7 +3,7 @@
 Panel otwiera się pod adresem `http://127.0.0.1:5077` (okno Edge w trybie aplikacji). Działa tylko lokalnie, a każde żądanie wymaga tokenu wstrzykniętego w stronę.
 Motyw: przełącznik **Ciemny / Jasny** w lewym dolnym rogu. Pasek u góry przełącza konta, gdy podłączonych jest kilka.
 
-Wszystkie polecenia zmieniające stan (zatrzymanie, zamknięcie pozycji, limity, LIVE) wymagają potwierdzenia w oknie dialogowym.
+START, kontrolowany test wykonania, STOP, zamknięcie pozycji, Emergency Stop i zmiana limitów mają jawne potwierdzenia. Przełączniki wyboru strategii i instrumentów działają bez dodatkowego okna. Nowe wejścia wymagają połączonego DEMO i aktualnego panelu.
 
 ## Pulpit
 
@@ -12,7 +12,7 @@ Wszystkie polecenia zmieniające stan (zatrzymanie, zamknięcie pozycji, limity,
 
 | Przycisk | Działanie |
 |---|---|
-| START | Uruchamia nowe wejścia (niedostępny, gdy strażnik konta blokuje handel). |
+| START | Po potwierdzeniu uruchamia automatyczny handel DEMO. Niedostępny przy blokadzie, rozłączeniu, nieaktualnym panelu lub koncie REAL. Po restarcie wymagany ponownie. |
 | Wstrzymaj nowe | Brak nowych wejść; otwarte pozycje są dalej zarządzane (trailing, BE, wyjścia). |
 | Zatrzymaj | Bot nie otwiera i nie zarządza pozycjami; SL/TP pozostają u brokera. |
 | Zamknij pozycje bota | Zamyka wszystkie pozycje z etykietą APEX na tym koncie (ręczne i innych botów – nie). |
@@ -23,7 +23,7 @@ Wszystkie polecenia zmieniające stan (zatrzymanie, zamknięcie pozycji, limity,
 - **Kapitał w czasie** (próbki co 5 min), **Otwarte pozycje bota**, **Ostatnie sygnały** (ranking i decyzje), **Ważne wiadomości** (kalendarz makro).
 - Komunikaty ostrzegawcze: most rozłączony, dzienny limit straty, maksymalne obsunięcie, blokada strażnika konta.
 
-## AI Decision Center
+## Centrum decyzji
 
 Wizualizacja **tylko do odczytu**. Pokazuje rzeczywiste zdarzenia silnika: oceny strategii, filtry, decyzje RiskEngine i wykonanie.
 Nie wysyła żadnych poleceń i nie zmienia decyzji. Test automatyczny potwierdza, że silnik z wizualizacją i bez niej wysyła identyczne zlecenia.
@@ -55,7 +55,7 @@ Lista par strategia × klasa aktywów z profilu, status walidacji i dowody z bac
 ## Ryzyko i bezpieczeństwo
 
 - **Limity ryzyka konta:** ryzyko na transakcję (domyślnie 0,5%, maks. 2%), maks. dzienna strata (1,5%), maks. obsunięcie (5%), maks. liczba pozycji (3), maks. dźwignia efektywna (5). Zapis jest walidowany, a wartości absurdalne są odrzucane.
-- **Tryb konta i ochrona LIVE:** stan strażnika konta. Dla konta LIVE: **Odblokuj konto LIVE…** (działa tylko po świadomej zmianie pliku konfiguracji; wymaga wpisania frazy `LIVE <numer> AKCEPTUJE RYZYKO`) i **Zablokuj konto LIVE**.
+- **Tryb konta i ochrona LIVE:** stan strażnika konta. Wydanie jest wyłącznie DEMO. Nie ma przycisku ani procedury odblokowania REAL.
 
 ## Połączenia platform
 
@@ -74,7 +74,7 @@ Lista par strategia × klasa aktywów z profilu, status walidacji i dowody z bac
 
 | Plik | Zawartość |
 |---|---|
-| `apex.config.json` | konfiguracja (porty, klucz, token, limity, LIVE) |
+| `apex.config.json` | konfiguracja (porty, klucz, token, limity); nie publikuj pliku |
 | `konta\<konto>\stan\` | trwały stan silnika (rejestr sygnałów, plany pozycji, limity dnia) – zapis atomowy z kopią `.bak` |
 | `konta\<konto>\dziennik\transakcje.csv` | dziennik transakcji |
 | `konta\<konto>\dziennik\sygnaly.log`, `zdarzenia.log` | sygnały i zdarzenia |

@@ -3,9 +3,9 @@
 Autonomiczny, wieloplatformowy bot tradingowy dla Windows 11 z panelem premium. Obsługuje cTrader (np. Pepperstone) i MetaTrader 5 przez mosty.
 Handluje FX, metalami, energią, indeksami, obligacjami i towarami. **Kryptowaluty są całkowicie wykluczone.**
 
-> **Status: gotowy do testów na koncie DEMO, nie do handlu na koncie rzeczywistym.**
+> **Wydanie techniczne DEMO w trakcie końcowej weryfikacji.** Aktualne dowody i bramki odbioru: [wyniki testów](docs/WYNIKI_TESTOW.md) i [HANDOFF](HANDOFF.md).
 > Badania na danych 2005–2020 nie wykazały strategii z potwierdzoną przewagą ([raport](reports/RAPORT_BADAN.md)).
-> Konto LIVE jest domyślnie zablokowane na trzech poziomach i wymaga osobnej, świadomej decyzji użytkownika.
+> Ta wersja jest **wyłącznie DEMO**. Nie udostępnia odblokowania REAL. Rzeczywisty test transakcji DEMO wymaga osobnego zatwierdzenia po połączeniu z cTrader.
 
 ## Architektura
 
@@ -35,10 +35,15 @@ Handluje FX, metalami, energią, indeksami, obligacjami i towarami. **Kryptowalu
 | `tests/Apex.AiLab.Tests` | Testy odłożonego modułu AI Lab (nie są uruchamiane przy budowie pakietu). |
 | `config`, `reports`, `docs` | Profil strategii, wyniki badań, dokumentacja. |
 
-## Szybki start (Windows 11)
+## Szybki start (Windows 11, gotowy ZIP)
+
+Rozpakuj cały `APEX-Windows-DEMO.zip` do nowego folderu i otwórz `Uruchom APEX.cmd`. **Nie potrzebujesz SDK, Node ani Visual Studio.** Zainstaluj `cTrader/ApexBridge.algo`, zaloguj Pepperstone DEMO w lokalnym cTrader Desktop i sparuj most kluczem z panelu. Zacznij od [instalacji](docs/INSTALACJA_WINDOWS.md) i [procedury odbioru DEMO](docs/PROCEDURA_DEMO_PEPPERSTONE.md).
+
+### Budowanie ze źródeł
 
 ```powershell
 winget install Microsoft.DotNet.SDK.8
+winget install OpenJS.NodeJS.LTS
 powershell -ExecutionPolicy Bypass -File tools\windows\Zbuduj-APEX.ps1
 & ".\dist\Uruchom APEX.cmd"
 ```
@@ -51,7 +56,7 @@ Następnie podłącz cTrader (konto **DEMO**) i wykonaj test wykonania. Szczegó
 2. [Podłączanie platform (cTrader, MT5, inne)](docs/PODLACZENIE_PLATFORM.md)
 3. [Procedura DEMO – Pepperstone](docs/PROCEDURA_DEMO_PEPPERSTONE.md)
 4. [Instrukcja panelu (w tym AI Decision Center)](docs/INSTRUKCJA_PANELU.md)
-5. [Konfiguracja: instrumenty, prowizje, profil, konto LIVE](docs/KONFIGURACJA.md)
+5. [Konfiguracja: instrumenty, prowizje, profil, blokada REAL](docs/KONFIGURACJA.md)
 6. [Stan projektu i przekazanie pracy (HANDOFF)](HANDOFF.md)
 7. [Protokół mostu APEX Bridge v1](docs/PROTOKOL_MOSTU.md)
 8. [Metodologia testów strategii](docs/METODOLOGIA_TESTOW.md) i [raport badań](reports/RAPORT_BADAN.md)
@@ -61,18 +66,21 @@ Następnie podłącz cTrader (konto **DEMO**) i wykonaj test wykonania. Szczegó
 
 ## Zasady, których bot nie łamie
 
-- Każda pozycja ma SL. Nie ma martingale, gridu, uśredniania ani zwiększania pozycji po stracie.
+- Każde nowe zlecenie wymaga SL i TP. Nie ma martingale, gridu, uśredniania ani zwiększania pozycji po stracie.
 - Wielkość pozycji wynika wyłącznie ze stałego procentu kapitału i jest zaokrąglana w dół.
 - Nie dotyka pozycji ręcznych ani innych botów.
 - Po niepewnej odpowiedzi serwera najpierw weryfikuje stan, nigdy nie ponawia „w ciemno”.
 - Strategie eksperymentalne działają wyłącznie na DEMO.
 - Ocena okazji 0–100 to ranking jakości, **nie prawdopodobieństwo zysku**.
-- Zmiany przygotowane przez AI nigdy nie trafiają do działającego bota bez Twojej akceptacji; AI nie może zmienić zasad dopuszczenia konta LIVE ani własnych zabezpieczeń.
+- Brak modułów uczenia i automatycznej aktualizacji. Aktualizacja aplikacji jest ręczna. Po restarcie nowe wejścia wymagają świadomego START; nie usuwaj zapisu stanu w celu ominięcia limitów.
 
 ## Dla deweloperów
 
 ```bash
-dotnet test tests/Apex.Tests                                   # wszystkie testy
+dotnet build APEX.Trading.Demo.sln -c Release                 # cały produkt, oba cBoty
+dotnet test tests/Apex.Tests -c Release                      # testy bota
+dotnet test tests/Apex.AiLab.Tests -c Release                 # archiwum, poza produktem
+npm ci --ignore-scripts && npm test && npm run check         # wyłącznie testy panelu
 dotnet run --project tools/Apex.PlatformSimulator -- --key K   # symulator platformy
 dotnet run --project tools/Apex.Backtester -- smoke            # backtester (dane: tools/data/prepare_data.py)
 ```

@@ -7,7 +7,11 @@
 - Specyfikacja: `docs/superpowers/specs/2026-10-26-apex-demo-design.md`; plan: `docs/superpowers/plans/2026-10-26-apex-demo.md`.
 - Bazowe wyniki z tej sesji (Linux, SDK 8.0.427): bot **120/120**, odłożony AI Lab **181/181**, brak pominiętych i niezaliczonych testów. Oba cBoty i backtester budują się: 0 błędów, 0 ostrzeżeń. Historyczne liczby poniżej nie opisują bieżącego podziału projektów testowych.
 - Bazowe TRX: `/home/ubuntu/.hermes/cache/scratch/apex-evidence/baseline-core.trx` i `baseline-ailab.trx` (artefakty lokalne poza Git).
-- W toku: przegląd i regresje silnika/persistencji, mostów, backendu/panelu oraz pakietu Windows. Brak jeszcze dowodu rzeczywistego połączenia z Pepperstone i uruchomienia aplikacji na Windows.
+- W toku: przegląd i regresje silnika/persistencji oraz mostów. Brak jeszcze dowodu rzeczywistego połączenia z Pepperstone i uruchomienia aplikacji na Windows.
+- Etap panel/pakiet: 9/9 testów Node (7 regresji panelu obejrzanych RED→GREEN, 2 kontrakty pakietu RED→GREEN), sprawdzona składnia JS i 3 skryptów PowerShell. Dodano `APEX.Trading.Demo.sln`; pełny build 0 błędów/ostrzeżeń, ponownie 120/120 testów bota.
+- Wykonano rzeczywistą publikację samodzielnego `win-x64` i ZIP przez `Zbuduj-APEX.ps1` w PowerShell 7.6.9 na Linux. Manifest 26 plików poprawny; kontrolowane uszkodzenie pliku i dodanie pliku spoza manifestu poprawnie odrzucone, po przywróceniu ponownie PASS. To pakiet walidacyjny sprzed integracji poprawek bezpieczeństwa, nie wersja końcowa do handlu.
+- Panel nie ma odblokowania REAL ani AI Lab, START wymaga potwierdzenia DEMO; nowe działania blokowane przy nieaktualnym/rozłączonym koncie. Centrum decyzji pozostaje pasywną wizualizacją reguł, bez modelu AI.
+- Dodano workflow Windows (PowerShell 5.1, test prawdziwego EXE bez brokera, ścieżki ze spacjami) i instrukcję gotowego ZIP bez SDK. Workflow jeszcze nie ma wyniku — nie jest to dowód wykonania na Windows.
 - Rozstrzygnięcie: aktualne zlecenie jest specyfikacją i zgodą na autonomiczną implementację, nie wymaga kolejnego zatwierdzania planu. Zachowujemy C#/.NET i architekturę, nie dodajemy zdalnego OAuth zamiast lokalnego mostu. Testy archiwalnego AI Lab wykonujemy oddzielnie, bez pakowania go z botem.
 
 ---

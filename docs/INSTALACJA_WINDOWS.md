@@ -1,82 +1,52 @@
-# Instalacja APEX Trading AI na Windows 11
+# APEX Trading AI DEMO — instalacja Windows 11
 
-## Co jest w pakiecie
+## Gotowy pakiet — bez narzędzi programistycznych
 
-| Element | Do czego służy |
-|---|---|
-| **APEX Desktop** (`ApexDesktop.exe`) | Samodzielna aplikacja: silnik bota, zarządzanie ryzykiem, panel premium w przeglądarce, serwer mostów platform. |
-| **Most cTrader** (`ApexBridge.algo`) | cBot łączący cTrader Desktop z APEX Desktop (dane rynkowe, konto, wykonywanie zleceń). |
-| **Most MetaTrader 5** (`ApexBridge.mq5`) | Expert Advisor łączący MT5 z APEX Desktop. |
-| **APEX natywny dla cTrader** (`ApexTradingAI.algo`) | Alternatywa „wszystko w jednym” – cały silnik w cBocie, bez APEX Desktop (panel na wykresie). |
+1. Pobierz `APEX-Windows-DEMO.zip` i odpowiadający mu plik `.zip.sha256` z przekazanego wydania albo artefaktu GitHub Actions. Nie pobieraj pustej gałęzi `main`; źródła są na `claude/beautiful-mccarthy-9cibo1`.
+2. Rozpakuj **cały ZIP** do nowego folderu, np. `C:\APEX DEMO`. Nie uruchamiaj pliku bezpośrednio wewnątrz ZIP i nie kopiuj samego EXE: folder `wwwroot` jest potrzebny do panelu.
+3. Opcjonalna weryfikacja integralności: kliknij prawym przyciskiem Start → Terminal/PowerShell i wykonaj `powershell -ExecutionPolicy Bypass -File "C:\APEX DEMO\Sprawdz-Pakiet.ps1"`. Oczekiwane: `PAKIET OK`. SHA-256 nie zastępuje podpisu wydawcy — porównaj sumę ZIP z otrzymaną z zaufanego źródła.
+4. Dwuklik `Uruchom APEX.cmd`. Aplikacja jest samodzielna: **nie instalujesz .NET SDK, Node, Pythona ani Visual Studio**.
+5. Panel otwiera się w Edge albo domyślnej przeglądarce. Jeżeli okno nie otworzy się automatycznie, wejdź na `http://127.0.0.1:5077`.
+6. Pozostaw proces APEX uruchomiony; zamknięcie samej karty panelu nie jest poleceniem STOP. Użyj przycisku STOP lub Emergency Stop w panelu.
 
-Zalecany sposób pracy: **APEX Desktop + most cTrader** (pełny panel, kilka kont i platform naraz).
+Windows 11 x64 oraz lokalny Pepperstone cTrader Desktop z kontem **DEMO** są wymagane. Program nie jest podpisany cyfrowo; nie omijaj SmartScreen dla plików z nieznanego źródła. Nie udostępniaj portów APEX w routerze ani w zaporze.
 
-## Wymagania
+## Zawartość
 
-- Windows 11 (lub 10) 64-bit, przeglądarka Microsoft Edge (wbudowana).
-- cTrader Desktop (np. Pepperstone) z kontem **DEMO** i/lub MetaTrader 5.
-- Do zbudowania pakietu ze źródeł: **.NET 8 SDK** (`winget install Microsoft.DotNet.SDK.8`). Zbudowany `ApexDesktop.exe` nie wymaga instalowania .NET.
+- `APEX-Desktop\ApexDesktop.exe` i `wwwroot\` — silnik, panel i serwer lokalny.
+- `cTrader\ApexBridge.algo` — zalecany most do pełnego panelu APEX.
+- `cTrader\ApexTradingAI.algo` — alternatywny bot natywny; **nie uruchamiaj obu na tym samym koncie**.
+- `MT5-opcjonalny\ApexBridge.mq5` — źródło dodatku MT5, wymaga MetaEditora; nie jest potrzebne do cTrader.
+- `Dokumentacja\` — instrukcje i ograniczenia; `Weryfikacja\bot.trx` — wynik testów z budowania.
+- `apex-build.json`, `manifest.sha256`, `Sprawdz-Pakiet.ps1` — pochodzenie i integralność plików. `sourceDirty: true` oznacza lokalne modyfikacje względem wskazanego commita.
 
-## Krok 1 – zbudowanie pakietu (jednorazowo)
+Nie ma pakietu AI Lab, uczenia modeli ani automatycznych aktualizacji.
 
-1. Pobierz repozytorium (np. `git clone` lub ZIP z GitHub) do folderu, np. `C:\APEX\zrodla`.
-2. Otwórz PowerShell w tym folderze i uruchom:
+## Podłączenie konta
 
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File tools\windows\Zbuduj-APEX.ps1
-   ```
+Przejdź do [PODLACZENIE_PLATFORM.md](PODLACZENIE_PLATFORM.md), a następnie [PROCEDURA_DEMO_PEPPERSTONE.md](PROCEDURA_DEMO_PEPPERSTONE.md). Start aplikacji i mostu nie jest zgodą na automatyczny handel. Po uruchomieniu/restarcie sprawdź stan ZATRZYMANY; świadomie uruchom test wykonania i dopiero później START.
 
-   Skrypt uruchamia testy automatyczne (120 testów, ok. 1–2 min). **Jeśli którykolwiek test nie przejdzie, pakiet nie zostanie zbudowany.**
-3. Wynik: folder `dist\` z plikami `Uruchom APEX.cmd`, `APEX-Desktop\`, `cTrader\`, `MT5\`, `Dokumentacja\`.
-   Skrót `Uruchom APEX.cmd` uruchamia APEX Desktop z tego pakietu.
+Dane i logi znajdują się w `%LOCALAPPDATA%\APEX Trading AI\`. Nie usuwaj tego katalogu podczas aktualizacji: przechowuje rejestr sygnałów, limity i plany pozycji. Nie przesyłaj `apex.config.json`, tokenu ani klucza parowania do publicznego GitHub.
 
-Opcje: `-Wyjscie C:\APEX` (inny folder docelowy), `-PominTesty` (niezalecane).
+## Budowanie ze źródeł — tylko dla wykonawcy
 
-## Krok 2 – pierwsze uruchomienie APEX Desktop
+Gotowy pakiet nie wymaga tych czynności. Do budowy potrzebne są Git, .NET 8 SDK, Node.js 22+ i dostęp do NuGet/npm:
 
-1. Uruchom `dist\Uruchom APEX.cmd` (albo `APEX-Desktop\ApexDesktop.exe`).
-2. Windows SmartScreen może pokazać ostrzeżenie „Nieznany wydawca” – plik nie jest podpisany certyfikatem. Kliknij **Więcej informacji → Uruchom mimo to** tylko wtedy, gdy budowałeś pakiet sam z tego repozytorium.
-3. Otworzy się okno panelu (Edge w trybie aplikacji) pod adresem `http://127.0.0.1:5077`.
-   - Panel i mosty nasłuchują **wyłącznie na 127.0.0.1** – nie są dostępne z sieci, więc zapora Windows nie powinna pytać o zgodę.
-4. Dane aplikacji: `%LOCALAPPDATA%\APEX Trading AI\` (konfiguracja `apex.config.json`, stan kont, dziennik transakcji, logi).
-5. Druga kopia APEX Desktop na tym samym katalogu danych nie uruchomi się (ochrona przed podwójnym zarządzaniem kontem).
+```powershell
+winget install Microsoft.DotNet.SDK.8
+winget install OpenJS.NodeJS.LTS
+powershell -ExecutionPolicy Bypass -File tools\windows\Zbuduj-APEX.ps1 -Wyjscie "C:\APEX-build\wersja-1"
+```
 
-## Krok 3 – podłączenie platformy
+Skrypt buduje pełne `APEX.Trading.Demo.sln`, uruchamia testy bota i panelu, publikuje samodzielny EXE i oba cBoty, sprawdza manifest oraz tworzy ZIP. Nie pozwala pominąć testów ani nadpisać niepustego katalogu. Przy ponownej budowie wybierz nowy folder. MT5 nie jest kompilowany i nie blokuje pakietu cTrader. Archiwalne testy AI Lab uruchamia się oddzielnie, nie dołączając modułu do aplikacji.
 
-Instrukcja: [`PODLACZENIE_PLATFORM.md`](PODLACZENIE_PLATFORM.md). W skrócie dla cTrader:
+GitHub → Actions → **APEX Windows DEMO** → Run workflow na właściwej gałęzi automatyzuje budowę na `windows-2022`, w tym Windows PowerShell 5.1 i test uruchomienia prawdziwego EXE. Zielony workflow nie dowodzi połączenia z brokerem.
 
-1. Dwuklik na `dist\cTrader\ApexBridge.algo` → cTrader zainstaluje cBota „ApexBridge”.
-2. W panelu APEX: **Połączenia platform** → skopiuj **Klucz parowania**.
-3. W cTrader (konto DEMO): dodaj instancję ApexBridge na dowolnym wykresie, wklej klucz, **Start**.
-4. Konto pojawi się w APEX w ciągu kilku sekund.
+## Aktualizacja i problemy
 
-## Krok 4 – procedura DEMO
-
-Postępuj według [`PROCEDURA_DEMO_PEPPERSTONE.md`](PROCEDURA_DEMO_PEPPERSTONE.md): test wykonania, weryfikacja zabezpieczeń, obserwacja.
-
-## Autostart (opcjonalnie)
-
-Aby APEX Desktop uruchamiał się z Windows: `Win+R` → `shell:startup` → wklej skrót do `Uruchom APEX.cmd`.
-cTrader musi być uruchomiony i zalogowany, a instancja ApexBridge uruchomiona. Po każdym restarcie komputera sprawdź w cTrader (Automate → cBots), czy instancja działa. Jeśli nie, uruchom ją przyciskiem Start. Most sam łączy się ponownie co 5 s, gdy APEX Desktop jest niedostępny.
-
-## Aktualizacja
-
-1. Zamknij APEX Desktop. Bot nie musi zamykać pozycji, bo SL i TP są u brokera.
-2. Pobierz nową wersję źródeł i ponownie uruchom `Zbuduj-APEX.ps1`.
-3. Uruchom APEX Desktop. Stan (rejestr sygnałów, plany pozycji, limity dzienne) jest wczytywany z dysku, a pozycje są uzgadniane z brokerem.
-4. W cTrader zainstaluj nowy `ApexBridge.algo` (dwuklik) i zrestartuj instancję.
-
-## Odinstalowanie
-
-Usuń folder `dist\` oraz (opcjonalnie) `%LOCALAPPDATA%\APEX Trading AI\` – to usuwa także dziennik transakcji i konfigurację. W cTrader usuń cBoty ApexBridge/ApexTradingAI.
-
-## Rozwiązywanie problemów
-
-| Objaw | Przyczyna / rozwiązanie |
-|---|---|
-| „APEX Desktop już działa” | Druga kopia jest uruchomiona (sprawdź zasobnik / Menedżer zadań). |
-| Port 5077 zajęty | Zmień `HttpPort` w `apex.config.json` (i adres w moście cTrader). |
-| Most cTrader: „nieprawidłowy klucz parowania” | Skopiuj klucz ponownie z panelu (przycisk Kopiuj). |
-| Most cTrader: brak połączenia | APEX Desktop musi działać **na tym samym komputerze**; most nie działa w chmurze cTrader (Cloud). |
-| „Brak informacji o koncie”, „Handel zablokowany” | Konto LIVE – zablokowane domyślnie (patrz [`KONFIGURACJA.md`](KONFIGURACJA.md)). |
-| Ostrzeżenie o kalendarzu wiadomości | Brak dostępu do `nfs.faireconomy.media` – filtr wiadomości nieaktywny, działają filtry spreadu i zmienności. |
+- Aktualizuj ręcznie do **nowego folderu**, po zatrzymaniu handlu i sprawdzeniu pozycji. Dane konta zostają w LocalAppData. Zainstaluj nowy most i uruchom jedną instancję.
+- Brak panelu: sprawdź proces APEX i port 5077; zajęty port wymaga świadomej zmiany `HttpPort` przy zamkniętej aplikacji i zgodnej zmiany adresu mostu.
+- Druga instancja APEX na tym samym katalogu danych jest blokowana.
+- Brak połączenia: APEX i cTrader muszą być na **tym samym Windows**. cTrader Cloud ani sam VPS nie wystarczą.
+- Brak sygnałów może być poprawnym zachowaniem strategii; nie luzuj limitów, aby wymusić transakcję. Do kontrolowanego sprawdzenia służy zatwierdzany test wykonania.
+- Błąd kalendarza, prowizji albo specyfikacji: sprawdź diagnostykę i nie wyłączaj zabezpieczeń w ciemno.

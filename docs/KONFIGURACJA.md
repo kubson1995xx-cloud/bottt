@@ -1,66 +1,36 @@
-# Konfiguracja APEX Desktop
+# Konfiguracja APEX Trading AI DEMO
 
-Większość ustawień zmienia się w panelu. Plik `%LOCALAPPDATA%\APEX Trading AI\apex.config.json` zawiera także ustawienia, których **celowo nie da się zmienić z panelu** (np. globalny wyłącznik LIVE).
-Edytuj plik **tylko przy zamkniętym APEX Desktop**. Uszkodzony plik jest odkładany jako kopia (`.uszkodzony-…`), a aplikacja startuje z bezpiecznymi wartościami domyślnymi (LIVE wyłączone).
+Plik danych: `%LOCALAPPDATA%\APEX Trading AI\apex.config.json`. Edytuj wyłącznie przy zatrzymanym APEX i po zrobieniu kopii danych. Zwykle wystarcza polski panel. Nie publikuj pliku: zawiera token lokalnego API i klucz parowania. Nigdy nie wpisuj do niego hasła cTrader.
 
-## Najważniejsze pola
+## Domyślne limity
 
-| Pole | Domyślnie | Opis |
-|---|---|---|
-| `HttpPort` | 5077 | Port panelu i mostu WebSocket (cTrader). |
-| `BridgeTcpPort` | 5078 | Port mostu TCP (MetaTrader 5). |
-| `PairingKey` | losowy | Klucz parowania mostów (zmiana: panel → Nowy klucz parowania). |
-| `ApiToken` | losowy (≥ 32 znaki) | Token panelu. Nie udostępniaj go. |
-| `Label` | `APEX` | Etykieta pozycji bota – musi zgadzać się z ustawieniem mostów. |
-| `LiveTradingFeature` | **false** | Globalny wyłącznik handlu LIVE (patrz niżej). |
-| `AllowedBrokers` | [] | Opcjonalna lista dozwolonych brokerów (fragment nazwy), np. `["Pepperstone"]`. |
-| `Risk` | 0,5 / 1,5 / 5 / 3 / 5 | Domyślne limity ryzyka dla nowych kont (zmiana per konto w panelu). |
-| `MinScore` | 50 | Minimalna ocena okazji (0–100, ranking – nie prawdopodobieństwo). |
-| `News` | High, 30/30 min | Filtr wiadomości: `Enabled`, `MinImpact` (Low/Medium/High), `MinutesBefore`, `MinutesAfter`, `RequireCalendar`. |
-| `NewsUrl` | kalendarz ForexFactory (JSON) | Źródło kalendarza makro. |
-| `Universe` | auto | `Mode` (`auto`/`manual`), `Manual`, `Blacklist`, `MaxTotal`, `MaxPerClass`. |
-| `ProfilePath` | null | Ścieżka do własnego profilu strategii (null = profil wbudowany z badań). |
-| `Mt5DefaultCommission` | null | Domyślna prowizja dla kont MT5, np. `{"Kind":"UsdPerLot","Value":3.5}`. |
-| `Accounts` | {} | Ustawienia per konto (klucz: `Platforma:Broker:Numer`). |
-| `OpenBrowserOnStart` | true | Otwieranie panelu przy starcie. |
+- Ryzyko na transakcję: **0,5%** equity.
+- Dzienna strata: **1,5%**.
+- Maksymalny drawdown: **5%**.
+- Dźwignia efektywna: **x5** (ekspozycja nominalna/equity, nie deklarowana dźwignia rachunku).
+- Maksymalnie **3 pozycje** bota.
+- Każde nowe zlecenie wymaga SL i TP. Brak martingale, gridu i uśredniania straty. Minimum wolumenu większe od dozwolonego budżetu oznacza pominięcie transakcji, także testowej.
 
-Ustawienia konta (`Accounts["cTrader:Pepperstone:5123456"]`): `Risk`, `MinScore`, `Commission`, `Universe`, `AutoStart` (DEMO), `AllowLive`, `LiveConfirmation`.
+Luki cenowe i poślizgi mogą spowodować stratę większą niż planowane ryzyko mimo SL. Limity są kontrolami programu, nie gwarancją ceny wykonania. Ryzyko i wyniki odnoszą się do konta zgodnie z danymi brokera; nie mieszaj ręcznej aktywności z testem bez analizy wpływu na equity.
 
-## Instrumenty
+## Ustawienia techniczne
 
-- Wybór automatyczny bierze płynne instrumenty z listy preferowanej. Rozpoznaje sufiksy brokerów (`.cash`, `m`, `.r`, `-ECN`…) i stosuje limity na klasę.
-- Klasyfikacja jest heurystyczna i działa według zasady **„w razie wątpliwości – nie handluj”**: instrument nierozpoznany nie jest handlowany, a każda oznaka kryptowaluty (ticker, nazwa, opis) wyklucza instrument. Taki filtr czasem odrzuci zwykłą akcję (np. w opisie słowo zawierające „defi”) – to świadomy wybór.
-- Instrument jest handlowany tylko wtedy, gdy ma poprawną specyfikację: wartość pipsa, krok i minimum wolumenu oraz **znaną prowizję**.
+- `HttpPort`: `5077` — lokalny panel i WebSocket; `BridgeTcpPort`: `5078` — opcjonalny MT5.
+- `PairingKey`, `ApiToken`: generowane lokalnie. Zmiana parowania przez panel nie jest zmianą hasła cTrader.
+- `Label`: `APEX`, musi być zgodne z mostem; nie zmieniaj przy otwartych pozycjach.
+- `AllowedBrokers`: opcjonalna lista nazw brokerów. Sama nazwa nie uwierzytelnia zewnętrznej platformy — lokalny komputer musi być zaufany.
+- `Risk`: domyślne limity nowych kont; ustawienia per konto są w `Accounts`.
+- `MinScore`: `50`. To próg rankingu, **nie procent szans na zysk**.
+- `News`: kalendarz makro, okno przed/po publikacji i `RequireCalendar`. Brak wymaganego aktualnego kalendarza blokuje wejście. Jeżeli `RequireCalendar=false`, program może działać bez kalendarza, ale nie chroni wtedy filtrem przed publikacją; nie zmieniaj tego ustawienia bez świadomości skutków.
+- `Universe`: tryb automatyczny/ręczny, limity symboli i wykluczenia; krypto oraz nierozpoznane instrumenty są odrzucane także w trybie ręcznym.
+- `ProfilePath`: własny profil tylko po walidacji. Wbudowany profil i reguły wejścia pozostają bazą; nie zmieniaj statusów, aby ominąć odrzucenie strategii.
+- `Commission` / `Mt5DefaultCommission`: jawna prowizja jednej strony transakcji, gdy platforma nie udostępnia poprawnej informacji. Dopuszczalne typy zgodnie z modelem: `None`, `UsdPerLot`, `UsdPerMillionUsdVolume`, `PercentOfVolume`, `QuoteCurrencyPerLot`. Nie ustawiaj `None` na koncie prowizyjnym, aby odblokować handel.
+- `OpenBrowserOnStart`: otwieranie panelu. Argumenty: `ApexDesktop.exe --data <katalog> --port <port> --no-browser`; `APEX_DATA_DIR` zmienia domyślny katalog danych.
 
-## Prowizja
+## Tylko DEMO i restart
 
-- cTrader przekazuje prowizję automatycznie.
-- MetaTrader 5 – ustaw w panelu (Połączenia platform → Prowizja konta MetaTrader 5) albo w pliku: `Mt5DefaultCommission` lub `Accounts[...].Commission`.
-- cTrader z prowizją „nieznaną” (rzadkie): `Accounts["cTrader:Broker:Numer"].Commission = {"Kind":"UsdPerLot","Value":3.5}`.
-  Dostępne typy: `None`, `UsdPerLot`, `UsdPerMillionUsdVolume`, `PercentOfVolume`, `QuoteCurrencyPerLot`. Wartość dotyczy **jednej strony** transakcji.
+Ta wersja nie obsługuje handlu na REAL. Dawne pola `LiveTradingFeature`, `AllowLive`, `LiveConfirmation` ani fraza z historycznej dokumentacji nie stanowią zgody na odblokowanie. Panel nie udostępnia odblokowania konta rzeczywistego.
 
-## Profil strategii
+Start aplikacji/mostu i odtworzenie stanu nie powinny samodzielnie uruchamiać nowych wejść. Po restarcie sprawdź uzgodnienie pozycji, logi i limity, a następnie świadomie naciśnij START. Awaryjnej blokady nie resetuje zwykły restart. Nie usuwaj katalogu stanu w celu skasowania limitu lub ponowienia sygnału.
 
-Profil (`config/profile_default.json`, wbudowany) określa, które pary strategia × klasa są:
-- `Validated` – handel na DEMO i LIVE (obecnie **brak** takich par),
-- `Experimental` – handel **wyłącznie na DEMO**,
-- `Rejected` – brak handlu, nie da się włączyć z panelu.
-
-Własny profil (`ProfilePath`) jest walidowany przy starcie. Zmiana statusu na `Validated` powinna wynikać z nowych, uczciwych testów (patrz [`RAPORT_BADAN.md`](../reports/RAPORT_BADAN.md)), a nie z chęci „włączenia” strategii.
-
-## Konto LIVE
-
-> Ta sekcja opisuje procedurę, **nie zalecenie**. Obecnie żadna strategia nie ma potwierdzonej przewagi. Przy wbudowanym profilu bot na koncie LIVE nie otworzy żadnej pozycji.
-
-Handel na koncie rzeczywistym wymaga **wszystkich** poniższych kroków, wykonanych świadomie przez użytkownika:
-1. Zamknij APEX Desktop i ustaw w `apex.config.json`: `"LiveTradingFeature": true`.
-2. W moście cTrader ustaw parametr **Zezwól na konto LIVE = Tak** (w MT5: `InpAllowLive = true`).
-3. Uruchom APEX, w panelu: **Ryzyko i bezpieczeństwo → Odblokuj konto LIVE…** i wpisz dokładnie frazę `LIVE <numer konta> AKCEPTUJE RYZYKO`.
-4. Konto LIVE **nigdy nie startuje automatycznie** – trzeba ręcznie nacisnąć START.
-
-Dodatkowo na koncie LIVE strategie eksperymentalne są wyłączone (podwójnie: profil i silnik), a test wykonania jest niedostępny. Wycofanie zgody: **Zablokuj konto LIVE** albo `LiveTradingFeature: false`.
-
-## Zmienne środowiskowe i argumenty
-
-- `APEX_DATA_DIR` – inny katalog danych.
-- `ApexDesktop.exe --data <katalog> --port <port> --no-browser`.
+AI Lab nie jest częścią konfiguracji produktu: nie uruchamia się, nie uczy strategii i nie aktualizuje plików. Aktualizacje aplikacji wykonuje się ręcznie do nowego folderu.

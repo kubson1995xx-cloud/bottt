@@ -10,11 +10,12 @@ const S = {
   lastOk: 0,
   dirty: {},
   connTab: 'ctrader',
+  polling: false,
 };
 
 const VIEW_TITLES = {
   dashboard: 'Pulpit',
-  decisions: 'AI Decision Center',
+  decisions: 'Centrum decyzji',
   positions: 'Pozycje i wyniki',
   strategies: 'Strategie',
   instruments: 'Instrumenty',
@@ -111,15 +112,30 @@ async function api(path, body) {
   if (body !== undefined) { opts.method = 'POST'; opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const r = await fetch(path, opts);
   if (r.status === 401) throw new Error('Brak autoryzacji – odśwież stronę.');
-  return r.json();
+  let data;
+  try { data = await r.json(); }
+  catch (e) { throw new Error('Nieprawidłowa odpowiedź APEX (HTTP ' + r.status + ').'); }
+  if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + (data.message || 'Polecenie nie zostało potwierdzone. Sprawdź stan konta przed ponowieniem.'));
+  return data;
+}
+
+function canOpenTrades(acc) {
+  return !!(acc && acc.connected && acc.engine && acc.engine.guardAllowed && acc.engine.isLive === false
+    && S.lastOk > 0 && Date.now() - S.lastOk < 6000);
 }
 
 async function command(action, args, confirm) {
   const acc = currentAccount();
   if (!acc) { toast('Brak wybranego konta.'); return; }
+  const opens = action === 'start' || action === 'executionTest';
+  if (opens && !canOpenTrades(acc)) { toast('Handel wymaga połączonego, zweryfikowanego konta DEMO i aktualnego panelu.'); return; }
   if (confirm) {
     const ok = await confirmModal(confirm.title, confirm.body, confirm.button, confirm.danger);
     if (!ok) return;
+  }
+  // Podczas otwartego potwierdzenia mogło zmienić się konto, połączenie lub typ rachunku.
+  if (opens && (currentAccount()?.key !== acc.key || !canOpenTrades(currentAccount()))) {
+    toast('Stan konta zmienił się podczas potwierdzania. Sprawdź konto i spróbuj ponownie.'); return;
   }
   try {
     const res = await api('/api/accounts/' + encodeURIComponent(acc.key) + '/command', { action, args: args || {} });
@@ -157,6 +173,8 @@ applyTheme(lsGet('apex-theme') || (window.matchMedia && window.matchMedia('(pref
 /* ------------------------------------------------------------------ odpytywanie */
 
 async function poll() {
+  if (S.polling) return;
+  S.polling = true;
   try {
     S.data = await api('/api/status');
     S.host = S.data.host;
@@ -165,9 +183,11 @@ async function poll() {
     if (!S.account || !accs.some((a) => a.key === S.account)) S.account = lsGet('apex-account') && accs.some((a) => a.key === lsGet('apex-account')) ? lsGet('apex-account') : (accs[0] && accs[0].key) || null;
     render(false);
   } catch (e) {
+    S.lastOk = 0;
+    render(true);
     const hs = document.getElementById('hostState');
     hs.replaceChildren(el('span', { class: 'badge critical' }, el('span', { class: 'dot' }), 'brak połączenia z APEX'));
-  }
+  } finally { S.polling = false; }
 }
 setInterval(poll, 1500);
 poll();
@@ -178,7 +198,7 @@ function render(force) {
   if (!S.data) return;
   renderChrome();
   const view = document.getElementById('view-' + S.view);
-  // AI Decision Center zarządza własnym widokiem (animacje) i własnym odpytywaniem – tylko odczyt.
+  // Centrum decyzji zarządza własnym widokiem (animacje) i własnym odpytywaniem – tylko odczyt.
   if (S.view === 'decisions' && window.ApexDC) {
     if (!view.firstChild) view.appendChild(window.ApexDC.mount());
     window.ApexDC.setAccount(currentAccount());
@@ -204,6 +224,8 @@ function modeBadge(st, acc) {
 }
 
 function envBadge(acc) {
+  if (!acc || !acc.engine || typeof acc.engine.isLive !== 'boolean')
+    return el('span', { class: 'badge neutral' }, 'KONTO NIEZWERYFIKOWANE');
   const live = acc && acc.engine && acc.engine.isLive;
   return live ? el('span', { class: 'badge live', title: 'Konto rzeczywiste' }, el('span', { class: 'dot' }), 'LIVE')
               : el('span', { class: 'badge demo', title: 'Konto demonstracyjne' }, el('span', { class: 'dot' }), 'DEMO');
@@ -217,7 +239,7 @@ function renderChrome() {
     const b = el('button', { class: 'account-tab', 'aria-pressed': String(a.key === S.account), title: a.key },
       el('span', { class: 'badge ' + (a.connected ? 'good' : 'critical'), style: 'padding:2px 6px' }, el('span', { class: 'dot' })),
       `${a.platform} · ${e.accountNumber || a.key.split(':').pop()}`,
-      e.isLive ? el('span', { class: 'badge live', style: 'padding:1px 7px' }, 'LIVE') : el('span', { class: 'badge demo', style: 'padding:1px 7px' }, 'DEMO'));
+      envBadge(a));
     b.addEventListener('click', () => { S.account = a.key; lsSet('apex-account', a.key); S.dirty = {}; render(true); });
     return b;
   }));
@@ -280,7 +302,7 @@ function viewDashboard() {
       el('span', { class: 'badge ' + (e.dailyPnl >= 0 ? 'good' : 'critical') }, el('span', { class: 'dot' }), 'Dziś ' + signed(e.dailyPnl) + ' ' + ccy + ' (' + signed(e.dailyPnlPct) + '%)'),
       el('span', { class: 'muted', text: 'Saldo ' + money(e.balance, ccy) })),
     el('div', { class: 'controls' },
-      el('button', { class: 'btn primary', onclick: () => command('start'), disabled: e.mode === 'Running' || !e.guardAllowed }, icon('play'), 'START'),
+      el('button', { class: 'btn primary', onclick: () => command('start', null, { title: 'Uruchomić automatyczny handel DEMO?', body: 'APEX będzie samodzielnie otwierał i zamykał transakcje DEMO na koncie ' + e.accountNumber + '. Najpierw zakończ test wykonania i sprawdź SL/TP oraz limity ryzyka. Po restarcie ponownie wymagany jest START.', button: 'Uruchom handel DEMO' }), disabled: e.mode === 'Running' || !canOpenTrades(acc) }, icon('play'), 'START'),
       el('button', { class: 'btn', onclick: () => command('pause'), disabled: e.mode !== 'Running' }, icon('pause'), 'Wstrzymaj nowe'),
       el('button', { class: 'btn', onclick: () => command('stop', null, { title: 'Zatrzymać bota?', body: 'Bot przestanie otwierać i zarządzać pozycjami. Otwarte pozycje pozostaną chronione przez SL/TP u brokera.', button: 'Zatrzymaj' }) }, icon('stop'), 'STOP'),
       el('button', { class: 'btn danger', onclick: () => command('closeAll', null, { title: 'Zamknąć pozycje bota?', body: 'Zostaną zamknięte WSZYSTKIE pozycje otwarte przez APEX na tym koncie. Pozycje ręczne i innych botów nie są dotykane.', button: 'Zamknij pozycje bota', danger: true }) }, icon('x'), 'Zamknij pozycje bota'),
@@ -552,25 +574,15 @@ function viewRisk() {
       { title: 'Zapisać nowe limity ryzyka?', body: 'Nowe limity obowiązują natychmiast dla tego konta. Wartości spoza bezpiecznych zakresów zostaną odrzucone.', button: 'Zapisz limity' });
   } }, icon('check'), 'Zapisz limity');
   wrap.appendChild(card('Limity ryzyka konta', null, form, el('div', { style: 'margin-top:14px' }, save),
-    el('p', { class: 'note', text: 'Bot nigdy nie stosuje martingale, uśredniania strat ani gridów. Każda pozycja ma obowiązkowy Stop Loss, a wolumen jest zaokrąglany wyłącznie w dół.' })));
+    el('p', { class: 'note', text: 'Bot nigdy nie stosuje martingale, uśredniania strat ani gridów. Każda nowa pozycja wymaga Stop Loss i Take Profit, a wolumen jest zaokrąglany wyłącznie w dół.' })));
 
   const live = e.isLive;
   const liveBox = el('div', { class: 'stack' });
   if (!live) {
     liveBox.appendChild(el('div', { class: 'callout good' }, icon('shield'), el('div', null, el('strong', { text: 'Konto DEMO. ' }), 'Handel odbywa się wyłącznie na środkach demonstracyjnych.')));
-  } else if (!acc.liveFeature) {
-    liveBox.appendChild(el('div', { class: 'callout critical' }, icon('shield'), el('div', null, el('strong', { text: 'Konto LIVE zablokowane. ' }), 'Handel na kontach rzeczywistych jest wyłączony globalnie. Odblokowanie wymaga świadomej edycji pliku apex.config.json ("LiveTradingFeature": true) przy zamkniętej aplikacji, a następnie potwierdzenia frazą w tym miejscu.')));
   } else {
-    const input = el('input', { type: 'text', 'aria-label': 'Fraza potwierdzenia', placeholder: acc.requiredLivePhrase || '', style: 'width:100%;margin-top:8px;padding:9px 11px;border-radius:10px;border:1px solid var(--border-strong);background:var(--surface-2)' });
-    liveBox.appendChild(el('div', { class: 'callout critical' }, icon('alert'), el('div', null, el('strong', { text: 'Konto LIVE. ' }), e.guardAllowed ? 'Konto zostało świadomie odblokowane. Handel odbywa się na PRAWDZIWYCH środkach.' : 'Handel zablokowany. Aby odblokować, wpisz dokładnie frazę potwierdzenia.')));
-    if (!e.guardAllowed) {
-      liveBox.appendChild(el('button', { class: 'btn danger', onclick: async () => {
-        const phrase = await confirmModal('Odblokować handel LIVE?', 'Wpisz dokładnie frazę: ' + (acc.requiredLivePhrase || ''), 'Odblokuj LIVE', true, input);
-        if (phrase) command('unlockLive', { phrase });
-      } }, icon('shield'), 'Odblokuj konto LIVE…'));
-    } else {
-      liveBox.appendChild(el('button', { class: 'btn', onclick: () => command('lockLive') }, icon('shield'), 'Zablokuj konto LIVE'));
-    }
+    liveBox.appendChild(el('div', { class: 'callout critical' }, icon('shield'), el('div', null,
+      el('strong', { text: 'Konto REAL zablokowane. ' }), 'Ta wersja działa wyłącznie na DEMO. Nie udostępnia odblokowania handlu rzeczywistego; zmiana pliku konfiguracji nie odblokuje konta REAL.')));
   }
   wrap.appendChild(card('Tryb konta i ochrona LIVE', null, liveBox));
   return wrap;
@@ -592,10 +604,10 @@ function viewConnections() {
   let steps;
   if (S.connTab === 'ctrader') {
     steps = el('ol', { class: 'steps' },
-      el('li', { text: 'W cTrader otwórz zakładkę Algo i zaimportuj plik ApexBridge.algo (folder instalacji APEX → platformy → cTrader).' }),
+      el('li', { text: 'Zaloguj się na Pepperstone cTrader DEMO. Z rozpakowanego pakietu APEX otwórz cTrader → ApexBridge.algo (dwuklik), a następnie zakładkę Algo w cTrader Desktop.' }),
       el('li', { text: 'Dodaj instancję cBota „ApexBridge” na dowolnym wykresie (np. EURUSD H1) na koncie DEMO.' }),
       el('li', { text: 'W parametrach wklej Klucz parowania (poniżej). Adres serwera pozostaw domyślny.' }),
-      el('li', { text: 'Uruchom cBota (Start). Konto pojawi się w APEX w ciągu kilku sekund.' }));
+      el('li', { text: 'Uruchom lokalnie cBota (Start), nie w cTrader Cloud. Konto pojawi się w APEX; sprawdź numer i oznaczenie DEMO. Bot pozostaje zatrzymany do Twojej decyzji. Nie uruchamiaj równocześnie ApexTradingAI na tym koncie.' }));
   } else if (S.connTab === 'mt5') {
     steps = el('ol', { class: 'steps' },
       el('li', { text: 'Skopiuj plik ApexBridge.mq5 do folderu MQL5\\Experts terminala (Plik → Otwórz folder danych) i skompiluj go w MetaEditorze (F7).' }),
@@ -655,7 +667,7 @@ function viewDiagnostics() {
     const isLive = acc.engine.isLive;
     const test = el('div', { class: 'stack', style: 'gap:10px' },
       el('p', { class: 'muted', style: 'margin:0', text: 'Test otwiera pozycję o minimalnym wolumenie z SL i TP, po ok. 20 s przesuwa SL, a następnie zamyka pozycję. Każdy krok jest weryfikowany na podstawie faktycznego stanu u brokera.' }),
-      el('div', { class: 'controls' }, el('button', { class: 'btn primary', disabled: isLive, onclick: () => command('executionTest', { symbol: acc.testSymbol }, { title: 'Uruchomić test wykonania na DEMO?', body: 'Zostanie otwarta pozycja o minimalnym wolumenie na ' + (acc.testSymbol || 'płynnym instrumencie FX') + ' i zamknięta po ok. minucie.', button: 'Uruchom test' }) }, icon('test'), 'Test wykonania (DEMO)'),
+      el('div', { class: 'controls' }, el('button', { class: 'btn primary', disabled: !canOpenTrades(acc), onclick: () => command('executionTest', { symbol: acc.testSymbol }, { title: 'Uruchomić test wykonania na DEMO?', body: 'Zatwierdzasz otwarcie rzeczywistej transakcji DEMO na koncie ' + acc.engine.accountNumber + ', na ' + (acc.testSymbol || 'instrumencie spełniającym limity ryzyka') + ', z SL i TP i próbą zamknięcia po ok. minucie. Przez cały test obserwuj pozycję w cTrader.', button: 'Zatwierdzam transakcję DEMO' }) }, icon('test'), 'Test wykonania (DEMO)'),
         isLive ? el('span', { class: 'muted', text: 'Niedostępny na koncie LIVE.' }) : null),
       feed(acc.executionTest, false));
     wrap.appendChild(card('Test otwarcia, zarządzania i zamknięcia pozycji', 'tylko DEMO', test));

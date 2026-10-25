@@ -1,0 +1,54 @@
+name: APEX Windows DEMO
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/beautiful-mccarthy-9cibo1"]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'tools/**'
+      - 'docs/**'
+      - 'APEX.Trading.Demo.sln'
+      - 'package*.json'
+      - '.github/workflows/windows-demo.yml'
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Build and test complete DEMO package (PowerShell 5.1)
+        shell: powershell
+        run: ./tools/windows/Zbuduj-APEX.ps1 -Wyjscie "$env:RUNNER_TEMP/APEX Windows DEMO"
+      - name: Run actual Windows executable (no broker, no orders)
+        shell: powershell
+        run: ./tools/windows/Smoke-Windows.ps1 -Pakiet "$env:RUNNER_TEMP/APEX Windows DEMO"
+      - name: Test archive separately (not part of product)
+        shell: powershell
+        run: dotnet test tests/Apex.AiLab.Tests/Apex.AiLab.Tests.csproj -c Release --logger "trx;LogFileName=archive.trx" --results-directory "$env:RUNNER_TEMP/archive-tests"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: APEX Windows DEMO
+          path: |
+            ${{ runner.temp }}/APEX Windows DEMO.zip
+            ${{ runner.temp }}/APEX Windows DEMO.zip.sha256
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: APEX-Test-Evidence
+          path: |
+            ${{ runner.temp }}/APEX Windows DEMO/Weryfikacja/*.trx
+            ${{ runner.temp }}/archive-tests/*.trx
+          if-no-files-found: warn
+          retention-days: 30

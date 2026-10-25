@@ -7,3 +7,5 @@ obj/
 .vs/
 TestResults/
 /dist/
+node_modules/
+.superpowers/

@@ -1,58 +1,51 @@
-# Procedura uruchomienia na koncie DEMO (Pepperstone, cTrader)
+# Procedura odbioru: Pepperstone cTrader DEMO
 
-Cel: sprawdzić na prawdziwym serwerze brokera (środki demonstracyjne) ścieżkę zleceń, zabezpieczenia i zachowanie bota, zanim w ogóle rozważysz konto rzeczywiste.
+**To test z prawdziwym serwerem brokera. Symulator i zielone testy .NET go nie zastępują. Tylko środki demonstracyjne.**
 
-> W tej procedurze **nie ma żadnego kroku na koncie LIVE**. APEX domyślnie blokuje LIVE na trzech poziomach: most, strażnik konta i globalny wyłącznik w pliku konfiguracji.
+## 1. Połączenie bez handlu
 
-## 0. Konto demo
+1. Uruchom gotowy pakiet Windows i połącz lokalny `ApexBridge` zgodnie z [PODLACZENIE_PLATFORM.md](PODLACZENIE_PLATFORM.md).
+2. Sprawdź w **obu programach** ten sam numer konta Pepperstone DEMO, walutę i saldo. Nie przesyłaj hasła, tokenów ani pliku konfiguracyjnego.
+3. Poczekaj na świeże notowania, instrumenty i wymagane świece. Sprawdź pozycje oraz dziennik. Oczekiwany stan: **ZATRZYMANY**; nie naciskaj jeszcze START.
+4. Nie uruchamiaj równolegle wersji natywnej, starego APEX ani drugiej instancji mostu. Zapewnij połączenie internetowe i wyłącz usypianie Windows na czas testu.
+5. Zanotuj commit z `apex-build.json`, czas UTC i numer konta DEMO. Na VPS ten etap nie jest potwierdzony samym faktem zbudowania ZIP.
 
-1. Na stronie Pepperstone otwórz konto **demo cTrader** (np. Razor – prowizja za lot, niski spread; Standard – koszt w spreadzie). Zanotuj numer konta i walutę.
-2. Zaloguj się w cTrader Desktop na to konto. W nagłówku cTrader musi być oznaczenie **Demo**.
+## 2. Osobna zgoda na kontrolowaną transakcję
 
-## 1. Uruchomienie
+Po potwierdzeniu połączenia użytkownik zatwierdza **konkretny test otwarcia i zamknięcia na tym koncie DEMO**. W panelu: **Diagnostyka i dziennik → Test wykonania (DEMO)**. Okno potwierdzenia informuje, że powstanie rzeczywista transakcja DEMO; anulowanie nie powinno wysłać zlecenia.
 
-1. Uruchom APEX Desktop ([`INSTALACJA_WINDOWS.md`](INSTALACJA_WINDOWS.md)).
-2. Podłącz most cTrader ([`PODLACZENIE_PLATFORM.md`](PODLACZENIE_PLATFORM.md)).
-3. W panelu, na **Pulpicie**, sprawdź:
-   - znacznik **„Konto demonstracyjne”** (zielony) i numer konta zgodny z cTrader,
-   - brak czerwonego komunikatu „Handel zablokowany przez strażnika konta”,
-   - tryb: **PRACA** (konto DEMO startuje automatycznie; LIVE nigdy).
-4. **Instrumenty** → lista „Instrumenty u brokera”:
-   - kryptowaluty mają powód „kryptowaluta – trwale wykluczona”,
-   - skanowane są tylko klasy, dla których profil ma strategię (domyślnie indeksy – strategia eksperymentalna DEMO).
-5. **Strategie**: tylko „Kupno spadków / Indeksy” ma status **EKSPERYMENTALNA – TYLKO DEMO**, reszta **ODRZUCONA PRZEZ TESTY**.
+- Test używa minimalnego wolumenu tylko wtedy, gdy przejdzie kontrole konta, danych, kosztów i ryzyka. Może poprawnie odmówić, np. przy zamkniętym rynku lub zbyt małym equity.
+- Obserwuj pozycję w cTrader: zgodny symbol, etykieta `APEX`, minimalny wolumen, **SL i TP widoczne u brokera**.
+- Test następnie próbuje przesunąć SL i zamknąć pozycję. Oczekuj jawnego potwierdzenia kolejnych kroków w panelu.
+- W cTrader → **History** sprawdź identyfikator pozycji, otwarcie i zamknięcie. Zapisz identyfikator i komunikat końcowy; bez nich nie oznaczaj integracji jako zaliczonej.
+- Przy błędzie, utracie połączenia lub niepewnej odpowiedzi **nie klikaj ponownie w ciemno**. Najpierw sprawdź faktyczne pozycje i historię. Jeśli pozycja została, zamknij ją w cTrader lub użyj Emergency Stop, pamiętając, że APEX potrzebuje działającego mostu do wysłania zamknięcia.
 
-## 2. Test wykonania (obowiązkowy)
+## 3. Testy odporności — również tylko DEMO
 
-1. **Diagnostyka i dziennik** → **Test wykonania (DEMO)** → **Uruchom test** → potwierdź.
-2. Bot otworzy pozycję o **minimalnym wolumenie** z SL i TP, po ~20 s przesunie SL, po kolejnych ~20 s zamknie pozycję. Każdy krok jest weryfikowany na podstawie stanu u brokera.
-3. Oczekiwany wynik (ok. 1 min): **„TEST ZALICZONY – otwarcie, zmiana SL i zamknięcie potwierdzone u brokera”**.
-4. W cTrader → History sprawdź pozycję z etykietą `APEX` i komentarzem `APEX|XT|…|v1`.
-5. Jeśli test nie przejdzie: zapisz komunikaty z panelu (Komunikaty mostu, Zdarzenia konta) i log `%LOCALAPPDATA%\APEX Trading AI\logi`. **Nie przechodź dalej.**
+- **Restart APEX:** przy istniejącej własnej pozycji DEMO odtworzenie planu i uzgodnienie bez ponownego zlecenia tego sygnału; nowe wejścia wymagają START.
+- **Rozłączenie mostu:** brak nowych operacji na nieaktualnym połączeniu; po powrocie uzgodnienie z brokerem, bez duplikatów.
+- **Emergency Stop:** blokada dalszych wejść i próba zamknięcia wyłącznie pozycji APEX. Po restarcie blokada nadal obowiązuje; reset prowadzi do ZATRZYMANY, nie PRACA.
+- **Pozycje obce:** istniejąca pozycja ręczna lub innego bota ma pozostać nietknięta. Nie otwieraj zbędnej dodatkowej pozycji wyłącznie dla tego testu bez osobnej zgody.
+- **Drugi most:** drugie połączenie tego samego konta zostaje odrzucone.
+- **Ryzyko:** porównaj wartości domyślne 0,5% / 1,5% / 5% / x5 / 3 pozycje; nie podnoś ich w celu wymuszenia testu.
 
-Na koncie LIVE przycisk testu jest nieaktywny, a silnik dodatkowo odmawia jego wykonania.
+## 4. Automatyczna praca
 
-## 3. Testy zabezpieczeń (zalecane, ~15 min)
+Dopiero po odbiorze bezpieczeństwa i testu wykonania naciśnij **START** i zatwierdź automatyczny handel DEMO. Strategie mają prawo czekać bez zleceń — domyślny profil jest selektywny. Centrum decyzji pokazuje rzeczywiste przyczyny WAIT/BUY/SELL; nie generuje dodatkowych sygnałów AI.
 
-| Test | Jak | Oczekiwany wynik |
-|---|---|---|
-| Pozycja ręczna | Otwórz ręcznie małą pozycję w cTrader (bez etykiety APEX). Użyj **Zamknij pozycje bota**. | Pozycja ręczna pozostaje otwarta i nietknięta. |
-| Rozłączenie | Zatrzymaj instancję ApexBridge w cTrader na 1 min, potem uruchom. | Panel: „Most rozłączony” → po starcie ponowne połączenie i uzgodnienie stanu, bez duplikatów. |
-| Restart APEX | Zamknij i uruchom APEX Desktop. | Stan wczytany z dysku; pozycje bota przejęte; brak ponownego wysłania tych samych sygnałów. |
-| Awaryjny stop | **ZATRZYMAJ AWARYJNIE** → potwierdź. | Zamknięte wyłącznie pozycje bota; tryb AWARYJNE ZATRZYMANIE; START zablokowany do „Resetuj awarię”. |
-| Duplikat mostu | Uruchom drugą instancję ApexBridge na tym samym koncie. | Druga instancja odrzucona: „to konto jest już połączone przez inny most”. |
+W Windows muszą działać APEX, cTrader i most. Po wyłączeniu pozostają tylko SL/TP u brokera; trailing i decyzje strategii nie działają. STOP wstrzymuje także zwykłe zarządzanie, natomiast „Wstrzymaj nowe” pozostawia je aktywne.
 
-## 4. Obserwacja (tygodnie–miesiące)
+## Protokół wyniku
 
-1. Zostaw bota w trybie **PRACA** na DEMO. Komputer i cTrader muszą działać w godzinach sesji.
-2. **AI Decision Center** pokazuje na żywo, co silnik ocenia i dlaczego czeka (WAIT), kupuje (BUY) lub sprzedaje (SELL).
-3. Co tydzień:
-   - **Pozycje i wyniki** → **Pobierz dziennik CSV** (`transakcje.csv`) i porównaj z raportem badań: średni wynik w R, odsetek zysków, czas trwania;
-   - sprawdź poślizgi (cena wejścia względem sygnału) i komunikaty błędów;
-   - sprawdź, czy monitor wyników nie wstrzymał strategii (karta „Strategie wstrzymane przez monitor wyników”).
-4. Kryterium wiarygodności: co najmniej 3–6 miesięcy i kilkadziesiąt transakcji. Przy ~9 transakcjach rocznie w backteście potrwa to długo. To uczciwa konsekwencja braku silnej przewagi (patrz [`RAPORT_BADAN.md`](../reports/RAPORT_BADAN.md)).
+- Pakiet/commit:
+- Konto oznaczone DEMO w cTrader i APEX:
+- Rzeczywiste saldo, waluta i czas notowań zgodne:
+- Zgoda użytkownika na test i czas:
+- Symbol / wolumen / identyfikator pozycji:
+- SL oraz TP widoczne w cTrader:
+- Zmiana SL potwierdzona:
+- Zamknięcie i wpis w History potwierdzone:
+- Restart / duplikaty / Emergency Stop sprawdzone:
+- Błędy i czynności wymagające powtórzenia:
 
-## 5. Konto LIVE – poza tą procedurą
-
-Przejście na konto rzeczywiste to **osobna, świadoma decyzja użytkownika**. Wymaga ręcznej edycji pliku konfiguracji, odblokowania konkretnego konta frazą w panelu, włączenia parametru LIVE w moście i ręcznego naciśnięcia START.
-Szczegóły i ostrzeżenia: [`KONFIGURACJA.md`](KONFIGURACJA.md) → „Konto LIVE”. Strategia eksperymentalna **nigdy** nie działa na LIVE. Przy obecnym profilu bot na LIVE nie otworzyłby żadnej pozycji, bo nie ma strategii o statusie `Validated`.
+Brak potwierdzonej przewagi strategii pozostaje ograniczeniem badawczym, nie przeszkodą w odbiorze technicznym DEMO. **Nie ma etapu przejścia na REAL.**
