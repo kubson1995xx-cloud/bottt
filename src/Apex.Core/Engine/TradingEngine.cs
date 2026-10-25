@@ -79,6 +79,7 @@ namespace Apex.Core.Engine
         private bool _initialized;
         private bool _connected = true;
         private bool _dirty;
+        private bool _persistenceHealthy = true;
         private DateTime _lastSaveUtc;
         private int _consecutiveErrors;
         private int _consecutiveExceptions;
@@ -191,9 +192,9 @@ namespace Apex.Core.Engine
 
         public void SetGuard(AccountGuardResult r)
         {
-            GuardAllowed = r.Allowed;
+            GuardAllowed = r.Allowed && !r.IsLive;
             GuardIsLive = r.IsLive;
-            GuardMessage = r.Reason;
+            GuardMessage = r.IsLive ? "Wersja DEMO – konto LIVE jest trwale zablokowane." : r.Reason;
         }
 
         public void SetUniverse(IEnumerable<UniverseEntry> entries)
@@ -232,6 +233,11 @@ namespace Apex.Core.Engine
             _lastAccount = acc;
             if (!_cfg.IsBacktest) LoadState(acc.Number);
             _state.AccountNumber = acc.Number;
+            if (_state.Mode != EngineMode.EmergencyStopped)
+            {
+                _state.Mode = EngineMode.Stopped;
+                _state.ModeReason = "start/restart – wymagany jawny START użytkownika";
+            }
             _risk = new RiskManager(_cfg.Risk, _state.Risk);
             if (_state.RiskPerTradeOverride.HasValue)
             {
@@ -281,9 +287,13 @@ namespace Apex.Core.Engine
         }
 
         public void SaveState(DateTime utc, bool force = false)
+            => TrySaveState(utc, force);
+
+        private bool TrySaveState(DateTime utc, bool force = false)
         {
-            if (_cfg.IsBacktest || !_dirty) return;
-            if (!force && (utc - _lastSaveUtc).TotalSeconds < 5) return;
+            if (_cfg.IsBacktest) return true;
+            if (!_dirty && !force) return _persistenceHealthy;
+            if (!force && (utc - _lastSaveUtc).TotalSeconds < 5) return _persistenceHealthy;
             try
             {
                 _state.Ledger = _ledger.Entries.ToList();
@@ -296,16 +306,36 @@ namespace Apex.Core.Engine
                 _store.Flush();
                 _dirty = false;
                 _lastSaveUtc = utc;
+                _persistenceHealthy = true;
+                return true;
             }
             catch (Exception ex)
             {
                 AddError("Zapis stanu nieudany: " + ex.Message);
+                _persistenceHealthy = false;
+                _dirty = true;
+                if (_state.Mode != EngineMode.EmergencyStopped)
+                    SetMode(EngineMode.PausedNewEntries, "błąd trwałego zapisu – nowe wejścia zablokowane");
+                return false;
             }
         }
 
         private bool IsOwn(PositionInfo p) => string.Equals(p.Label, _cfg.Label, StringComparison.Ordinal);
 
         private List<PositionInfo> OwnPositions() => _broker.GetPositions().Where(IsOwn).ToList();
+
+        private bool CanOperate(out AccountSnapshot account, bool requireValidEquity = true)
+        {
+            account = _broker.GetAccount();
+            return _broker.IsConnected && GuardAllowed && !GuardIsLive && !account.IsLive && (!requireValidEquity || account.IsValid)
+                && account.Number == _state.AccountNumber;
+        }
+
+        private bool QuoteFresh(Quote q, DateTime utc) => q.IsValid && q.TimeUtc <= utc
+            && (_cfg.IsBacktest || utc - q.TimeUtc <= TimeSpan.FromSeconds(_cfg.MaxQuoteAgeSeconds));
+
+        private static bool HasValidTarget(PositionInfo pos) => pos.TakeProfit is > 0
+            && double.IsFinite(pos.TakeProfit.Value) && (int)pos.Direction * (pos.TakeProfit.Value - pos.EntryPrice) > 0;
 
         /// <summary>
         /// Uzgodnienie stanu z brokerem: przejęcie własnych pozycji bez planu (odtworzenie), usunięcie planów pozycji,
@@ -317,6 +347,7 @@ namespace Apex.Core.Engine
             var ids = new HashSet<long>(own.Select(p => p.Id));
             foreach (var pos in own)
             {
+                CloseOrphanTest(pos, utc);
                 if (_plans.ContainsKey(pos.Id)) continue;
                 var plan = ReconstructPlan(pos, utc);
                 _plans[pos.Id] = plan;
@@ -415,7 +446,17 @@ namespace Apex.Core.Engine
             }
 
             var acc = _broker.GetAccount();
-            if (!acc.IsValid) { AddError("Nieprawidłowe dane konta – pomijam cykl."); return; }
+            if (!acc.IsValid)
+            {
+                AddError("Nieprawidłowe dane konta – nowe wejścia zablokowane.");
+                if (_state.Mode == EngineMode.EmergencyStopped) CloseAllOwn(utc, "awaryjne zatrzymanie przy nieprawidłowym equity");
+                return;
+            }
+            if (acc.IsLive)
+            {
+                SetGuard(new AccountGuardResult { IsLive = true });
+                return;
+            }
             if (_state.AccountNumber != 0 && acc.Number != _state.AccountNumber)
             {
                 GuardAllowed = false;
@@ -432,16 +473,29 @@ namespace Apex.Core.Engine
                 _journal.Event(ev);
                 _dirty = true;
             }
+            // Także szczyt equity i granica dnia bez zdarzeń muszą przetrwać restart.
+            _dirty = true;
             if (_risk.State.MaxDrawdownHit && _state.Mode != EngineMode.EmergencyStopped)
             {
-                if (_cfg.Risk.CloseAllOnMaxDrawdown) CloseAllOwn(utc, "przekroczone maksymalne obsunięcie");
                 SetMode(EngineMode.EmergencyStopped, "przekroczone maksymalne obsunięcie kapitału");
+                TrySaveState(utc, true);
             }
             if (_risk.State.DailyLimitHit && _cfg.Risk.CloseAllOnDailyLimit && _plans.Count > 0)
                 CloseAllOwn(utc, "przekroczony dzienny limit straty");
 
             var own = OwnPositions();
             EnsurePlans(own, utc);
+            if (_state.Mode == EngineMode.EmergencyStopped)
+            {
+                if (_test != null)
+                {
+                    _test.Log.Add("TEST NIEZALICZONY – awaryjne zatrzymanie");
+                    LastExecutionTest = _test.Log.ToList();
+                    _test = null;
+                }
+                foreach (var pos in own)
+                    if (!_pendingCloses.ContainsKey(pos.Id)) RequestClose(pos.Id, "awaryjne zatrzymanie", utc);
+            }
             ProtectPositions(own, utc);
             ResolvePending(own, utc);
             ProcessPendingCloses(utc);
@@ -492,8 +546,15 @@ namespace Apex.Core.Engine
         {
             foreach (var pos in own)
             {
-                if (pos.StopLoss.HasValue) continue;
                 if (_pendingCloses.ContainsKey(pos.Id)) continue;
+                if (!HasValidTarget(pos))
+                {
+                    AddError($"Pozycja #{pos.Id} {pos.Symbol} bez poprawnego TP – zamykam własną pozycję.");
+                    RequestClose(pos.Id, "brak poprawnego TP", utc);
+                    continue;
+                }
+                if (pos.StopLoss is > 0 && double.IsFinite(pos.StopLoss.Value)) continue;
+                if (!CanOperate(out _)) return;
                 var spec = _market.GetSpec(pos.Symbol);
                 var q = _market.GetQuote(pos.Symbol);
                 _plans.TryGetValue(pos.Id, out var plan);
@@ -506,7 +567,8 @@ namespace Apex.Core.Engine
                 }
                 double sl = PositionManagerRules.EmergencyStop(plan, pos, spec, q.Value, atr);
                 var res = _broker.ModifyStopLoss(pos.Id, sl);
-                if (res.Status == OrderStatus.Filled)
+                var protectedPosition = OwnPositions().FirstOrDefault(p => p.Id == pos.Id);
+                if (res.Status == OrderStatus.Filled && protectedPosition?.StopLoss is > 0 && double.IsFinite(protectedPosition.StopLoss.Value))
                 {
                     _log.Warn($"Pozycja #{pos.Id} {pos.Symbol} nie miała SL – ustawiono SL {sl}.");
                     if (plan != null && plan.InitialStop <= 0)
@@ -526,6 +588,7 @@ namespace Apex.Core.Engine
 
         private void RequestClose(long positionId, string reason, DateTime utc)
         {
+            if (!CanOperate(out _, requireValidEquity: false) || !OwnPositions().Any(p => p.Id == positionId)) return;
             _closeReasons[positionId] = reason;
             var res = _broker.ClosePosition(positionId, null);
             if (res.Status == OrderStatus.Filled || res.Error == BrokerErrorKind.EntityNotFound)
@@ -554,6 +617,7 @@ namespace Apex.Core.Engine
 
         public void CloseAllOwn(DateTime utc, string reason)
         {
+            if (!CanOperate(out _, requireValidEquity: false)) return;
             foreach (var pos in OwnPositions())
                 RequestClose(pos.Id, reason, utc);
             _log.Warn($"Zamykanie wszystkich pozycji bota: {reason}.");
@@ -967,6 +1031,8 @@ namespace Apex.Core.Engine
         {
             ranked = null;
             keep = false;
+            if (_ledger.Pending.Count > 0) return "niepewne zlecenie – portfel wymaga uzgodnienia";
+            if (_pendingCloses.Count > 0 || own.Any(p => !HasValidTarget(p))) return "pozycja bota bez poprawnego TP lub oczekujące zamknięcie";
             if (utc > c.DecisionTimeUtc + c.Validity) return "sygnał wygasł";
             if (_ledger.IsKnown(c.SignalId)) return "sygnał już wykorzystany";
             if (own.Any(p => string.Equals(p.Symbol, c.Symbol, StringComparison.OrdinalIgnoreCase)) || _ledger.HasPendingFor(c.Symbol))
@@ -991,13 +1057,13 @@ namespace Apex.Core.Engine
             var qn = _market.GetQuote(c.Symbol);
             if (qn == null || !qn.Value.IsValid) return "brak poprawnych notowań";
             var q = qn.Value;
-            if (!_cfg.IsBacktest && (utc - q.TimeUtc).TotalSeconds > _cfg.MaxQuoteAgeSeconds) return "notowania nieaktualne";
+            if (!QuoteFresh(q, utc)) return "notowania nieaktualne lub z przyszłości";
 
-            if (_news != null && _cfg.News.Enabled)
+            if (_cfg.News.Enabled)
             {
-                if (_news.IsBlackout(spec, utc, _cfg.News, out var evt))
+                if (_cfg.News.RequireCalendar && (_news == null || !_news.IsFresh(utc, _cfg.News))) return "brak aktualnego kalendarza wiadomości";
+                if (_news != null && _news.IsBlackout(spec, utc, _cfg.News, out var evt))
                     return $"okno wiadomości: {evt!.Currency} {evt.Title} {evt.TimeUtc:HH:mm} UTC";
-                if (_cfg.News.RequireCalendar && !_news.IsFresh(utc, _cfg.News)) return "brak aktualnego kalendarza wiadomości";
             }
 
             double entry = q.EntryPrice(c.Direction);
@@ -1015,7 +1081,9 @@ namespace Apex.Core.Engine
 
             double slip = _cfg.Risk.SlippageAllowanceAtr * c.Atr;
             double budget = _risk.RiskBudget(acc);
-            var sizing = PositionSizer.Size(spec, budget, c.StopDistance, entry, spread, slip);
+            // Ryzyko dla dokładnie tej odległości SL, którą wyślemy (0,1 pipsa).
+            double sentStop = spec.PipsToPrice(Math.Round(spec.PriceToPips(c.StopDistance), 1));
+            var sizing = PositionSizer.Size(spec, budget, sentStop, entry, spread, slip);
             if (!sizing.Ok) return "wielkość pozycji: " + sizing.Reason;
             if (sizing.CostToRisk > _cfg.Risk.MaxCostToRisk) return $"koszt transakcji {sizing.CostToRisk:P0} ryzyka > {_cfg.Risk.MaxCostToRisk:P0}";
 
@@ -1069,16 +1137,19 @@ namespace Apex.Core.Engine
 
         private bool Execute(Ranked r, DateTime utc)
         {
+            if (_state.Mode != EngineMode.Running || !_persistenceHealthy || _ledger.Pending.Count > 0 || !CanOperate(out _)) return false;
+            if (_pendingCloses.Count > 0 || OwnPositions().Any(p => !HasValidTarget(p))) return false;
             var c = r.C;
             string sid = c.SignalId;
             if (!_ledger.TryReserve(sid, c.Symbol, utc)) return false;
             _dirty = true;
             // Zapis z wyprzedzeniem: rezerwacja sygnału trafia na dysk PRZED wysłaniem zlecenia,
             // więc awaria tuż po wysłaniu nie pozwoli wysłać tego samego sygnału ponownie po restarcie.
-            SaveState(utc, force: true);
+            if (!TrySaveState(utc, force: true)) return false;
 
             double slPips = Math.Round(r.Spec.PriceToPips(c.StopDistance), 1);
-            double? tpPips = c.TakeProfitDistance.HasValue ? Math.Round(r.Spec.PriceToPips(c.TakeProfitDistance.Value), 1) : (double?)null;
+            // Ochronny TP 3R dla strategii wychodzących regułą/trailingiem; reguły wejścia bez zmian.
+            double tpPips = c.TakeProfitDistance.HasValue ? Math.Round(r.Spec.PriceToPips(c.TakeProfitDistance.Value), 1) : 3 * slPips;
             double? maxSlip = _cfg.MaxEntrySlippageAtr > 0 ? Math.Max(1, Math.Round(r.Spec.PriceToPips(_cfg.MaxEntrySlippageAtr * c.Atr), 1)) : (double?)null;
             var req = new OrderRequest
             {
@@ -1092,7 +1163,8 @@ namespace Apex.Core.Engine
                 SignalId = sid,
                 MaxSlippagePips = maxSlip,
             };
-            if (!(slPips > 0)) { _ledger.MarkConsumed(sid, "nieprawidłowy SL", utc); return false; }
+            if (!(slPips > 0) || !(tpPips > 0) || !double.IsFinite(slPips) || !double.IsFinite(tpPips))
+            { _ledger.MarkConsumed(sid, "nieprawidłowy SL/TP", utc); _dirty = true; return false; }
 
             _pendingInfo[sid] = new PendingInfo { Candidate = c, RiskAmount = r.Sizing.RiskAmount, Score = r.Score.Total, Units = r.Sizing.Units };
             var outcome = _broker.OpenMarket(req);
@@ -1123,7 +1195,7 @@ namespace Apex.Core.Engine
                         _pendingInfo.Remove(sid);
                         LogSignal(c, r.Score, $"WYKONANY #{pos.Id} wol. {pos.VolumeUnits} SL {slPips} pips ryzyko {r.Sizing.RiskAmount:F2}");
                         _journal.TradeOpened(plan, pos.VolumeUnits, $"ocena {r.Score.Total:F1}; {r.Score.Describe()}");
-                        if (!pos.StopLoss.HasValue)
+                        if (!pos.StopLoss.HasValue || !HasValidTarget(pos))
                         {
                             AddError($"#{pos.Id} {c.Symbol} otwarta bez SL – natychmiastowe zabezpieczenie.");
                             ProtectPositions(new List<PositionInfo> { pos }, utc);
@@ -1277,6 +1349,7 @@ namespace Apex.Core.Engine
         public string CmdStart()
         {
             if (!GuardAllowed) return "Nie można uruchomić: " + GuardMessage;
+            if (!_initialized || !_persistenceHealthy || !CanOperate(out _)) return "Nie można uruchomić: brak bezpiecznego konta/połączenia lub trwałego zapisu.";
             if (_state.Mode == EngineMode.EmergencyStopped) return "Najpierw zresetuj awaryjne zatrzymanie.";
             if (_risk.State.MaxDrawdownHit) return "Najpierw zresetuj blokadę maksymalnego obsunięcia.";
             _consecutiveErrors = 0;
@@ -1300,16 +1373,18 @@ namespace Apex.Core.Engine
 
         public string CmdEmergencyStop(DateTime utc, string reason)
         {
-            CloseAllOwn(utc, "AWARYJNE ZATRZYMANIE: " + reason);
             _pool.Clear();
             SetMode(EngineMode.EmergencyStopped, reason);
             SaveState(utc, true);
+            CloseAllOwn(utc, "AWARYJNE ZATRZYMANIE: " + reason);
             return "AWARYJNE ZATRZYMANIE – zamykanie pozycji bota.";
         }
 
         public string CmdResetEmergency(DateTime utc)
         {
             if (_state.Mode != EngineMode.EmergencyStopped) return "Bot nie jest w stanie awaryjnym.";
+            if (!CanOperate(out _, requireValidEquity: false) || OwnPositions().Count > 0 || _ledger.Pending.Count > 0)
+                return "Reset zablokowany: najpierw potwierdź zamknięcie własnych pozycji i uzgodnienie zleceń.";
             if (_risk.State.MaxDrawdownHit && _lastAccount != null) _risk.ResetDrawdownLatch(_lastAccount.Equity);
             SetMode(EngineMode.Stopped, "zresetowano stan awaryjny – naciśnij START");
             SaveState(utc, true);
@@ -1375,6 +1450,7 @@ namespace Apex.Core.Engine
             public DateTime Started;
             public double InitialStop;
             public TradeDirection Direction;
+            public bool Failed;
             public readonly List<string> Log = new();
         }
 
@@ -1387,31 +1463,59 @@ namespace Apex.Core.Engine
         /// </summary>
         public string CmdExecutionTest(DateTime utc, string? symbol)
         {
-            if (!GuardAllowed) return "Test niedostępny: " + GuardMessage;
             if (GuardIsLive) return "Test wykonania jest dostępny WYŁĄCZNIE na koncie DEMO.";
+            if (!GuardAllowed) return "Test niedostępny: " + GuardMessage;
+            if (!_initialized || !_persistenceHealthy || !CanOperate(out var acc)) return "Test niedostępny: brak bezpiecznego konta/połączenia lub zapisu.";
+            _risk.Update(acc, utc);
+            _dirty = true;
+            if (_risk.NewEntriesBlocked(out var blocked)) { TrySaveState(utc, true); return "Test zablokowany: " + blocked; }
             if (_state.Mode == EngineMode.EmergencyStopped) return "Bot w stanie awaryjnym.";
             if (_test != null) return "Test już trwa.";
+            if (_ledger.Pending.Count > 0) return "Test zablokowany: niepewne zlecenie wymaga uzgodnienia portfela.";
             var own = OwnPositions();
+            if (_pendingCloses.Count > 0 || own.Any(p => !HasValidTarget(p))) return "Test zablokowany: brak poprawnego TP lub oczekujące zamknięcie.";
             var candidates = string.IsNullOrWhiteSpace(symbol)
                 ? _universe.OrderBy(u => u.AssetClass == AssetClass.Forex ? 0 : 1).Select(u => u.Symbol)
                 : new[] { symbol!.Trim() };
             foreach (var sym in candidates)
             {
-                if (own.Any(p => string.Equals(p.Symbol, sym, StringComparison.OrdinalIgnoreCase))) continue;
+                if (own.Any(p => string.Equals(p.Symbol, sym, StringComparison.OrdinalIgnoreCase)) || _ledger.HasPendingFor(sym)) continue;
+                if (!_universeBySymbol.TryGetValue(sym, out var universe)) continue;
                 var spec = _market.GetSpec(sym);
                 var q = _market.GetQuote(sym);
                 if (spec == null || spec.Validate() != null || q == null || !q.Value.IsValid) continue;
-                if (spec.AssetClass == AssetClass.Crypto) continue;
-                if (!_market.IsMarketOpen(sym, utc, out _)) continue;
+                if (spec.AssetClass == AssetClass.Crypto || InstrumentClassifier.IsCrypto(spec.Name, spec.Description, spec.BaseAsset, spec.QuoteAsset)) continue;
+                if (!QuoteFresh(q.Value, utc)) continue;
+                if (!_market.IsMarketOpen(sym, utc, out var timeToClose) || timeToClose < TimeSpan.FromMinutes(_cfg.NoEntryMinutesBeforeClose)) continue;
+                if (_cfg.News.Enabled && (_cfg.News.RequireCalendar && (_news == null || !_news.IsFresh(utc, _cfg.News)) || _news != null && _news.IsBlackout(spec, utc, _cfg.News, out _))) continue;
                 double atr = 0;
                 if (_features.TryGet(sym, Tf.H1, utc, out var fs, out int i)) atr = Ta.At(fs.Atr(14), i);
                 if (!(atr > 0)) atr = q.Value.Mid * 0.002;
                 double slPips = Math.Max(spec.MinStopDistancePips + 1, Math.Round(spec.PriceToPips(1.5 * atr), 1));
                 double tpPips = Math.Round(slPips * 2, 1);
+                double stop = spec.PipsToPrice(slPips);
+                double slip = _cfg.Risk.SlippageAllowanceAtr * atr;
+                if (!double.IsFinite(atr) || q.Value.Spread > _cfg.Risk.MaxSpreadToAtr * atr) continue;
+                var size = PositionSizer.Size(spec, _risk.RiskBudget(acc), stop, q.Value.Ask, q.Value.Spread, slip);
+                if (!size.Ok || size.CostToRisk > _cfg.Risk.MaxCostToRisk) continue;
+                // Minimum brokera nie zwalnia testu z limitów ryzyka i portfela.
+                double units = spec.VolumeMin;
+                double risk = units * (stop + slip) * spec.ValuePerPricePerUnit + 2 * spec.CommissionOneSide(units, q.Value.Ask);
+                var check = _risk.EvaluateNewTrade(new TradeProposal
+                {
+                    Symbol = sym, AssetClass = universe.AssetClass, Direction = TradeDirection.Long,
+                    RiskAmount = risk, Notional = PositionSizer.Notional(spec, units, q.Value.Ask),
+                    EstimatedMargin = _broker.EstimateMargin(sym, TradeDirection.Long, units),
+                    BaseCurrency = universe.BaseCurrency, QuoteCurrency = universe.QuoteCurrency,
+                    MaxSignedCorrelation = MaxCorrelation(new SignalCandidate { Symbol = sym, Direction = TradeDirection.Long }, own, utc).Item1,
+                }, acc, BuildOpenRisks(own));
+                if (!check.Allowed) continue;
                 string sid = SignalIdGenerator.Create(sym, StrategyId.ExecutionTest, TradeDirection.Long, utc);
                 var t = new ExecTest { Symbol = sym, SignalId = sid, Started = utc, StepTime = utc, Direction = TradeDirection.Long };
                 t.Log.Add($"{utc:HH:mm:ss} START testu na {sym}: wolumen min. {spec.VolumeMin}, SL {slPips} pips, TP {tpPips} pips");
                 if (!_ledger.TryReserve(sid, sym, utc)) return "Test z tym identyfikatorem już był wykonany – spróbuj za minutę.";
+                _dirty = true;
+                if (!TrySaveState(utc, true)) return "Test zablokowany: zapis rezerwacji nieudany.";
                 var res = _broker.OpenMarket(new OrderRequest
                 {
                     Symbol = sym, Direction = TradeDirection.Long, VolumeUnits = spec.VolumeMin, StopLossPips = slPips, TakeProfitPips = tpPips,
@@ -1420,6 +1524,8 @@ namespace Apex.Core.Engine
                 if (res.Status == OrderStatus.Rejected)
                 {
                     _ledger.MarkConsumed(sid, res.Message, utc);
+                    _dirty = true;
+                    TrySaveState(utc, true);
                     t.Log.Add($"{utc:HH:mm:ss} BŁĄD: serwer odrzucił zlecenie ({res.Error}: {res.Message})");
                     LastExecutionTest = t.Log.ToList();
                     return "Test nieudany: zlecenie odrzucone – " + res.Message;
@@ -1458,7 +1564,8 @@ namespace Apex.Core.Engine
                         t.PositionId = pos.Id;
                         if (!_plans.ContainsKey(pos.Id))
                             _plans[pos.Id] = new TradePlan { PositionId = pos.Id, SignalId = t.SignalId, Symbol = pos.Symbol, Strategy = StrategyId.ExecutionTest, Direction = pos.Direction, EntryPrice = pos.EntryPrice, InitialStop = pos.StopLoss ?? 0, InitialRisk = pos.StopLoss.HasValue ? Math.Abs(pos.EntryPrice - pos.StopLoss.Value) : 0, InitialVolume = pos.VolumeUnits, EntryTimeUtc = pos.EntryTimeUtc, EntryReason = "test wykonania", Exit = new ExitPlan() };
-                        if (!pos.StopLoss.HasValue) { t.Log.Add($"{utc:HH:mm:ss} BŁĄD: pozycja bez SL – zamykam."); RequestClose(pos.Id, "test: brak SL", utc); Finish("TEST NIEZALICZONY – pozycja otwarta bez SL"); return; }
+                        _dirty = true;
+                        if (!(pos.StopLoss is > 0) || !double.IsFinite(pos.StopLoss.Value) || !HasValidTarget(pos)) { RequestClose(pos.Id, "test: brak SL/TP", utc); Finish("TEST NIEZALICZONY – pozycja otwarta bez poprawnego SL/TP"); return; }
                         t.InitialStop = pos.StopLoss.Value;
                         t.Log.Add($"{utc:HH:mm:ss} Krok 1 OK: pozycja #{pos.Id} otwarta po {pos.EntryPrice}, SL {pos.StopLoss}, TP {pos.TakeProfit}, wolumen {pos.VolumeUnits}");
                         t.Step = 2;
@@ -1477,7 +1584,21 @@ namespace Apex.Core.Engine
                         double newSl = pos.EntryPrice - 0.75 * (pos.EntryPrice - t.InitialStop);
                         var spec = _market.GetSpec(pos.Symbol);
                         if (spec != null) newSl = spec.RoundPrice(newSl);
+                        var quote = _market.GetQuote(pos.Symbol);
+                        if (spec == null || quote == null || !QuoteFresh(quote.Value, utc) || !double.IsFinite(newSl)
+                            || newSl <= t.InitialStop || newSl >= quote.Value.Bid - spec.MinStopDistancePips * spec.PipSize)
+                        {
+                            RequestClose(pos.Id, "test: brak poprawnej ciaśniejszej ceny SL", utc);
+                            Finish("TEST NIEZALICZONY – nie można bezpiecznie zacieśnić SL");
+                            return;
+                        }
                         var r = _broker.ModifyStopLoss(pos.Id, newSl);
+                        if (r.Status == OrderStatus.Rejected)
+                        {
+                            RequestClose(pos.Id, "test: zmiana SL odrzucona", utc);
+                            Finish("TEST NIEZALICZONY – zmiana SL odrzucona, zamykanie pozycji");
+                            return;
+                        }
                         t.Log.Add($"{utc:HH:mm:ss} Krok 2: zmiana SL {t.InitialStop} → {newSl}: {r.Status} {r.Message}");
                         t.InitialStop = newSl;
                         t.Step = 3;
@@ -1495,11 +1616,12 @@ namespace Apex.Core.Engine
                     else if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds)
                     {
                         t.Log.Add($"{utc:HH:mm:ss} UWAGA: SL u brokera = {pos.StopLoss}, oczekiwano {t.InitialStop} – zamykam pozycję.");
+                        t.Failed = true;
                         t.Step = 4;
                     }
                     break;
                 case 4:
-                    if (pos == null) { Finish("TEST ZALICZONY – pozycja zamknięta"); return; }
+                    if (pos == null) { Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono zmiany SL" : "TEST ZALICZONY – pozycja zamknięta"); return; }
                     if ((utc - t.StepTime).TotalSeconds < 20) return;
                     t.Log.Add($"{utc:HH:mm:ss} Krok 3: zamykanie pozycji #{pos.Id}.");
                     RequestClose(pos.Id, "test wykonania – zamknięcie", utc);
@@ -1507,7 +1629,7 @@ namespace Apex.Core.Engine
                     t.StepTime = utc;
                     break;
                 case 5:
-                    if (pos == null) Finish("TEST ZALICZONY – otwarcie, zmiana SL i zamknięcie potwierdzone u brokera");
+                    if (pos == null) Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono zmiany SL" : "TEST ZALICZONY – otwarcie, zmiana SL i zamknięcie potwierdzone u brokera");
                     else if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds) Finish("TEST NIEZALICZONY – pozycja nadal otwarta po próbie zamknięcia (ponawiam zamykanie w tle)");
                     break;
             }

@@ -7,7 +7,7 @@ namespace Apex.Core.Safety
 {
     public sealed class AccountGuardSettings
     {
-        /// <summary>Zezwolenie na konto LIVE. Domyślnie FALSE. Samo włączenie nie wystarcza – wymagane są dodatkowe warunki.</summary>
+        /// <summary>Pole zgodności starych konfiguracji; wersja DEMO zawsze odrzuca LIVE.</summary>
         public bool AllowLive { get; init; }
 
         /// <summary>Fraza potwierdzenia LIVE. Musi dokładnie odpowiadać <see cref="AccountGuard.RequiredLivePhrase"/>.</summary>
@@ -29,9 +29,7 @@ namespace Apex.Core.Safety
     }
 
     /// <summary>
-    /// Strażnik konta. Domyślnie bot handluje WYŁĄCZNIE na koncie DEMO.
-    /// Handel na koncie LIVE wymaga jednocześnie: AllowLive = true, numeru konta na liście dozwolonych
-    /// oraz wpisania dokładnej frazy potwierdzenia zawierającej numer konta. Brak któregokolwiek warunku = blokada.
+    /// Strażnik konta. Wersja DEMO odrzuca LIVE niezależnie od dawnych pól odblokowania.
     /// </summary>
     public static class AccountGuard
     {
@@ -61,16 +59,7 @@ namespace Apex.Core.Safety
                 return new AccountGuardResult { Allowed = true, IsLive = false, Reason = $"Konto DEMO {account.Number} ({account.BrokerName}) – handel dozwolony." };
             }
 
-            // Konto LIVE – wszystkie warunki muszą być spełnione jednocześnie.
-            if (!settings.AllowLive)
-                return Deny(true, $"Wykryto konto LIVE {account.Number}. Handel na koncie rzeczywistym jest ZABLOKOWANY (parametr 'Zezwól na LIVE' = Nie).");
-            if (!settings.AllowedAccounts.Contains(account.Number))
-                return Deny(true, $"Konto LIVE {account.Number} nie zostało jawnie dodane do listy dozwolonych kont.");
-            string required = RequiredLivePhrase(account.Number);
-            if (!string.Equals((settings.LiveConfirmation ?? "").Trim(), required, StringComparison.Ordinal))
-                return Deny(true, $"Brak poprawnego potwierdzenia LIVE. Wymagana fraza: \"{required}\".");
-
-            return new AccountGuardResult { Allowed = true, IsLive = true, Reason = $"UWAGA: handel na koncie LIVE {account.Number} świadomie zatwierdzony przez użytkownika." };
+            return Deny(true, $"Wersja DEMO: konto LIVE {account.Number} jest trwale ZABLOKOWANE niezależnie od konfiguracji.");
         }
 
         private static AccountGuardResult Deny(bool isLive, string reason) => new() { Allowed = false, IsLive = isLive, Reason = reason };

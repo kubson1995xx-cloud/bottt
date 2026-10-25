@@ -54,7 +54,7 @@ namespace Apex.Core.Engine
     {
         public int SchemaVersion { get; set; } = 1;
         public long AccountNumber { get; set; }
-        public EngineMode Mode { get; set; } = EngineMode.Running;
+        public EngineMode Mode { get; set; } = EngineMode.Stopped;
         public string ModeReason { get; set; } = "";
         public RiskState Risk { get; set; } = new();
         public List<LedgerEntry> Ledger { get; set; } = new();

@@ -72,6 +72,7 @@ namespace Apex.Backtester.Sim
 
             world.SetTime(times.Min);
             engine.Initialize(times.Min);
+            engine.CmdStart(); // Symulacja jawnie uruchamia wejścia; produkcja po restarcie pozostaje zatrzymana.
             DateTime prev = times.Min;
             double peak = spec.StartEquity, maxDd = 0;
             DateTime lastDay = DateTime.MinValue;

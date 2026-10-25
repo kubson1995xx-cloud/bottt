@@ -42,7 +42,7 @@ namespace Apex.Core.Risk
             if (specError != null) return SizingResult.Reject("Specyfikacja: " + specError, riskBudget);
             if (!(riskBudget > 0) || double.IsInfinity(riskBudget)) return SizingResult.Reject("nieprawidłowy budżet ryzyka", riskBudget);
             if (!(stopDistance > 0) || double.IsInfinity(stopDistance)) return SizingResult.Reject("nieprawidłowa odległość SL", riskBudget);
-            if (!(entryPrice > 0)) return SizingResult.Reject("nieprawidłowa cena wejścia", riskBudget);
+            if (!(entryPrice > 0) || !double.IsFinite(entryPrice)) return SizingResult.Reject("nieprawidłowa cena wejścia", riskBudget);
             if (double.IsNaN(spread) || spread < 0) return SizingResult.Reject("nieprawidłowy spread", riskBudget);
             if (double.IsNaN(slippageAllowance) || slippageAllowance < 0) slippageAllowance = 0;
 

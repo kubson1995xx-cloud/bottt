@@ -148,9 +148,9 @@ namespace Apex.Core.Model
             if (!(PipSize > 0) || double.IsInfinity(PipSize)) return "nieprawidłowy rozmiar pipsa";
             if (!(TickSize > 0) || double.IsInfinity(TickSize)) return "nieprawidłowy rozmiar ticka";
             if (!(PipValuePerUnit > 0) || double.IsInfinity(PipValuePerUnit)) return "nie można ustalić wartości pipsa";
-            if (!(VolumeMin > 0)) return "nieprawidłowy minimalny wolumen";
-            if (!(VolumeStep > 0)) return "nieprawidłowy krok wolumenu";
-            if (!(VolumeMax >= VolumeMin)) return "nieprawidłowy maksymalny wolumen";
+            if (!(VolumeMin > 0) || !double.IsFinite(VolumeMin)) return "nieprawidłowy minimalny wolumen";
+            if (!(VolumeStep > 0) || !double.IsFinite(VolumeStep)) return "nieprawidłowy krok wolumenu";
+            if (!(VolumeMax >= VolumeMin) || !double.IsFinite(VolumeMax)) return "nieprawidłowy maksymalny wolumen";
             if (CommissionKind == CommissionKind.Unknown) return "nieznany typ prowizji – koszt niezweryfikowany";
             if (double.IsNaN(CommissionOneSide(VolumeMin, 1.0))) return "nie można policzyć prowizji";
             if (!TradingEnabled) return "handel instrumentem wyłączony";
@@ -174,7 +174,8 @@ namespace Apex.Core.Model
         public bool IsHedging { get; init; } = true;
         public DateTime TimeUtc { get; init; }
 
-        public bool IsValid => Balance > 0 && Equity > 0 && !double.IsNaN(Equity) && !double.IsNaN(Balance);
+        public bool IsValid => Balance > 0 && Equity > 0 && double.IsFinite(Equity) && double.IsFinite(Balance)
+            && double.IsFinite(Margin) && Margin >= 0 && double.IsFinite(FreeMargin);
     }
 
     /// <summary>Informacja o otwartej pozycji (dowolnego pochodzenia – filtrowanie po etykiecie robi silnik).</summary>

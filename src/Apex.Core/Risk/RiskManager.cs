@@ -42,6 +42,9 @@ namespace Apex.Core.Risk
         /// <summary>Walidacja zakresów – chroni przed absurdalnymi ustawieniami (np. ryzyko 50%).</summary>
         public string? Validate()
         {
+            if (new[] { RiskPerTradePct, MaxDailyLossPct, MaxDrawdownPct, MaxEffectiveLeverage, MaxCorrelation,
+                MaxMarginUseOfFree, MinMarginLevelPct, MaxCostToRisk, MaxSpreadToAtr, SpreadSpikeMultiple, SlippageAllowanceAtr }.Any(x => !double.IsFinite(x)))
+                return "Parametry ryzyka muszą być skończonymi liczbami.";
             if (RiskPerTradePct <= 0 || RiskPerTradePct > 2.0) return "Ryzyko na transakcję musi być w zakresie (0; 2]%.";
             if (MaxDailyLossPct <= 0 || MaxDailyLossPct > 10) return "Maksymalna dzienna strata musi być w zakresie (0; 10]%.";
             if (MaxDrawdownPct <= 0 || MaxDrawdownPct > 30) return "Maksymalne obsunięcie musi być w zakresie (0; 30]%.";
@@ -193,6 +196,8 @@ namespace Apex.Core.Risk
             var r = new RiskCheckResult();
             if (!acc.IsValid) { r.Failures.Add("nieprawidłowe dane konta"); return r; }
             if (NewEntriesBlocked(out var blocked)) r.Failures.Add(blocked);
+            if (!(p.RiskAmount > 0) || !double.IsFinite(p.RiskAmount) || !(p.Notional > 0) || !double.IsFinite(p.Notional))
+                r.Failures.Add("nieprawidłowe ryzyko lub wartość nominalna transakcji");
 
             if (open.Count >= _settings.MaxOpenPositions)
                 r.Failures.Add($"osiągnięto limit pozycji ({open.Count}/{_settings.MaxOpenPositions})");

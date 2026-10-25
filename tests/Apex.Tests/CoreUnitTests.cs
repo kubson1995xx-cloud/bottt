@@ -382,7 +382,7 @@ namespace Apex.Tests
         }
 
         [Fact]
-        public void Live_RequiresAllThreeConditions()
+        public void Live_IsRejectedEvenWithAllLegacyUnlockConditions()
         {
             long nr = 5551234;
             string phrase = AccountGuard.RequiredLivePhrase(nr);
@@ -391,7 +391,7 @@ namespace Apex.Tests
             Assert.False(AccountGuard.Evaluate(Acc(true), new AccountGuardSettings { AllowedAccounts = new[] { nr }, LiveConfirmation = phrase }).Allowed);
             Assert.False(AccountGuard.Evaluate(Acc(true), new AccountGuardSettings { AllowLive = true, AllowedAccounts = new[] { nr }, LiveConfirmation = phrase.ToLowerInvariant() }).Allowed);
             Assert.False(AccountGuard.Evaluate(Acc(true), new AccountGuardSettings { AllowLive = true, AllowedAccounts = new[] { 999L }, LiveConfirmation = AccountGuard.RequiredLivePhrase(999) }).Allowed);
-            Assert.True(AccountGuard.Evaluate(Acc(true), new AccountGuardSettings { AllowLive = true, AllowedAccounts = new[] { nr }, LiveConfirmation = phrase }).Allowed);
+            Assert.False(AccountGuard.Evaluate(Acc(true), new AccountGuardSettings { AllowLive = true, AllowedAccounts = new[] { nr }, LiveConfirmation = phrase }).Allowed);
         }
 
         [Fact]

@@ -48,6 +48,7 @@ namespace Apex.Core.Bridge
                     added++;
                 }
                 if (list.Count > _maxBars) list.RemoveRange(0, list.Count - _maxBars);
+                _features.Remove(key); // Korekta/snapshot o tym samym czasie i liczbie świec też zmienia wskaźniki.
             }
             return added;
         }
@@ -62,7 +63,9 @@ namespace Apex.Core.Bridge
             lock (_lock)
             {
                 if (!_bars.TryGetValue(K(symbol, tf), out var l) || l.Count == 0) return null;
-                return l[^1].OpenTime;
+                for (int i = l.Count - 1; i >= 0; i--)
+                    if (l[i].OpenTime + tf.Duration() <= utc) return l[i].OpenTime;
+                return null;
             }
         }
 
@@ -84,8 +87,8 @@ namespace Apex.Core.Bridge
                     features = new FeatureSet(BarSeries.FromBars(symbol, tf, l));
                     _features[key] = (last, l.Count, features);
                 }
-                index = features.Count - 1;
-                return true;
+                index = features.IndexAtOrBefore(utc);
+                return index >= 0;
             }
         }
 

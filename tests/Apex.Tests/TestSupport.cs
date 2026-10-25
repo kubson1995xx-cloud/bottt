@@ -211,6 +211,7 @@ namespace Apex.Tests
             Engine.SetUniverse(new[] { new UniverseEntry { Symbol = "US500", AssetClass = AssetClass.Index, BaseCurrency = "US500" } });
             Engine.SetGuard(new AccountGuardResult { Allowed = guardAllowed, IsLive = live, Reason = "test" });
             Engine.Initialize(Now);
+            Engine.CmdStart(); // Scenariusze handlu wymagają jawnego START; silnik produkcyjny startuje zatrzymany.
         }
 
         /// <summary>Dodaje kolejny instrument z tym samym scenariuszem świec (np. do testu filtra kryptowalut).</summary>
