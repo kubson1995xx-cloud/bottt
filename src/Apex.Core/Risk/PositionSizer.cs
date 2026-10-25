@@ -51,23 +51,27 @@ namespace Apex.Core.Risk
                 return SizingResult.Reject($"SL {stopPips:F1} pips poniżej minimum brokera {spec.MinStopDistancePips:F1}", riskBudget);
 
             double vpp = spec.ValuePerPricePerUnit;
-            double commPerUnitRt = 2.0 * spec.CommissionOneSide(1.0, entryPrice);
-            if (double.IsNaN(commPerUnitRt) || commPerUnitRt < 0) return SizingResult.Reject("nie można zweryfikować prowizji", riskBudget);
+            double commPerUnitRt = 2.0 * spec.CommissionBaseOneSide(1.0, entryPrice);
+            if (!double.IsFinite(commPerUnitRt) || commPerUnitRt < 0) return SizingResult.Reject("nie można zweryfikować prowizji", riskBudget);
 
-            double lossPerUnit = (stopDistance + slippageAllowance) * vpp + commPerUnitRt;
-            if (!(lossPerUnit > 0)) return SizingResult.Reject("nie można policzyć straty na jednostkę", riskBudget);
+            double stopLossPerUnit = (stopDistance + slippageAllowance) * vpp;
+            double lossPerUnit = stopLossPerUnit + commPerUnitRt;
+            if (!(stopLossPerUnit > 0) || !double.IsFinite(lossPerUnit)) return SizingResult.Reject("nie można policzyć straty na jednostkę", riskBudget);
 
-            // Koszt: spread + prowizja (w cenie) + poślizg na wejściu i wyjściu, względem odległości SL.
-            double commInPrice = vpp > 0 ? commPerUnitRt / vpp : double.NaN;
-            double costToRisk = (spread + commInPrice + 2 * slippageAllowance) / stopDistance;
-
-            double rawUnits = riskBudget / lossPerUnit;
+            // loss(u) = stopLossPerUnit*u + max(baseRtPerUnit*u, 2*floor).
+            // Both linear inequalities must fit; never multiply the fixed floor by units.
+            double rawUnits = Math.Min(riskBudget / lossPerUnit,
+                (riskBudget - 2.0 * spec.MinCommissionAccount) / stopLossPerUnit);
             double units = spec.NormalizeVolumeDown(rawUnits);
             if (units < spec.VolumeMin - 1e-9)
-                return SizingResult.Reject($"minimalny wolumen {spec.VolumeMin} przekracza dopuszczalne ryzyko (wyliczono {rawUnits:F2})", riskBudget, costToRisk);
+                return SizingResult.Reject($"minimalny wolumen {spec.VolumeMin} przekracza dopuszczalne ryzyko (wyliczono {rawUnits:F2})", riskBudget);
 
             double commission = 2.0 * spec.CommissionOneSide(units, entryPrice);
-            double risk = units * (stopDistance + slippageAllowance) * vpp + commission;
+            double risk = units * stopLossPerUnit + commission;
+            double commInPrice = commission / units / vpp;
+            double costToRisk = (spread + commInPrice + 2 * slippageAllowance) / stopDistance;
+            if (!double.IsFinite(risk) || !double.IsFinite(costToRisk))
+                return SizingResult.Reject("nie można zweryfikować kosztu transakcji", riskBudget);
             if (risk > riskBudget * 1.000001)
                 return SizingResult.Reject($"ryzyko po zaokrągleniu {risk:F2} > budżet {riskBudget:F2}", riskBudget, costToRisk);
 

@@ -131,6 +131,10 @@ namespace Apex.Core.Bridge
         public bool CloseOnly { get; set; }
         public string CommissionKind { get; set; } = "Unknown";
         public double CommissionValue { get; set; }
+        /// <summary>Opcjonalne v1: minimum za jedną stronę w walucie konta; brak pól = starszy most bez minimum.</summary>
+        public double? MinCommissionAccount { get; set; }
+        /// <summary>false = minimum niezweryfikowane; nie wolno ominąć tego przez nadpisanie prowizji bazowej.</summary>
+        public bool? MinCommissionKnown { get; set; }
         public double UsdToAccount { get; set; } = 1;
         public double QuoteToAccount { get; set; } = 1;
         public bool IsCustom { get; set; }

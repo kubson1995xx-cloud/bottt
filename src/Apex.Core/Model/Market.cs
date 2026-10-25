@@ -76,6 +76,10 @@ namespace Apex.Core.Model
         /// <summary>Surowa wartość prowizji (znaczenie zależy od CommissionKind), jedna strona.</summary>
         public double CommissionValue { get; init; }
 
+        /// <summary>Minimum prowizji za jedną stronę, w walucie konta (nie stawka na jednostkę).</summary>
+        public double MinCommissionAccount { get; init; }
+        public bool MinCommissionKnown { get; init; } = true;
+
         /// <summary>Kurs konwersji z USD na walutę konta (potrzebny dla prowizji w USD).</summary>
         public double UsdToAccount { get; init; } = 1.0;
 
@@ -112,31 +116,40 @@ namespace Apex.Core.Model
         /// <summary>Prowizja za jedną stronę transakcji dla podanego wolumenu i ceny, w walucie konta. NaN gdy nie da się policzyć.</summary>
         public double CommissionOneSide(double units, double price)
         {
+            if (!MinCommissionKnown || !double.IsFinite(MinCommissionAccount) || MinCommissionAccount < 0) return double.NaN;
+            double basis = CommissionBaseOneSide(units, price);
+            if (!double.IsFinite(basis) || basis < 0) return double.NaN;
+            return units == 0 ? 0 : Math.Max(basis, MinCommissionAccount);
+        }
+
+        // Only the base fee is linear in units. The sizer must solve the floor separately.
+        internal double CommissionBaseOneSide(double units, double price)
+        {
+            if (!double.IsFinite(units) || units < 0 || !PositiveFinite(price) ||
+                !double.IsFinite(CommissionValue) || CommissionValue < 0) return double.NaN;
             switch (CommissionKind)
             {
                 case CommissionKind.None:
                     return 0;
                 case CommissionKind.UsdPerMillionUsdVolume:
-                    {
-                        // Wolumen w USD = units * cena * (kurs waluty kwotowania do USD).
-                        // QuoteToAccount / UsdToAccount = kurs waluty kwotowania do USD.
-                        if (UsdToAccount <= 0) return double.NaN;
-                        double quoteToUsd = QuoteToAccount / UsdToAccount;
-                        double usdVolume = units * price * quoteToUsd;
-                        return usdVolume / 1_000_000.0 * CommissionValue * UsdToAccount;
-                    }
+                    if (!PositiveFinite(UsdToAccount) || !PositiveFinite(QuoteToAccount)) return double.NaN;
+                    // USD conversion cancels algebraically; still require the actual USD FX rate.
+                    return units * price * QuoteToAccount / 1_000_000.0 * CommissionValue;
                 case CommissionKind.UsdPerLot:
-                    if (LotSize <= 0) return double.NaN;
+                    if (!PositiveFinite(LotSize) || !PositiveFinite(UsdToAccount)) return double.NaN;
                     return units / LotSize * CommissionValue * UsdToAccount;
                 case CommissionKind.PercentOfVolume:
+                    if (!PositiveFinite(QuoteToAccount)) return double.NaN;
                     return units * price * QuoteToAccount * CommissionValue / 100.0;
                 case CommissionKind.QuoteCurrencyPerLot:
-                    if (LotSize <= 0) return double.NaN;
+                    if (!PositiveFinite(LotSize) || !PositiveFinite(QuoteToAccount)) return double.NaN;
                     return units / LotSize * CommissionValue * QuoteToAccount;
                 default:
                     return double.NaN;
             }
         }
+
+        private static bool PositiveFinite(double value) => value > 0 && double.IsFinite(value);
 
         /// <summary>
         /// Walidacja specyfikacji. Zwraca null jeśli wszystko w porządku, w przeciwnym razie powód odrzucenia (PL).
@@ -152,7 +165,8 @@ namespace Apex.Core.Model
             if (!(VolumeStep > 0) || !double.IsFinite(VolumeStep)) return "nieprawidłowy krok wolumenu";
             if (!(VolumeMax >= VolumeMin) || !double.IsFinite(VolumeMax)) return "nieprawidłowy maksymalny wolumen";
             if (CommissionKind == CommissionKind.Unknown) return "nieznany typ prowizji – koszt niezweryfikowany";
-            if (double.IsNaN(CommissionOneSide(VolumeMin, 1.0))) return "nie można policzyć prowizji";
+            if (!MinCommissionKnown) return "minimum prowizji niezweryfikowane";
+            if (!double.IsFinite(CommissionOneSide(VolumeMin, 1.0))) return "nie można policzyć prowizji";
             if (!TradingEnabled) return "handel instrumentem wyłączony";
             if (CloseOnly) return "instrument w trybie tylko-zamykanie";
             return null;

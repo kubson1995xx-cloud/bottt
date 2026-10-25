@@ -25,7 +25,8 @@ namespace Apex.Platform.Tests
             foreach (var (key, value) in values) ((Properties)(object)stub).Values[key] = value;
             return stub;
         }
-        private static Symbol Symbol(SymbolCommissionType kind = SymbolCommissionType.UsdPerOneLot, double value = 3.5, double minimum = 0)
+        private static Symbol Symbol(SymbolCommissionType kind = SymbolCommissionType.UsdPerOneLot, double value = 3.5, double minimum = 0,
+            SymbolMinCommissionType minimumType = SymbolMinCommissionType.Asset, string? minimumAsset = "USD")
         {
             var hours = Stub<MarketHours>(("IsOpened", true), ("TimeTillClose", TimeSpan.FromHours(1)));
             return Stub<Symbol>(("get_Name", "EURUSD"), ("get_Description", "Euro vs US Dollar"),
@@ -33,6 +34,7 @@ namespace Apex.Platform.Tests
                 ("get_Digits", 5), ("get_PipSize", 0.0001), ("get_TickSize", 0.00001), ("get_LotSize", 100000L),
                 ("get_VolumeInUnitsMin", 1000.0), ("get_VolumeInUnitsStep", 1000.0), ("get_VolumeInUnitsMax", 1000000.0),
                 ("get_CommissionType", kind), ("get_Commission", value), ("get_MinCommission", minimum),
+                ("get_MinCommissionType", minimumType), ("get_MinCommissionAsset", minimumAsset == null ? null : Stub<Asset>(("get_Name", minimumAsset))),
                 ("get_MinDistanceType", SymbolMinDistanceType.Pips), ("get_MinStopLossDistance", 2.0), ("get_MinTakeProfitDistance", 2.0),
                 ("get_Bid", 1.1), ("get_Ask", 1.1001), ("get_IsTradingEnabled", true), ("get_TradingMode", SymbolTradingMode.FullAccess),
                 ("get_IsCustom", false), ("get_MarketHours", hours), ("get_PipValue", 99.0));
@@ -73,12 +75,54 @@ namespace Apex.Platform.Tests
             Assert.NotNull(SpecMapper.ToSpec(dto, dto.PipValue, null).Validate());
         }
 
-        [Fact]
-        public void UnsupportedMinimumCommissionIsExplicitlyUnverified()
+        [Theory]
+        [InlineData(SymbolMinCommissionType.Asset, "EUR", 6.0)]
+        [InlineData(SymbolMinCommissionType.QuoteAsset, null, 4.0)]
+        public void ActualSdkMinimumTypesAreConvertedToAccountCurrency(SymbolMinCommissionType minimumType, string? asset, double expected)
         {
-            var dto = CTraderData.Describe(Symbol(minimum: 1), _ => 1);
+            var dto = CTraderData.Describe(Symbol(minimum: 1, minimumType: minimumType, minimumAsset: asset),
+                from => from switch { "USD" => 4.0, "EUR" => 6.0, _ => double.NaN });
+            var spec = SpecMapper.ToSpec(BridgeProtocol.Deserialize<SymbolDto>(BridgeProtocol.Serialize(dto))!, null, null);
+            Assert.Null(spec.Validate());
+            Assert.True(dto.TradingEnabled);
+            Assert.Equal("UsdPerLot", dto.CommissionKind);
+            Assert.Equal(expected, spec.CommissionOneSide(1000, 1.1), 8);
+            Assert.Equal(14, spec.CommissionOneSide(100000, 1.1), 8);
+        }
+
+        [Theory]
+        [InlineData((SymbolMinCommissionType)999, "USD")]
+        [InlineData(SymbolMinCommissionType.Asset, null)]
+        [InlineData(SymbolMinCommissionType.Asset, "")]
+        [InlineData(SymbolMinCommissionType.Asset, "MISSING")]
+        public void UnsupportedMinimumCommissionIsExplicitlyUnverifiedEvenWithOverride(SymbolMinCommissionType minimumType, string? asset)
+        {
+            var dto = CTraderData.Describe(Symbol(minimum: 1, minimumType: minimumType, minimumAsset: asset),
+                from => from == "USD" ? 1 : double.NaN);
             Assert.Equal("Unknown", dto.CommissionKind);
-            Assert.NotNull(SpecMapper.ToSpec(dto, dto.PipValue, null).Validate());
+            Assert.NotNull(SpecMapper.ToSpec(dto, dto.PipValue, new CommissionOverride { Kind = "None" }).Validate());
+        }
+
+        [Theory]
+        [InlineData(-1)]
+        [InlineData(double.NaN)]
+        [InlineData(double.PositiveInfinity)]
+        public void InvalidSdkMinimumCannotBeHiddenByOverride(double minimum)
+        {
+            var dto = CTraderData.Describe(Symbol(minimum: minimum), _ => 1);
+            Assert.NotNull(SpecMapper.ToSpec(dto, null, new CommissionOverride { Kind = "None" }).Validate());
+        }
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-1)]
+        [InlineData(double.NaN)]
+        [InlineData(double.PositiveInfinity)]
+        public void InvalidMinimumAssetConversionRemainsUnknown(double invalid)
+        {
+            var dto = CTraderData.Describe(Symbol(minimum: 1, minimumAsset: "EUR"), from => from == "EUR" ? invalid : 1);
+            Assert.Equal("Unknown", dto.CommissionKind);
+            Assert.NotNull(SpecMapper.ToSpec(dto, null, new CommissionOverride { Kind = "None" }).Validate());
         }
 
         [Fact]

@@ -163,8 +163,10 @@ namespace Apex.Core.Bridge
                 CloseOnly = s.CloseOnly,
                 CommissionKind = kind,
                 CommissionValue = value,
-                UsdToAccount = s.UsdToAccount > 0 ? s.UsdToAccount : 1,
-                QuoteToAccount = s.QuoteToAccount > 0 ? s.QuoteToAccount : 1,
+                MinCommissionAccount = s.MinCommissionAccount ?? 0,
+                MinCommissionKnown = s.MinCommissionKnown != false && (s.MinCommissionKnown != true || s.MinCommissionAccount.HasValue),
+                UsdToAccount = s.UsdToAccount,
+                QuoteToAccount = s.QuoteToAccount,
             };
         }
     }

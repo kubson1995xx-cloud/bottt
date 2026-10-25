@@ -33,8 +33,30 @@ namespace Apex.Platforms.CTrader
                 SymbolCommissionType.QuoteCurrencyPerOneLot => "QuoteCurrencyPerLot",
                 _ => "Unknown",
             };
-            // Protocol v1 has no minimum-commission field. Never silently understate the cost.
-            if (s.MinCommission != 0 || !double.IsFinite(s.Commission) || s.Commission < 0) kind = "Unknown";
+            double minimum = s.MinCommission;
+            double minimumAccount = minimum == 0 ? 0 : double.NaN;
+            if (double.IsFinite(minimum) && minimum > 0)
+            {
+                // SDK 1.0.21: Asset uses MinCommissionAsset; QuoteAsset uses the symbol quote asset.
+                // No other interpretation is supported. Missing asset/rate stays explicitly unknown.
+                try
+                {
+                    string? asset = s.MinCommissionType switch
+                    {
+                        SymbolMinCommissionType.Asset => s.MinCommissionAsset?.Name,
+                        SymbolMinCommissionType.QuoteAsset => s.QuoteAsset?.Name,
+                        _ => null,
+                    };
+                    if (!string.IsNullOrWhiteSpace(asset))
+                    {
+                        double rate = convert(asset);
+                        if (PlatformSafety.Positive(rate)) minimumAccount = minimum * rate;
+                    }
+                }
+                catch (Exception) { minimumAccount = double.NaN; }
+            }
+            bool minimumKnown = minimum == 0 || PlatformSafety.Positive(minimumAccount);
+            if (!minimumKnown || !double.IsFinite(s.Commission) || s.Commission < 0) kind = "Unknown";
             bool converted = PlatformSafety.Positive(quote) && PlatformSafety.Positive(usd);
             if (!converted) kind = "Unknown"; // SpecMapper must not silently replace a missing FX rate with 1.
             double minStop = PlatformSafety.MinimumPips(s.MinStopLossDistance,
@@ -49,6 +71,7 @@ namespace Apex.Platforms.CTrader
                 MinStopPips = double.IsFinite(minStop) && minStop >= 0 ? minStop : double.MaxValue,
                 TradingEnabled = converted && s.IsTradingEnabled && s.TradingMode == SymbolTradingMode.FullAccess,
                 CloseOnly = s.TradingMode == SymbolTradingMode.CloseOnly, CommissionKind = kind, CommissionValue = s.Commission,
+                MinCommissionAccount = minimumKnown ? minimumAccount : null, MinCommissionKnown = minimumKnown,
                 UsdToAccount = usd, QuoteToAccount = quote, IsCustom = s.IsCustom,
             };
         }
