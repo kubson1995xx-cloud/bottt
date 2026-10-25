@@ -147,9 +147,13 @@ namespace Apex.Desktop
                     var argsEl = doc.RootElement.TryGetProperty("args", out var ar) ? ar.Clone() : default;
                     try
                     {
-                        string msg = await rt.Command(e => rt.ExecuteAction(e, action, argsEl));
+                        string msg = await rt.Command(e => rt.ExecuteAction(e, action, argsEl), ctx.RequestAborted);
                         log.Info($"[{key}] polecenie '{action}': {msg}");
                         return Results.Json(new { message = msg });
+                    }
+                    catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested)
+                    {
+                        return Results.StatusCode(499);
                     }
                     catch (TimeoutException)
                     {

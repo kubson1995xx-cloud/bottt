@@ -397,6 +397,31 @@ namespace Apex.Tests
         }
 
         [Fact]
+        public async Task AbortedCallerCannotLeavePendingRuntimeCommandExecutable()
+        {
+            using var r = Runtime();
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            using var abort = new CancellationTokenSource();
+            var blocker = r.Command(_ => { entered.Set(); release.Wait(); return "released"; });
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+            try
+            {
+                var method = typeof(AccountRuntime).GetMethod(nameof(AccountRuntime.Command), new[] { typeof(Func<TradingEngine, string>), typeof(CancellationToken) });
+                Assert.NotNull(method);
+                int calls = 0;
+                Func<TradingEngine?, string> action = _ => { calls++; return "must not run"; };
+                var queued = (Task<string>)method!.Invoke(r, new object[] { action, abort.Token })!;
+                abort.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued);
+                release.Set(); await blocker;
+                await r.Command(_ => "barrier");
+                Assert.Equal(0, calls);
+            }
+            finally { release.Set(); }
+        }
+
+        [Fact]
         public async Task ConcurrentHelloCannotAcceptTwoOwners()
         {
             var cfg = Config();

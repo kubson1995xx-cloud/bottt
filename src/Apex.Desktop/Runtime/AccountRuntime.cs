@@ -171,12 +171,16 @@ namespace Apex.Desktop.Runtime
         }
 
         /// <summary>Polecenie oczekujące ponad 30 s jest anulowane. Rozpoczęte polecenie zwraca faktyczny wynik, nie pozorny timeout.</summary>
-        public Task<string> Command(Func<TradingEngine?, string> f)
+        public Task<string> Command(Func<TradingEngine?, string> f) => Command(f, CancellationToken.None);
+
+        public Task<string> Command(Func<TradingEngine?, string> f, CancellationToken cancellationToken)
         {
+            if (cancellationToken.IsCancellationRequested) return Task.FromCanceled<string>(cancellationToken);
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             int claimed = 0;
             long id = Interlocked.Increment(ref _commandSequence);
             var commandSession = _adapter.Session;
+            CancellationTokenRegistration cancellation = default;
             lock (_lifecycle)
             {
                 if (_stop) return Task.FromException<string>(new ObjectDisposedException(nameof(AccountRuntime)));
@@ -185,6 +189,14 @@ namespace Apex.Desktop.Runtime
                     if (Interlocked.CompareExchange(ref claimed, 1, 0) == 0)
                         tcs.TrySetException(new ObjectDisposedException(nameof(AccountRuntime)));
                 };
+                cancellation = cancellationToken.Register(() =>
+                {
+                    if (Interlocked.CompareExchange(ref claimed, 1, 0) == 0)
+                    {
+                        _cancelCommands.TryRemove(id, out _);
+                        tcs.TrySetCanceled(cancellationToken);
+                    }
+                });
                 Enqueue(() =>
                 {
                     if (Interlocked.CompareExchange(ref claimed, 1, 0) != 0) return;
@@ -199,12 +211,16 @@ namespace Apex.Desktop.Runtime
 
             async Task Expire()
             {
-                await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
-                if (!tcs.Task.IsCompleted && Interlocked.CompareExchange(ref claimed, 1, 0) == 0)
+                try
                 {
-                    _cancelCommands.TryRemove(id, out _);
-                    tcs.TrySetException(new TimeoutException("Polecenie anulowane przed wykonaniem."));
+                    await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+                    if (!tcs.Task.IsCompleted && Interlocked.CompareExchange(ref claimed, 1, 0) == 0)
+                    {
+                        _cancelCommands.TryRemove(id, out _);
+                        tcs.TrySetException(new TimeoutException("Polecenie anulowane przed wykonaniem."));
+                    }
                 }
+                finally { cancellation.Dispose(); }
             }
         }
 
