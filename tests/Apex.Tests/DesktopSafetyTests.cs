@@ -52,6 +52,24 @@ namespace Apex.Tests
             return s;
         }
 
+        [Fact]
+        public async Task DefaultExecutionSymbolBelongsToEngineUniverse()
+        {
+            using var r = Runtime();
+            var s = Session();
+            r.Attach(s);
+            s.Handle(BridgeProtocol.Serialize(new SymbolsMsg { Items = new()
+            {
+                new SymbolDto { Name = "EURUSD", BaseAsset = "EUR", QuoteAsset = "USD", TradingEnabled = true },
+                new SymbolDto { Name = "US500", Description = "US 500 Index", BaseAsset = "US500", QuoteAsset = "USD", TradingEnabled = true },
+            } }));
+            r.OnSymbols(s);
+            await WaitUntil(() => r.Status != null && Status(r).GetProperty("engineReady").GetBoolean());
+            string? selected = Status(r).GetProperty("testSymbol").GetString();
+            Assert.NotNull(selected);
+            Assert.Contains(r.Universe, u => u.Selected && u.Symbol == selected);
+        }
+
         private ConfigStore Config() => new(_dir);
         private AccountRuntime Runtime(ConfigStore? config = null) => new("cTrader:Pepperstone:910001", "cTrader", config ?? Config(), new NewsCalendar(), new AppLog(Path.Combine(_dir, "logs")));
         private static void Symbols(BridgeSession s) => s.Handle(BridgeProtocol.Serialize(new SymbolsMsg()));

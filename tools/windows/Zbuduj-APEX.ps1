@@ -37,6 +37,9 @@ try {
     Krok "Testy jednostkowe i integracyjne bota"
     & dotnet test tests/Apex.Tests/Apex.Tests.csproj -c Release --no-build --logger "trx;LogFileName=bot.trx" --results-directory $evidence
     Sprawdz "Testy bota"
+    Krok "Wykonywalne testy adaptera cTrader (bez brokera)"
+    & dotnet test src/Platforms/cTrader/Tests/Apex.Platform.Tests.csproj -c Release --no-build --logger "trx;LogFileName=platform.trx" --results-directory $evidence
+    Sprawdz "Testy adaptera cTrader"
     Krok "Testy panelu i pakietu"
     & npm ci --ignore-scripts --no-audit --no-fund
     Sprawdz "Zaleznosci testowe panelu"

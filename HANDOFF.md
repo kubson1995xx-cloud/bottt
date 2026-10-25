@@ -16,6 +16,19 @@
 
 ---
 
+## Zintegrowana implementacja — stan po testach 2026-10-26
+
+- Przejęto wszystkie commity wykonawców Core, Platforms i Desktop do wskazanej gałęzi (bez zmian archiwum AI Lab). Zachowano strategie i profil; poprawiono bezpieczeństwo danych, rozmiaru zleceń, persistencji, kolejki poleceń i ponownego połączenia.
+- **237/237 testów bota**, **61/61 wykonywalnych testów adaptera**, **181/181 testów archiwum** (archiwum ponownie wykonane przed ostatnią zmianą wyboru symbolu; końcowy przebieg jeszcze do powtórzenia). Panel: **10/10** testów. Build rozwiązania i obu cBotów: 0 błędów/ostrzeżeń.
+- Pełny test rzeczywistego procesu Desktop z SYNTETYCZNYM symulatorem używa teraz domyślnego symbolu z przycisku panelu (bez ręcznego US500): open → SL/TP → modify → close zaliczony, pozycje obce nietknięte. To nie jest połączenie z Pepperstone.
+- Dodatkowe regresje rodzica RED→GREEN: błąd odczytu/uszkodzenie/obce konto nie mogą zerować zapisu i otwierać transakcji (4); wspólna bariera zamknięcia transportu (1); domyślny symbol testu musi należeć do uniwersum silnika (1); panel pokazuje identyfikatory, SL/TP i pozycje obce (1 JS).
+- Pierwsze testy po integracji ujawniły okresowo gubioną odpowiedź odmowy mostu (WrongPairingKey / DuplicateConnection). Przyczyna: asynchroniczne zamknięcie i przedwczesne Dispose/Abort. Dodano idempotentne zamknięcie i oczekiwanie na bounded handshake w serwerze; ostatnie dwa pełne przebiegi po poprawce zielone. Nie ukryto wcześniejszych czerwonych TRX.
+- Ważne rozstrzygnięcie: gdy strategia nie miała TP, silnik dodaje ochronny TP **3R**. Reguły wejścia nie zmienione, ale historyczne wyniki **nie walidują zmienionego limitu wyjścia**. Własne istniejące pozycje bez poprawnego TP są zamykane, bo protokół nie ma ModifyTP.
+- Rozstrzygnięcie: domyślny test wykonania wybiera symbol dopuszczony przez profil/uniwersum, zamiast preferować EURUSD, który przy indeksowym profilu jest niedopuszczony. Gdy nie ma dopuszczonego instrumentu, test odmawia bez luzowania limitów.
+- Blokada REAL jest bezwarunkowa w dostarczanych ścieżkach; restart/reconnect nie uruchamia wejść. Awaria/corrupt/full journal blokuje handel i może wymagać ręcznej interwencji w cTrader — nie ma gwarancji wykonania Emergency Stop bez sieci/dysku/brokera.
+- W toku: niezależny przegląd całości; uzupełnienie opłat minimalnych cTrader i walidacji FX w izolowanej gałęzi. Nie przedstawiać obecnego ZIP jako finalnej akceptacji brokerskiej.
+- Otwarte bramki: faktyczne Windows/cTrader API/LocalStorage, zgodność specyfikacji Pepperstone, realne połączenie DEMO i osobno zatwierdzona transakcja. Żadnych transakcji brokerskich nie wykonano.
+
 ## Archiwalny opis poprzedniego wykonawcy (może być nieaktualny)
 
 Plik przekazania pracy dla kolejnego wykonawcy (np. Codex). Opisuje stan projektu, wykonane zmiany, zadania niedokończone i zasady pracy.

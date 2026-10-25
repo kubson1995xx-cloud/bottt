@@ -282,7 +282,8 @@ namespace Apex.Tests
             await s.Sim.AddForeignPosition("NAS100", "");
             var foreignIds = s.Sim.Positions.Select(p => p.Id).ToList();
 
-            string msg = await _host.Command(s.Key, "executionTest", new { symbol = "US500" });
+            // Używamy tej samej ścieżki domyślnego instrumentu co przycisk panelu, nie ręcznego obejścia.
+            string msg = await _host.Command(s.Key, "executionTest");
             Assert.Contains("rozpoczęty", msg);
             string? verdict = null;
             Assert.True(await WaitFor(async () =>

@@ -39,7 +39,7 @@ namespace Apex.Desktop.Bridge
             try
             {
                 if (_ws.State == WebSocketState.Open)
-                    await _ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, reason.Length > 100 ? reason.Substring(0, 100) : reason, timeout.Token)
+                    await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, reason.Length > 100 ? reason.Substring(0, 100) : reason, timeout.Token)
                         .WaitAsync(timeout.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is WebSocketException || ex is ObjectDisposedException || ex is OperationCanceledException || ex is InvalidOperationException) { }
@@ -147,6 +147,8 @@ namespace Apex.Desktop.Bridge
             }
             finally
             {
+                // Nie niszcz gniazda, zanim komunikat odmowy i handshake zamknięcia zostaną obsłużone.
+                await session.CloseAsync("zakończenie połączenia").ConfigureAwait(false);
                 session.MarkClosed();
                 _accounts.Unregister(session);
             }

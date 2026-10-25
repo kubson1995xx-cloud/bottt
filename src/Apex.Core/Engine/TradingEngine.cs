@@ -77,6 +77,7 @@ namespace Apex.Core.Engine
         private readonly Dictionary<string, DateTime> _dataWarned = new(StringComparer.OrdinalIgnoreCase);
 
         private bool _initialized;
+        private bool _stateReadFault;
         private bool _connected = true;
         private bool _dirty;
         private bool _persistenceHealthy = true;
@@ -257,8 +258,8 @@ namespace Apex.Core.Engine
         {
             string? json = null;
             try { json = _store.Get(StoreKey(account)); }
-            catch (Exception ex) { _log.Warn("Nie można odczytać zapisanego stanu: " + ex.Message); }
-            if (string.IsNullOrWhiteSpace(json))
+            catch (Exception ex) { BlockInvalidState(account, ex.Message); return; }
+            if (json == null)
             {
                 _state = new EngineState { AccountNumber = account };
                 return;
@@ -266,12 +267,11 @@ namespace Apex.Core.Engine
             try
             {
                 var st = JsonSerializer.Deserialize<EngineState>(json!, StateJson);
-                if (st == null || st.AccountNumber != account)
-                {
-                    _log.Warn("Zapisany stan dotyczy innego konta – start z czystym stanem.");
-                    _state = new EngineState { AccountNumber = account };
-                    return;
-                }
+                if (st == null || st.AccountNumber != account || st.SchemaVersion != 1 || !Enum.IsDefined(typeof(EngineMode), st.Mode)
+                    || st.Risk == null || st.Ledger == null || st.Plans == null || st.Suspended == null || st.RecentTrades == null
+                    || st.DisabledStrategies == null || st.DisabledClasses == null
+                    || st.Plans.Any(p => p == null) || st.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId)))
+                    throw new JsonException("Nieprawidłowy schemat lub tożsamość zapisanego stanu.");
                 _state = st;
                 _ledger.Restore(st.Ledger);
                 _plans.Clear();
@@ -280,10 +280,16 @@ namespace Apex.Core.Engine
             }
             catch (Exception ex)
             {
-                // Uszkodzony stan: zachowujemy się bezpiecznie – start w trybie wstrzymanych wejść.
-                _log.Error("Uszkodzony zapis stanu (" + ex.Message + ") – start z czystym stanem, nowe wejścia wstrzymane do decyzji użytkownika.");
-                _state = new EngineState { AccountNumber = account, Mode = EngineMode.PausedNewEntries, ModeReason = "uszkodzony zapis stanu" };
+                BlockInvalidState(account, ex.Message);
             }
+        }
+
+        private void BlockInvalidState(long account, string reason)
+        {
+            _stateReadFault = true;
+            _persistenceHealthy = false;
+            _state = new EngineState { AccountNumber = account, Mode = EngineMode.Stopped, ModeReason = "błąd odczytu stanu – wymagane ręczne uzgodnienie" };
+            _log.Error("Nie można bezpiecznie odtworzyć stanu: " + reason + ". Wejścia zablokowane, oryginalny zapis nie będzie nadpisany.");
         }
 
         public void SaveState(DateTime utc, bool force = false)
@@ -291,6 +297,7 @@ namespace Apex.Core.Engine
 
         private bool TrySaveState(DateTime utc, bool force = false)
         {
+            if (_stateReadFault) return false; // Nie kasujemy dowodów uszkodzenia ani nie cofamy blokad/rejestru.
             if (_cfg.IsBacktest) return true;
             if (!_dirty && !force) return _persistenceHealthy;
             if (!force && (utc - _lastSaveUtc).TotalSeconds < 5) return _persistenceHealthy;

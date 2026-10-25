@@ -442,6 +442,26 @@ function equityChart(points, ccy) {
 
 /* ------------------------------------------------------------------ Pozycje i wyniki */
 
+function brokerPositions(acc) {
+  if (!Array.isArray(acc.positions)) return positionsList(acc.engine?.openPositions);
+  if (acc.positions.length === 0) return el('div', { class: 'empty', text: 'Brak otwartych pozycji na koncie.' });
+  const price = v => v === null || v === undefined || !Number.isFinite(v) ? 'BRAK' : nf(5).format(v);
+  const rows = acc.positions.map(p => el('tr', null,
+    el('td', { text: String(p.id) }), el('td', { text: p.symbol }),
+    el('td', { text: p.side === 'buy' || p.side === 'long' ? 'KUP' : 'SPRZEDAJ' }),
+    el('td', { class: 'num', text: nf(4).format(p.units) }),
+    el('td', { class: 'num', text: price(p.entry) }), el('td', { class: 'num', text: price(p.price) }),
+    el('td', { class: 'num ' + (p.sl == null ? 'neg' : ''), text: price(p.sl) }),
+    el('td', { class: 'num ' + (p.tp == null ? 'neg' : ''), text: price(p.tp) }),
+    el('td', { class: 'num ' + cls(p.net), text: money(p.net, acc.engine?.currency || acc.account?.currency) }),
+    el('td', { text: p.label === S.host.label ? 'APEX' : 'Pozycja obca: ' + (p.label || 'ręczna') })));
+  return el('div', null,
+    el('div', { class: 'table-wrap' }, el('table', null,
+      el('thead', null, el('tr', null, ...['ID u brokera', 'Instrument', 'Kierunek', 'Wolumen (units)', 'Wejście', 'Bieżąca cena', 'Stop Loss', 'Take Profit', 'Wynik netto', 'Pochodzenie'].map(text => el('th', { text })))),
+      el('tbody', null, rows))),
+    el('p', { class: 'note', text: 'Pozycje obce pokazano tylko do odczytu; polecenia APEX ich nie obejmują. Przy rozłączeniu są to ostatnio odebrane dane — sprawdź stan bezpośrednio w cTrader.' }));
+}
+
 function viewPositions() {
   const acc = currentAccount();
   if (!acc) return waitingView();
@@ -455,7 +475,7 @@ function viewPositions() {
     tile('Expectancy', st.trades ? signed(st.expectancyR, 3) + ' R' : '—', 'średni wynik w wielokrotnościach ryzyka'),
     tile('Maks. obsunięcie', st.trades ? pct(st.maxDrawdownPct) : '—'),
     tile('Śr. zysk / śr. strata', st.trades ? `${nf(2).format(st.avgWin || 0)} / ${nf(2).format(st.avgLoss || 0)}` : '—')));
-  wrap.appendChild(card('Otwarte pozycje bota', null, positionsList(e.openPositions)));
+  wrap.appendChild(card('Pozycje na koncie — dane brokera', acc.connected ? 'ostatnia migawka' : 'ROZŁĄCZONO — dane mogą być nieaktualne', brokerPositions(acc)));
   const rows = (acc.recentTrades || []).map((t) => el('tr', null,
     el('td', { text: time(t.exit) }), el('td', { text: t.symbol }), el('td', { text: t.dir }), el('td', { text: t.strategy }),
     el('td', { class: 'num ' + cls(t.net), text: signed(t.net) }), el('td', { class: 'num ' + cls(t.r), text: signed(t.r) + 'R' }),

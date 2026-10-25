@@ -466,14 +466,10 @@ namespace Apex.Desktop.Runtime
                 var legs = InstrumentClassifier.CurrencyLegs(u.AssetClass, u.Symbol, dto?.BaseAsset, dto?.QuoteAsset);
                 return new UniverseEntry { Symbol = u.Symbol, AssetClass = u.AssetClass, BaseCurrency = legs.Base, QuoteCurrency = legs.Quote };
             }));
-            // Instrument do testu wykonania: pierwszy płynny FX dostępny u brokera (nie musi mieć strategii).
-            _testSymbol = null;
-            foreach (var pref in UniverseSelector.Preferred[AssetClass.Forex])
-            {
-                var m = s.Symbols.FirstOrDefault(x => UniverseSelector.Matches(InstrumentClassifier.Normalize(x.Name), InstrumentClassifier.Normalize(pref))
-                                                     && InstrumentClassifier.Classify(x.Name, x.Description, x.BaseAsset, x.QuoteAsset) == AssetClass.Forex);
-                if (m != null) { _testSymbol = m.Name; break; }
-            }
+            // Test nie omija dopuszczonego uniwersum silnika ani klasyfikacji instrumentów.
+            _testSymbol = _universe.Where(u => u.Selected)
+                .OrderBy(u => u.AssetClass == AssetClass.Forex ? 0 : 1)
+                .Select(u => u.Symbol).FirstOrDefault();
         }
 
         private void Subscribe()

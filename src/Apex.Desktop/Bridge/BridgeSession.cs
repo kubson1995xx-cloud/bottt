@@ -318,9 +318,16 @@ namespace Apex.Desktop.Bridge
 
         public Task CloseAsync(string reason)
         {
-            MarkClosed();
-            return _transport.CloseAsync(reason);
+            lock (_closeGate)
+            {
+                if (_closeTask != null) return _closeTask;
+                MarkClosed();
+                return _closeTask = _transport.CloseAsync(reason);
+            }
         }
+
+        private readonly object _closeGate = new();
+        private Task? _closeTask;
 
         public void MarkClosed()
         {

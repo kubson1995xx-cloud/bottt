@@ -89,6 +89,19 @@ test('START requires explicit DEMO confirmation', () => {
   assert.match(dialog.textContent, /DEMO/);
 });
 
+test('positions panel exposes broker IDs, SL and TP and distinguishes foreign positions', () => {
+  const p = panel();
+  selectAccount(p, `S.host.label='APEX'; S.data.data.accounts[0].positions=[
+    {id:456,symbol:'US500',side:'buy',units:0.1,entry:5000,price:5001,sl:4900,tp:5300,label:'APEX',net:0.1},
+    {id:789,symbol:'EURUSD',side:'sell',units:1000,entry:1.1,price:1.09,sl:1.12,tp:1.05,label:'InnyBot',net:10}];`);
+  const view = p.run('viewPositions()');
+  assert.match(view.textContent, /456/);
+  assert.match(view.textContent.replace(/\s/g, ''), /4900/);
+  assert.match(view.textContent.replace(/\s/g, ''), /5300/);
+  assert.match(view.textContent, /789/);
+  assert.match(view.textContent, /pozycje obce|InnyBot/i);
+});
+
 test('shipped interface has no AI Lab or automatic update controls', () => {
   for (const file of ['index.html', 'app.js', 'decision-center.js']) {
     const text = fs.readFileSync(path.join(www, file), 'utf8');

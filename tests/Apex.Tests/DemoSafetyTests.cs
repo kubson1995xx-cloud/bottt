@@ -18,8 +18,8 @@ public class DemoSafetyTests
     {
         public readonly Dictionary<string, string> Durable = new();
         private readonly Dictionary<string, string> _pending = new();
-        public bool FailSet, FailFlush;
-        public string? Get(string key) => Durable.GetValueOrDefault(key);
+        public bool FailSet, FailFlush, FailGet;
+        public string? Get(string key) => FailGet ? throw new IOException("test disk read failure") : Durable.GetValueOrDefault(key);
         public void Set(string key, string value)
         {
             if (FailSet) throw new IOException("test disk write failure");
@@ -121,6 +121,27 @@ public class DemoSafetyTests
         restarted.Tick();
         Assert.Equal(EngineMode.Stopped, restarted.Engine.Mode);
         Assert.Empty(r.G.Inner.Orders);
+    }
+
+    [Theory]
+    [InlineData(true, "")]
+    [InlineData(false, "not-json")]
+    [InlineData(false, "null")]
+    [InlineData(false, "{\"AccountNumber\":999}")]
+    public void CorruptOrUnreadableState_CannotBeOverwrittenOrStarted(bool failGet, string content)
+    {
+        var original = new Rig();
+        string key = original.Store.Durable.Keys.Single();
+        original.Store.Durable[key] = content;
+        original.Store.FailGet = failGet;
+        var restarted = new Rig(original.Store, original.G, start: false);
+        restarted.Engine.CmdStart();
+        restarted.Engine.CmdExecutionTest(restarted.Now, "US500");
+        restarted.Engine.SaveState(restarted.Now, true);
+        restarted.Tick();
+        Assert.Empty(restarted.G.Inner.Orders);
+        Assert.NotEqual(EngineMode.Running, restarted.Engine.Mode);
+        Assert.Equal(content, restarted.Store.Durable[key]);
     }
 
     [Fact]

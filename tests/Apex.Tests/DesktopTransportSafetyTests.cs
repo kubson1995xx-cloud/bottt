@@ -34,6 +34,29 @@ namespace Apex.Tests
             Assert.True(ws.Aborted);
         }
 
+        private sealed class ClosingTransport : IBridgeTransport
+        {
+            public string Kind => "test";
+            public string Remote => "memory";
+            public int CloseCount;
+            public readonly TaskCompletionSource Closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public Task SendAsync(string json, CancellationToken ct) => Task.CompletedTask;
+            public Task CloseAsync(string reason) { CloseCount++; return Closed.Task; }
+        }
+
+        [Fact]
+        public async Task SessionCloseIsOneSharedCompletionBarrier()
+        {
+            var transport = new ClosingTransport();
+            var session = new BridgeSession(transport);
+            Task first = session.CloseAsync("reject");
+            Task second = session.CloseAsync("server finally");
+            Assert.Same(first, second);
+            Assert.Equal(1, transport.CloseCount);
+            transport.Closed.SetResult();
+            await first;
+        }
+
         [Fact]
         public async Task ClosedSocketCannotReportSuccessfulSend()
         {
