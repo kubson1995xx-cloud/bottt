@@ -29,19 +29,21 @@ namespace Apex.Desktop.Bridge
 
         public Task SendAsync(string json, CancellationToken ct)
         {
-            if (_ws.State != WebSocketState.Open) return Task.CompletedTask;
+            if (_ws.State != WebSocketState.Open) throw new WebSocketException("Transport WebSocket jest zamknięty.");
             return _ws.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, ct);
         }
 
         public async Task CloseAsync(string reason)
         {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
             try
             {
                 if (_ws.State == WebSocketState.Open)
-                    await _ws.CloseAsync(WebSocketCloseStatus.NormalClosure, reason.Length > 100 ? reason.Substring(0, 100) : reason, CancellationToken.None).ConfigureAwait(false);
+                    await _ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, reason.Length > 100 ? reason.Substring(0, 100) : reason, timeout.Token)
+                        .WaitAsync(timeout.Token).ConfigureAwait(false);
             }
-            catch (WebSocketException) { }
-            catch (ObjectDisposedException) { }
+            catch (Exception ex) when (ex is WebSocketException || ex is ObjectDisposedException || ex is OperationCanceledException || ex is InvalidOperationException) { }
+            finally { _ws.Abort(); }
         }
     }
 

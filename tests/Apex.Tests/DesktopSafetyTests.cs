@@ -254,6 +254,9 @@ namespace Apex.Tests
         [InlineData("null")]
         [InlineData("{}")]
         [InlineData("{\"AccountNumber\":910001,\"Mode\":\"Running\",\"Ledger\":null}")]
+        [InlineData("{\"AccountNumber\":910001,\"Risk\":{},\"Ledger\":[null]}")]
+        [InlineData("{\"AccountNumber\":910001,\"Risk\":{},\"Ledger\":[{\"SignalId\":\"\"}]}")]
+        [InlineData("{\"AccountNumber\":910001,\"Risk\":{},\"Ledger\":[],\"Plans\":[null]}")]
         public async Task CorruptedStateNeverBuildsOrOverwritesEvidence(string json)
         {
             string dir = Path.Combine(_dir, "konta", "cTrader_Pepperstone_910001", "stan");
@@ -266,6 +269,60 @@ namespace Apex.Tests
             await WaitUntil(() => r.Status != null);
             Assert.False(Status(r).GetProperty("engineReady").GetBoolean());
             Assert.Equal(json, File.ReadAllText(path));
+        }
+
+        [Fact]
+        public async Task ClosedCallbackIsAppliedBeforeLaterReconnectAction()
+        {
+            using var r = Runtime();
+            var first = Session(); Symbols(first); r.Attach(first);
+            await r.Command(_ => "ready");
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var blocker = r.Command(_ => { entered.Set(); release.Wait(); return "released"; });
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+            r.OnClosed(first, new ClosedDto { Id = 77, Label = "APEX", Symbol = "EURUSD", EntryTime = 1, ExitTime = 2, Net = 123 });
+            var second = Session(); Symbols(second);
+            int countAtReconnect = -1;
+            var replace = r.Command(_ => { countAtReconnect = r.Journal.AllRecent().Count; r.Attach(second); return "replaced"; });
+            release.Set();
+            await blocker; await replace;
+            await r.Command(_ => "barrier");
+            Assert.Equal(1, countAtReconnect);
+            Assert.Equal(123, Assert.Single(r.Journal.AllRecent()).NetProfit);
+        }
+
+        [Fact]
+        public async Task StopIsSavedBeforeAcknowledgementWithoutDispose()
+        {
+            using var r = Runtime();
+            var s = Session(); Symbols(s); r.Attach(s);
+            await Action(r, "start");
+            Assert.Contains("zatrzymany", await Action(r, "stop"));
+            string path = Path.Combine(_dir, "konta", "cTrader_Pepperstone_910001", "stan", "APEX_APEX_910001.json");
+            using var state = JsonDocument.Parse(File.ReadAllText(path));
+            Assert.Equal("Stopped", state.RootElement.GetProperty("Mode").GetString());
+        }
+
+        [Fact]
+        public async Task ReconnectRequiresExplicitStartAndQueuedOldCommandIsCancelled()
+        {
+            using var r = Runtime();
+            var first = Session(); Symbols(first); r.Attach(first);
+            await Action(r, "start");
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var blocker = r.Command(_ => { entered.Set(); release.Wait(); return "released"; });
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+            int calls = 0;
+            var queued = r.Command(_ => { calls++; return "stale command"; });
+            var second = Session(); Symbols(second); r.Attach(second);
+            release.Set();
+            await blocker; await queued;
+            EngineMode? mode = null;
+            await r.Command(e => { mode = e?.Mode; return "mode"; });
+            Assert.Equal(0, calls);
+            Assert.Equal(EngineMode.Stopped, mode);
         }
 
         [Fact]

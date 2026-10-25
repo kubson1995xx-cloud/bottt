@@ -131,10 +131,12 @@ namespace Apex.Desktop.Runtime
 
         public void OnClosed(BridgeSession s, ClosedDto c) => Enqueue(() =>
         {
-            if (ReferenceEquals(_adapter.Session, s)) OnClosed(c);
+            if (ReferenceEquals(_adapter.Session, s)) ApplyClosed(c);
         });
 
-        public void OnClosed(ClosedDto c) => Enqueue(() =>
+        public void OnClosed(ClosedDto c) => Enqueue(() => ApplyClosed(c));
+
+        private void ApplyClosed(ClosedDto c)
         {
             _engine?.OnPositionClosed(new ClosedPositionInfo
             {
@@ -154,7 +156,7 @@ namespace Apex.Desktop.Runtime
                 NetProfit = c.Net,
                 PlatformReason = c.Reason,
             });
-        });
+        }
 
         // ------------------------------------------------------------------ polecenia
 
@@ -419,6 +421,11 @@ namespace Apex.Desktop.Runtime
                 if (state == null || state.AccountNumber != account || state.SchemaVersion != 1
                     || !Enum.IsDefined(state.Mode) || state.Risk == null || state.Ledger == null || state.Plans == null
                     || state.Suspended == null || state.RecentTrades == null || state.DisabledStrategies == null || state.DisabledClasses == null
+                    || state.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId) || string.IsNullOrWhiteSpace(e.Symbol) || !Enum.IsDefined(e.State))
+                    || state.Ledger.Select(e => e.SignalId).Distinct(StringComparer.Ordinal).Count() != state.Ledger.Count
+                    || state.Plans.Any(p => p == null || p.PositionId <= 0 || string.IsNullOrWhiteSpace(p.Symbol))
+                    || state.Plans.Select(p => p.PositionId).Distinct().Count() != state.Plans.Count
+                    || state.RecentTrades.Any(t => t == null) || state.Suspended.Any(t => t == null)
                     || !parsed.RootElement.TryGetProperty("AccountNumber", out _)
                     || !parsed.RootElement.TryGetProperty("Risk", out _)
                     || !parsed.RootElement.TryGetProperty("Ledger", out _))
