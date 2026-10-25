@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Apex.Core.Bridge;
@@ -42,6 +43,10 @@ namespace Apex.Desktop.Bridge
         private AccountDto? _account;
         private long _requestSeq;
         private readonly SemaphoreSlim _sendLock = new(1, 1);
+        private readonly CancellationTokenSource _lifetime = new();
+        private int _state;
+        private DateTime _accountReceivedUtc;
+        private DateTime _positionsReceivedUtc;
 
         public BridgeSession(IBridgeTransport transport)
         {
@@ -51,7 +56,7 @@ namespace Apex.Desktop.Bridge
         }
 
         public string Id { get; } = Guid.NewGuid().ToString("N").Substring(0, 12);
-        public SessionState State { get; set; } = SessionState.AwaitingHello;
+        public SessionState State { get => (SessionState)Volatile.Read(ref _state); set => Volatile.Write(ref _state, (int)value); }
         public string Platform { get; private set; } = "";
         public string BridgeVersion { get; private set; } = "";
         public string Transport => _transport.Kind;
@@ -68,7 +73,39 @@ namespace Apex.Desktop.Bridge
         public event Action<BridgeSession>? SymbolsUpdated;
         public event Action<BridgeSession, ClosedDto>? PositionClosed;
 
-        public AccountDto? Account { get { lock (_lock) return _account; } }
+        public AccountDto? Account { get { lock (_lock) return _account == null ? null : CloneAccount(_account); } }
+        public DateTime AccountReceivedUtc { get { lock (_lock) return _accountReceivedUtc; } }
+        public bool HasFreshSnapshots
+        {
+            get
+            {
+                lock (_lock)
+                    return IsAlive && DateTime.UtcNow - _accountReceivedUtc < TimeSpan.FromSeconds(30)
+                        && DateTime.UtcNow - _positionsReceivedUtc < TimeSpan.FromSeconds(30);
+            }
+        }
+        public List<string> RecentLog(int count) { lock (_lock) return BridgeLog.Take(count).ToList(); }
+        private static AccountDto CloneAccount(AccountDto a) => new()
+        {
+            Number = a.Number, Broker = a.Broker, Currency = a.Currency, IsLive = a.IsLive, Hedging = a.Hedging,
+            Balance = a.Balance, Equity = a.Equity, Margin = a.Margin, FreeMargin = a.FreeMargin, MarginLevel = a.MarginLevel,
+        };
+        private static bool ValidAccount(string json, AccountDto? a)
+        {
+            if (a == null || a.Number <= 0 || string.IsNullOrWhiteSpace(a.Broker) || string.IsNullOrWhiteSpace(a.Currency)
+                || !double.IsFinite(a.Balance) || !double.IsFinite(a.Equity) || a.Balance <= 0 || a.Equity <= 0
+                || !double.IsFinite(a.Margin) || a.Margin < 0 || !double.IsFinite(a.FreeMargin)
+                || (a.MarginLevel.HasValue && !double.IsFinite(a.MarginLevel.Value))) return false;
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty("account", out var account)
+                && account.ValueKind == JsonValueKind.Object && account.TryGetProperty("isLive", out var live)
+                && (live.ValueKind == JsonValueKind.True || live.ValueKind == JsonValueKind.False);
+        }
+        private void RejectIdentity()
+        {
+            State = SessionState.Rejected;
+            _ = CloseAsync("nieprawidłowe dane lub zmiana tożsamości konta");
+        }
 
         public IReadOnlyList<PositionDto> Positions { get { lock (_lock) return _positions.ToList(); } }
 
@@ -103,9 +140,10 @@ namespace Apex.Desktop.Bridge
                 if (type != "hello") return;
                 var hello = BridgeProtocol.Deserialize<HelloMsg>(json);
                 if (hello == null) return;
+                if (!ValidAccount(json, hello.Account)) { RejectIdentity(); return; }
                 Platform = Sanitize(hello.Platform, 20);
                 BridgeVersion = Sanitize(hello.BridgeVersion, 20);
-                lock (_lock) _account = hello.Account;
+                lock (_lock) { _account = CloneAccount(hello.Account); _accountReceivedUtc = DateTime.UtcNow; }
                 HelloReceived?.Invoke(this, hello);
                 return;
             }
@@ -153,17 +191,19 @@ namespace Apex.Desktop.Bridge
                 case "account":
                     {
                         var m = BridgeProtocol.Deserialize<AccountMsg>(json);
-                        if (m?.Account == null) return;
+                        if (!ValidAccount(json, m?.Account)) { RejectIdentity(); return; }
                         lock (_lock)
                         {
                             // Zmiana numeru konta w trakcie sesji = przełączenie konta na platformie – sesja zostaje zablokowana.
-                            if (_account != null && m.Account.Number != _account.Number)
+                            var a = m!.Account;
+                            if (_account == null || a.Number != _account.Number || a.IsLive != _account.IsLive
+                                || a.Broker != _account.Broker || a.Currency != _account.Currency || a.Hedging != _account.Hedging)
                             {
-                                State = SessionState.Rejected;
-                                _ = _transport.CloseAsync("zmiana konta w trakcie sesji");
+                                RejectIdentity();
                                 return;
                             }
-                            _account = m.Account;
+                            _account = CloneAccount(a);
+                            _accountReceivedUtc = DateTime.UtcNow;
                         }
                         break;
                     }
@@ -171,7 +211,8 @@ namespace Apex.Desktop.Bridge
                     {
                         var m = BridgeProtocol.Deserialize<PositionsMsg>(json);
                         if (m == null) return;
-                        lock (_lock) _positions = m.Items;
+                        if (m.Items == null) return;
+                        lock (_lock) { _positions = m.Items; _positionsReceivedUtc = DateTime.UtcNow; }
                         break;
                     }
                 case "closed":
@@ -218,60 +259,73 @@ namespace Apex.Desktop.Bridge
 
         public async Task SendAsync<T>(T msg)
         {
-            string json = BridgeProtocol.Serialize(msg);
-            await _sendLock.WaitAsync().ConfigureAwait(false);
-            try { await _transport.SendAsync(json, CancellationToken.None).ConfigureAwait(false); }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            await _sendLock.WaitAsync(timeout.Token).ConfigureAwait(false);
+            try
+            {
+                timeout.Token.ThrowIfCancellationRequested();
+                await _transport.SendAsync(BridgeProtocol.Serialize(msg), timeout.Token).WaitAsync(timeout.Token).ConfigureAwait(false);
+            }
+            catch { _ = CloseAsync("błąd wysyłania"); throw; }
             finally { _sendLock.Release(); }
         }
 
         public void Send<T>(T msg)
         {
-            try { SendAsync(msg).Wait(TimeSpan.FromSeconds(10)); }
-            catch (AggregateException) { }
+            try { SendAsync(msg).GetAwaiter().GetResult(); }
+            catch (Exception ex) when (ex is OperationCanceledException || ex is System.IO.IOException || ex is System.Net.WebSockets.WebSocketException || ex is ObjectDisposedException) { }
         }
 
         public string NextId() => $"{Id}-{Interlocked.Increment(ref _requestSeq)}";
 
-        /// <summary>
-        /// Wysyła zapytanie i czeka na odpowiedź z tym samym identyfikatorem.
-        /// Zwraca (wysłano?, odpowiedź?). Brak odpowiedzi po wysłaniu = stan NIEPEWNY (silnik zweryfikuje pozycje).
-        /// </summary>
-        public (bool sent, string? response) Request<T>(T msg, string id, TimeSpan timeout)
+        /// <summary>Termin obejmuje oczekiwanie na blokadę, wysyłanie i odpowiedź.
+        /// Po rozpoczęciu wysyłania brak potwierdzenia oznacza NIEPEWNOŚĆ, nigdy pewne odrzucenie.</summary>
+        public (bool sent, string? response) Request<T>(T msg, string id, TimeSpan timeout) =>
+            RequestAsync(msg, id, timeout).GetAwaiter().GetResult();
+
+        private async Task<(bool sent, string? response)> RequestAsync<T>(T msg, string id, TimeSpan timeout)
         {
-            if (!IsAlive) return (false, null);
+            if (!HasFreshSnapshots || Account?.IsLive != false) return (false, null);
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            deadline.CancelAfter(timeout);
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pending[id] = tcs;
+            if (!_pending.TryAdd(id, tcs)) return (false, null);
+            bool acquired = false, started = false;
             try
             {
-                var send = SendAsync(msg);
-                if (!send.Wait(TimeSpan.FromSeconds(5)) || send.IsFaulted)
-                {
-                    _pending.TryRemove(id, out _);
-                    return (false, null);
-                }
+                await _sendLock.WaitAsync(deadline.Token).ConfigureAwait(false);
+                acquired = true;
+                deadline.Token.ThrowIfCancellationRequested();
+                if (!HasFreshSnapshots || Account?.IsLive != false) return (false, null);
+                started = true;
+                await _transport.SendAsync(BridgeProtocol.Serialize(msg), deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false);
+                _sendLock.Release();
+                acquired = false;
+                return (true, await tcs.Task.WaitAsync(deadline.Token).ConfigureAwait(false));
             }
-            catch (AggregateException)
+            catch (Exception ex) when (ex is OperationCanceledException || ex is System.IO.IOException || ex is System.Net.WebSockets.WebSocketException || ex is ObjectDisposedException)
             {
-                _pending.TryRemove(id, out _);
-                return (false, null);
+                if (started) _ = CloseAsync("niepewny wynik wysłania – wymagane ponowne połączenie");
+                return (started, null);
             }
-            bool ok;
-            try { ok = tcs.Task.Wait(timeout); }
-            catch (AggregateException) { ok = false; }
-            _pending.TryRemove(id, out _);
-            return (true, ok && tcs.Task.Status == TaskStatus.RanToCompletion ? tcs.Task.Result : null);
+            finally
+            {
+                if (acquired) _sendLock.Release();
+                _pending.TryRemove(id, out _);
+            }
         }
 
         public Task CloseAsync(string reason)
         {
-            State = State == SessionState.Rejected ? SessionState.Rejected : SessionState.Closed;
-            foreach (var kv in _pending) kv.Value.TrySetCanceled();
+            MarkClosed();
             return _transport.CloseAsync(reason);
         }
 
         public void MarkClosed()
         {
             if (State != SessionState.Rejected) State = SessionState.Closed;
+            _lifetime.Cancel();
             foreach (var kv in _pending) kv.Value.TrySetCanceled();
         }
     }

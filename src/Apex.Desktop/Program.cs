@@ -119,7 +119,7 @@ namespace Apex.Desktop
                     pairingKey = config.Config.PairingKey,
                     wsUrl = $"ws://127.0.0.1:{port}/bridge",
                     tcpPort = config.Config.BridgeTcpPort,
-                    liveFeature = config.Config.LiveTradingFeature,
+                    liveFeature = false,
                     label = config.Config.Label,
                     news = new
                     {
@@ -153,7 +153,7 @@ namespace Apex.Desktop
                     }
                     catch (TimeoutException)
                     {
-                        return Results.Json(new { message = "Silnik nie odpowiedział w czasie (polecenie w kolejce)." }, statusCode: 504);
+                        return Results.Json(new { message = "Polecenie anulowane przed wykonaniem – przekroczono czas oczekiwania." }, statusCode: 504);
                     }
                 }
             });

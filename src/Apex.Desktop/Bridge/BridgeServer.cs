@@ -152,15 +152,15 @@ namespace Apex.Desktop.Bridge
 
         public void StartTcp(CancellationToken ct)
         {
-            _tcp = new TcpListener(IPAddress.Loopback, _config.Config.BridgeTcpPort);
             try
             {
+                _tcp = new TcpListener(IPAddress.Loopback, _config.Config.BridgeTcpPort);
                 _tcp.Start();
             }
-            catch (SocketException ex)
+            catch (Exception ex) when (ex is SocketException || ex is ArgumentOutOfRangeException)
             {
                 // Zajęty port nie może zatrzymać całej aplikacji – panel i most WebSocket (cTrader) działają dalej.
-                _log.Error($"Nie można uruchomić serwera mostów TCP na porcie {_config.Config.BridgeTcpPort} ({ex.SocketErrorCode}) – most MetaTrader 5 niedostępny. Zmień BridgeTcpPort w apex.config.json.");
+                _log.Error($"Nie można uruchomić serwera mostów TCP na porcie {_config.Config.BridgeTcpPort} ({ex.Message}) – most MetaTrader 5 niedostępny. Zmień BridgeTcpPort w apex.config.json.");
                 _tcp = null;
                 return;
             }
@@ -173,7 +173,8 @@ namespace Apex.Desktop.Bridge
                     TcpClient client;
                     try { client = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false); }
                     catch (OperationCanceledException) { break; }
-                    catch (SocketException) { continue; }
+                    catch (SocketException) { break; }
+                    catch (ObjectDisposedException) { break; }
                     _ = Task.Run(() => HandleTcpAsync(client, ct));
                 }
             }, ct);

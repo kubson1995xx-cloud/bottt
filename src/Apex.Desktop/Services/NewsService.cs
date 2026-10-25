@@ -61,7 +61,7 @@ namespace Apex.Desktop.Services
                 var events = NewsCalendar.ParseFfJson(json);
                 if (events.Count == 0) { LastError = "Pusty kalendarz"; return; }
                 _calendar.SetEvents(events, DateTime.UtcNow, uri.Host);
-                File.WriteAllText(_cachePath, _calendar.Serialize());
+                AtomicFile.Write(_cachePath, _calendar.Serialize());
                 LastError = "";
                 _log.Info($"Kalendarz wiadomości zaktualizowany: {events.Count} wydarzeń.");
             }

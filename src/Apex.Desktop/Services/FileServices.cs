@@ -16,6 +16,9 @@ namespace Apex.Desktop.Services
         private readonly string _dir;
         private readonly object _lock = new();
 
+        private volatile bool _hasFault;
+        public bool HasFault => _hasFault;
+
         public FileStore(string dir)
         {
             _dir = dir;
@@ -33,10 +36,16 @@ namespace Apex.Desktop.Services
         {
             lock (_lock)
             {
-                string p = PathFor(key);
-                if (File.Exists(p)) return File.ReadAllText(p);
-                // Odtworzenie z kopii, jeśli zapis został przerwany.
-                return File.Exists(p + ".bak") ? File.ReadAllText(p + ".bak") : null;
+                try
+                {
+                    string p = PathFor(key);
+                    if (File.Exists(p)) return File.ReadAllText(p);
+                    // Stara kopia może nie zawierać Emergency Stop lub niepewnego zlecenia.
+                    if (File.Exists(p + ".bak") || Directory.Exists(p))
+                        throw new IOException("Brak autorytatywnego pliku stanu: " + p);
+                    return null;
+                }
+                catch { _hasFault = true; throw; }
             }
         }
 
@@ -44,11 +53,8 @@ namespace Apex.Desktop.Services
         {
             lock (_lock)
             {
-                string p = PathFor(key);
-                string tmp = p + ".tmp";
-                File.WriteAllText(tmp, value);
-                if (File.Exists(p)) File.Copy(p, p + ".bak", true);
-                File.Move(tmp, p, true);
+                try { AtomicFile.Write(PathFor(key), value); }
+                catch { _hasFault = true; throw; }
             }
         }
 
@@ -88,7 +94,7 @@ namespace Apex.Desktop.Services
         private static TradeRecord? Parse(string line)
         {
             var p = line.Split(';');
-            if (p.Length < 19) return null;
+            if (p.Length < 25) return null;
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             try
             {
@@ -120,7 +126,7 @@ namespace Apex.Desktop.Services
                     Parameters = p.Length > 24 ? p[24] : "",
                 };
             }
-            catch (FormatException) { return null; }
+            catch (Exception ex) when (ex is FormatException || ex is OverflowException) { return null; }
         }
 
         private void Append(string file, string line)

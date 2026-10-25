@@ -21,7 +21,7 @@ namespace Apex.Desktop.Services
         /// <summary>Ręczna prowizja (wymagana dla MT5 – platforma nie udostępnia prowizji przez API).</summary>
         public CommissionOverride? Commission { get; set; }
         public UniverseSettings? Universe { get; set; }
-        public bool AutoStart { get; set; } = true;
+        public bool AutoStart { get; set; }
     }
 
     /// <summary>Konfiguracja aplikacji (plik apex.config.json w katalogu danych).</summary>
@@ -79,14 +79,14 @@ namespace Apex.Desktop.Services
             HostConfig cfg;
             if (File.Exists(Path_))
             {
-                try { cfg = JsonSerializer.Deserialize<HostConfig>(File.ReadAllText(Path_), Json) ?? new HostConfig(); }
+                try { cfg = JsonSerializer.Deserialize<HostConfig>(File.ReadAllText(Path_), Json)
+                    ?? throw new InvalidDataException("Pusty obiekt konfiguracji."); }
                 catch (JsonException ex)
                 {
-                    // Uszkodzony plik – kopia zapasowa i bezpieczne ustawienia domyślne (LIVE wyłączone).
-                    File.Copy(Path_, Path_ + ".uszkodzony-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"), true);
-                    Console.Error.WriteLine("Uszkodzony plik konfiguracji: " + ex.Message);
-                    cfg = new HostConfig();
+                    throw new InvalidDataException("Uszkodzony plik konfiguracji – zachowano oryginał; wymagane sprawdzenie.", ex);
                 }
+                if (cfg.Risk == null || cfg.News == null || cfg.Universe == null || cfg.Accounts == null || cfg.AllowedBrokers == null)
+                    throw new InvalidDataException("Niekompletna konfiguracja – wymagane sprawdzenie pliku.");
             }
             else cfg = new HostConfig();
 
@@ -103,17 +103,7 @@ namespace Apex.Desktop.Services
         {
             lock (_lock)
             {
-                string tmp = Path_ + ".tmp";
-                File.WriteAllText(tmp, JsonSerializer.Serialize(Config, Json));
-                // Inny proces (AI Lab) może chwilowo czytać plik – na Windows zamiana wtedy się nie udaje; kilka krótkich ponowień.
-                for (int attempt = 1; ; attempt++)
-                {
-                    try { File.Move(tmp, Path_, true); break; }
-                    catch (Exception ex) when ((ex is UnauthorizedAccessException || (ex is IOException && ex is not FileNotFoundException && ex is not DirectoryNotFoundException)) && attempt < 6)
-                    {
-                        System.Threading.Thread.Sleep(25 * attempt * attempt);
-                    }
-                }
+                AtomicFile.Write(Path_, JsonSerializer.Serialize(Config, Json));
             }
         }
 
@@ -121,8 +111,11 @@ namespace Apex.Desktop.Services
         {
             lock (_lock)
             {
-                change(Config);
-                Save();
+                // Zmiana jest widoczna w pamięci dopiero po udanym trwałym zapisie.
+                var candidate = JsonSerializer.Deserialize<HostConfig>(JsonSerializer.Serialize(Config, Json), Json)!;
+                change(candidate);
+                AtomicFile.Write(Path_, JsonSerializer.Serialize(candidate, Json));
+                Config = candidate;
             }
         }
 
@@ -132,9 +125,8 @@ namespace Apex.Desktop.Services
             {
                 if (!Config.Accounts.TryGetValue(key, out var a))
                 {
-                    a = new AccountSettings();
-                    Config.Accounts[key] = a;
-                    Save();
+                    Update(c => c.Accounts[key] = new AccountSettings());
+                    a = Config.Accounts[key];
                 }
                 return a;
             }

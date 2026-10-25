@@ -34,6 +34,13 @@ namespace Apex.Desktop.Runtime
         private readonly FileJournal _journal;
         private readonly FileStore _store;
         private readonly ConcurrentQueue<Action> _commands = new();
+        private readonly object _lifecycle = new();
+        private readonly ConcurrentDictionary<long, Action> _cancelCommands = new();
+        private long _commandSequence;
+        private bool _emergencyLatched;
+        private volatile bool _storageFault;
+        private volatile bool _sessionReady;
+        private AccountDto? _identity;
         private readonly AutoResetEvent _wake = new(false);
         private readonly Thread _thread;
         private volatile bool _stop;
@@ -56,9 +63,9 @@ namespace Apex.Desktop.Runtime
             var safe = new string(key.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
             _dir = Path.Combine(config.DataDir, "konta", safe);
             Directory.CreateDirectory(_dir);
-            _adapter = new SessionAdapter(Commission);
             _journal = new FileJournal(Path.Combine(_dir, "dziennik"));
             _store = new FileStore(Path.Combine(_dir, "stan"));
+            _adapter = new SessionAdapter(Commission, () => !_stop && _sessionReady && !_storageFault && !_store.HasFault && !_emergencyLatched);
             LoadEquity();
             _thread = new Thread(Loop) { IsBackground = true, Name = "APEX " + key };
             _thread.Start();
@@ -84,26 +91,47 @@ namespace Apex.Desktop.Runtime
 
         // ------------------------------------------------------------------ sesje
 
+        public bool MatchesIdentity(AccountDto a)
+        {
+            lock (_lifecycle) return _identity == null || (_identity.Number == a.Number && _identity.Broker == a.Broker
+                && _identity.Currency == a.Currency && _identity.IsLive == a.IsLive && _identity.Hedging == a.Hedging);
+        }
+
         public void Attach(BridgeSession s)
         {
-            _adapter.Attach(s);
+            lock (_lifecycle)
+            {
+                if (_stop) return;
+                if (s.Account == null || !MatchesIdentity(s.Account)) throw new InvalidOperationException("Zmiana tożsamości konta.");
+                _identity ??= s.Account;
+                _sessionReady = false;
+                _adapter.Attach(s);
+            }
             Enqueue(() =>
             {
+                if (!ReferenceEquals(_adapter.Session, s)) return;
                 if (_engine == null) TryBuildEngine();
-                else Subscribe();
+                else { _engine.CmdStop(); _engine.SaveState(DateTime.UtcNow, true); Subscribe(); }
+                _sessionReady = true;
             });
         }
 
         public void Detach(BridgeSession s)
         {
             _adapter.Detach(s);
-            _wake.Set();
+            lock (_lifecycle) { if (!_stop) _wake.Set(); }
         }
 
         public void OnSymbols(BridgeSession s) => Enqueue(() =>
         {
+            if (!ReferenceEquals(_adapter.Session, s)) return;
             if (_engine == null) TryBuildEngine();
             else { RecomputeUniverse(); Subscribe(); }
+        });
+
+        public void OnClosed(BridgeSession s, ClosedDto c) => Enqueue(() =>
+        {
+            if (ReferenceEquals(_adapter.Session, s)) OnClosed(c);
         });
 
         public void OnClosed(ClosedDto c) => Enqueue(() =>
@@ -132,33 +160,83 @@ namespace Apex.Desktop.Runtime
 
         private void Enqueue(Action a)
         {
-            _commands.Enqueue(a);
-            _wake.Set();
+            lock (_lifecycle)
+            {
+                if (_stop) return;
+                _commands.Enqueue(a);
+                _wake.Set();
+            }
         }
 
         /// <summary>Wykonuje polecenie na wątku silnika i zwraca komunikat (lub błąd po 20 s).</summary>
         public Task<string> Command(Func<TradingEngine?, string> f)
         {
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Enqueue(() =>
+            int claimed = 0;
+            long id = Interlocked.Increment(ref _commandSequence);
+            var commandSession = _adapter.Session;
+            lock (_lifecycle)
             {
-                try { tcs.TrySetResult(f(_engine)); }
-                catch (Exception ex) { tcs.TrySetResult("Błąd: " + ex.Message); }
-            });
-            return tcs.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                if (_stop) return Task.FromException<string>(new ObjectDisposedException(nameof(AccountRuntime)));
+                _cancelCommands[id] = () =>
+                {
+                    if (Interlocked.CompareExchange(ref claimed, 1, 0) == 0)
+                        tcs.TrySetException(new ObjectDisposedException(nameof(AccountRuntime)));
+                };
+                Enqueue(() =>
+                {
+                    if (Interlocked.CompareExchange(ref claimed, 1, 0) != 0) return;
+                    _cancelCommands.TryRemove(id, out _);
+                    try { tcs.TrySetResult(ReferenceEquals(commandSession, _adapter.Session)
+                        ? f(_engine) : "Polecenie anulowane: zmieniło się połączenie konta."); }
+                    catch (Exception ex) { tcs.TrySetResult("Błąd: " + ex.Message); }
+                });
+            }
+            _ = Expire();
+            return tcs.Task;
+
+            async Task Expire()
+            {
+                await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+                if (!tcs.Task.IsCompleted && Interlocked.CompareExchange(ref claimed, 1, 0) == 0)
+                {
+                    _cancelCommands.TryRemove(id, out _);
+                    tcs.TrySetException(new TimeoutException("Polecenie anulowane przed wykonaniem."));
+                }
+            }
         }
 
         public string ExecuteAction(TradingEngine? e, string action, JsonElement args)
         {
+            // Zatrzymanie awaryjne zapisujemy nawet bez gotowego silnika i przed operacjami brokera.
+            if (action == "unlockLive") return "Handel LIVE jest wyłączony globalnie i trwale w wersji DEMO.";
+            if (action == "emergency")
+            {
+                _emergencyLatched = true;
+                string? error = null;
+                try { _store.Set("desktop-control", "{\"EmergencyStopped\":true}"); }
+                catch (Exception ex) { _storageFault = true; error = ex.Message; }
+                var result = e?.CmdEmergencyStop(DateTime.UtcNow, "przycisk AWARYJNY STOP w panelu")
+                    ?? "AWARYJNE ZATRZYMANIE zapisane – oczekiwanie na silnik.";
+                return error == null ? result : "Błąd trwałego zapisu Emergency Stop: " + error;
+            }
+            if (action == "stop" && e == null) return "Bot zatrzymany – silnik nie jest gotowy.";
             if (e == null) return "Silnik konta nie jest jeszcze gotowy (czekam na dane z mostu).";
+            e.SetGuard(EvaluateGuard());
             var now = DateTime.UtcNow;
             switch (action)
             {
                 case "start": return e.CmdStart();
-                case "stop": return e.CmdStop();
+                case "stop":
+                    var stopped = e.CmdStop();
+                    e.SaveState(now, true);
+                    return stopped;
                 case "pause": return e.CmdPauseEntries();
                 case "emergency": return e.CmdEmergencyStop(now, "przycisk AWARYJNY STOP w panelu");
-                case "resetEmergency": return e.CmdResetEmergency(now);
+                case "resetEmergency":
+                    _store.Set("desktop-control", "{\"EmergencyStopped\":false}");
+                    _emergencyLatched = false;
+                    return e.CmdResetEmergency(now);
                 case "closeAll": return e.CmdCloseAllOwn(now);
                 case "resumeSuspended": return e.CmdResumeSuspended();
                 case "executionTest":
@@ -222,19 +300,6 @@ namespace Apex.Desktop.Runtime
                         _config.Update(c => { if (!c.Accounts.TryGetValue(Key, out var a)) c.Accounts[Key] = a = new AccountSettings(); a.Commission = co; });
                         return $"Prowizja ustawiona: {co.Kind} {co.Value}";
                     }
-                case "unlockLive":
-                    {
-                        if (!_config.Config.LiveTradingFeature)
-                            return "Handel LIVE jest wyłączony globalnie. Aby go dopuścić, zamknij aplikację i świadomie ustaw \"LiveTradingFeature\": true w pliku apex.config.json.";
-                        var acc = _adapter.GetAccount();
-                        if (!acc.IsLive) return "To konto jest kontem DEMO – odblokowanie nie jest potrzebne.";
-                        string phrase = args.TryGetProperty("phrase", out var ph) ? (ph.GetString() ?? "") : "";
-                        if (phrase.Trim() != AccountGuard.RequiredLivePhrase(acc.Number))
-                            return $"Niepoprawna fraza. Wpisz dokładnie: {AccountGuard.RequiredLivePhrase(acc.Number)}";
-                        _config.Update(c => { if (!c.Accounts.TryGetValue(Key, out var a)) c.Accounts[Key] = a = new AccountSettings(); a.AllowLive = true; a.LiveConfirmation = phrase.Trim(); });
-                        _log.Warn($"Konto LIVE {acc.Number} świadomie odblokowane przez użytkownika.");
-                        return "Konto LIVE odblokowane. Bot pozostaje ZATRZYMANY – uruchom go przyciskiem START, gdy będziesz gotów.";
-                    }
                 case "lockLive":
                     {
                         _config.Update(c => { if (c.Accounts.TryGetValue(Key, out var a)) { a.AllowLive = false; a.LiveConfirmation = ""; } });
@@ -260,14 +325,13 @@ namespace Apex.Desktop.Runtime
         {
             var acc = _adapter.GetAccount();
             var cfg = _config.Config;
-            var s = Settings;
-            var live = new List<long>();
-            if (cfg.LiveTradingFeature && s.AllowLive && acc.Number > 0) live.Add(acc.Number);
+            if (_storageFault || _store.HasFault) return new AccountGuardResult { Allowed = false, IsLive = acc.IsLive, Reason = "Błąd trwałego stanu – wymagane sprawdzenie plików i restart." };
+            if (!_adapter.IsConnected) return new AccountGuardResult { Allowed = false, IsLive = acc.IsLive, Reason = "Brak świeżych migawek konta i pozycji." };
             var guardSettings = new AccountGuardSettings
             {
-                AllowLive = cfg.LiveTradingFeature && s.AllowLive,
-                LiveConfirmation = s.LiveConfirmation,
-                AllowedAccounts = acc.IsLive ? live : Array.Empty<long>(),
+                AllowLive = false,
+                LiveConfirmation = "",
+                AllowedAccounts = Array.Empty<long>(),
                 AllowedBrokers = cfg.AllowedBrokers,
             };
             return AccountGuard.Evaluate(acc.IsValid ? acc : null, guardSettings);
@@ -296,9 +360,10 @@ namespace Apex.Desktop.Runtime
         private void TryBuildEngine()
         {
             var s = _adapter.Session;
-            if (s == null || s.Account == null || !s.SymbolsReceived) return;
+            if (_storageFault || s == null || s.Account == null || !s.SymbolsReceived || !s.HasFreshSnapshots) return;
             try
             {
+                ValidatePersistentState(s.Account.Number);
                 var guard = EvaluateGuard();
                 var acc = _adapter.GetAccount();
                 var profile = LoadProfile();
@@ -317,14 +382,12 @@ namespace Apex.Desktop.Runtime
                 var engine = new TradingEngine(engineCfg, book, _adapter, _adapter, _adapter, _store, _log, _journal, _news);
                 engine.Decisions = _decisions; // pasywny rejestrator dla AI Decision Center (tylko odczyt)
                 engine.SetGuard(guard);
+                engine.Initialize(DateTime.UtcNow);
+                if (_emergencyLatched) engine.CmdEmergencyStop(DateTime.UtcNow, "odtworzony AWARYJNY STOP");
+                else if (engine.Mode == EngineMode.Running) engine.CmdStop();
+                engine.SaveState(DateTime.UtcNow, true);
                 _engine = engine;
                 RecomputeUniverse();
-                engine.Initialize(DateTime.UtcNow);
-                if (acc.IsLive || !accSettings.AutoStart)
-                {
-                    // Konto LIVE nigdy nie startuje automatycznie – wymaga przycisku START.
-                    if (engine.Mode == EngineMode.Running) engine.CmdStop();
-                }
                 Subscribe();
                 _log.Info($"Silnik konta gotowy: {(acc.IsLive ? "LIVE" : "DEMO")} {acc.Number} ({acc.BrokerName}), strategie aktywne dla klas: {string.Join(", ", book.Classes)}. Strażnik: {guard.Reason}");
                 _lastBuildError = "";
@@ -333,6 +396,38 @@ namespace Apex.Desktop.Runtime
             {
                 _lastBuildError = ex.Message;
                 _log.Error("Nie udało się uruchomić silnika konta: " + ex.Message);
+            }
+        }
+
+        private void ValidatePersistentState(long account)
+        {
+            try
+            {
+                var control = _store.Get("desktop-control");
+                if (control != null)
+                {
+                    using var doc = JsonDocument.Parse(control);
+                    _emergencyLatched = doc.RootElement.GetProperty("EmergencyStopped").GetBoolean();
+                }
+                string label = new string(_config.Config.Label.Where(char.IsLetterOrDigit).ToArray());
+                string key = $"APEX {label} {account}";
+                if (key.Length > 50) key = key.Substring(0, 50);
+                var json = _store.Get(key);
+                if (json == null) return;
+                var state = JsonSerializer.Deserialize<EngineState>(json, ConfigStore.Json);
+                using var parsed = JsonDocument.Parse(json);
+                if (state == null || state.AccountNumber != account || state.SchemaVersion != 1
+                    || !Enum.IsDefined(state.Mode) || state.Risk == null || state.Ledger == null || state.Plans == null
+                    || state.Suspended == null || state.RecentTrades == null || state.DisabledStrategies == null || state.DisabledClasses == null
+                    || !parsed.RootElement.TryGetProperty("AccountNumber", out _)
+                    || !parsed.RootElement.TryGetProperty("Risk", out _)
+                    || !parsed.RootElement.TryGetProperty("Ledger", out _))
+                    throw new InvalidDataException("Uszkodzony lub obcy stan konta; brak automatycznego odtwarzania z kopii.");
+            }
+            catch
+            {
+                _storageFault = true;
+                throw;
             }
         }
 
@@ -389,11 +484,12 @@ namespace Apex.Desktop.Runtime
             while (!_stop)
             {
                 _wake.WaitOne(TimeSpan.FromSeconds(2));
-                while (_commands.TryDequeue(out var cmd))
+                while (!_stop && _commands.TryDequeue(out var cmd))
                 {
                     try { cmd(); }
                     catch (Exception ex) { _log.Error("Polecenie: " + ex.Message); }
                 }
+                if (_stop) break;
                 try
                 {
                     var now = DateTime.UtcNow;
@@ -414,6 +510,13 @@ namespace Apex.Desktop.Runtime
                     _log.Error("Pętla konta: " + ex.Message);
                 }
             }
+            SaveAtShutdown();
+        }
+
+        private void SaveAtShutdown()
+        {
+            _engine?.CmdStop();
+            _engine?.SaveState(DateTime.UtcNow, true);
         }
 
         private void SampleEquity(DateTime now)
@@ -429,7 +532,7 @@ namespace Apex.Desktop.Runtime
             }
             try
             {
-                File.WriteAllText(Path.Combine(_dir, "kapital.json"),
+                AtomicFile.Write(Path.Combine(_dir, "kapital.json"),
                     JsonSerializer.Serialize(_equity.Select(x => new[] { BridgeProtocol.ToUnixMs(x.t), Math.Round(x.eq, 2) }).ToList()));
             }
             catch (IOException) { }
@@ -480,8 +583,10 @@ namespace Apex.Desktop.Runtime
                     lastMessageUtc = s.LastMessageUtc,
                     symbols = s.Symbols.Count,
                     quotes = s.QuoteCount,
-                    bridgeLog = s.BridgeLog.Take(10).ToList(),
+                    bridgeLog = s.RecentLog(10),
                 },
+                account = s?.Account,
+                positions = s?.Positions ?? Array.Empty<PositionDto>(),
                 engineReady = _engine != null,
                 buildError = _lastBuildError,
                 engine = st,
@@ -512,8 +617,8 @@ namespace Apex.Desktop.Runtime
                 executionTest = _engine?.LastExecutionTest ?? Array.Empty<string>(),
                 testSymbol = _testSymbol,
                 commission = Commission(),
-                liveFeature = _config.Config.LiveTradingFeature,
-                requiredLivePhrase = s?.Account is { IsLive: true } a ? AccountGuard.RequiredLivePhrase(a.Number) : null,
+                liveFeature = false,
+                requiredLivePhrase = (string?)null,
             };
         }
 
@@ -644,10 +749,16 @@ namespace Apex.Desktop.Runtime
 
         public void Dispose()
         {
-            _stop = true;
-            _wake.Set();
-            _thread.Join(TimeSpan.FromSeconds(5));
-            if (_engine != null) _engine.SaveState(DateTime.UtcNow, true);
+            lock (_lifecycle)
+            {
+                if (_stop) return;
+                _stop = true;
+                foreach (var cancel in _cancelCommands.Values) cancel();
+                _cancelCommands.Clear();
+                _wake.Set();
+            }
+            if (Thread.CurrentThread != _thread) _thread.Join(TimeSpan.FromSeconds(5));
+            // Zapis należy wyłącznie do wątku silnika; nigdy równolegle po nieudanym Join.
         }
     }
 }

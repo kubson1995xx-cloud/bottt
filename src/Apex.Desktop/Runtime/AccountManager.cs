@@ -25,6 +25,8 @@ namespace Apex.Desktop.Runtime
         private readonly ConcurrentDictionary<string, AccountRuntime> _runtimes = new();
         private readonly ConcurrentDictionary<string, BridgeSession> _sessions = new();
         private readonly ConcurrentQueue<string> _rejections = new();
+        private readonly object _lifecycle = new();
+        private bool _disposed;
 
         public AccountManager(ConfigStore config, NewsCalendar news, AppLog log)
         {
@@ -39,10 +41,14 @@ namespace Apex.Desktop.Runtime
 
         public void Register(BridgeSession s)
         {
-            _sessions[s.Id] = s;
-            s.HelloReceived += OnHello;
+            lock (_lifecycle)
+            {
+                if (_disposed) { s.MarkClosed(); return; }
+                _sessions[s.Id] = s;
+                s.HelloReceived += OnHello;
+            }
             s.SymbolsUpdated += sess => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r)) r.OnSymbols(sess); };
-            s.PositionClosed += (sess, c) => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r)) r.OnClosed(c); };
+            s.PositionClosed += (sess, c) => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r) && ReferenceEquals(r.Adapter.Session, sess)) r.OnClosed(sess, c); };
         }
 
         public void Unregister(BridgeSession s)
@@ -79,17 +85,33 @@ namespace Apex.Desktop.Runtime
             if (hello.Account == null || hello.Account.Number <= 0) { Reject(s, "brak danych konta"); return; }
             string platform = string.IsNullOrWhiteSpace(s.Platform) ? "Nieznana" : s.Platform;
             string key = BridgeSession.AccountKeyFor(platform, hello.Account);
-            var runtime = _runtimes.GetOrAdd(key, k => new AccountRuntime(k, platform, _config, _news, _log));
-            var current = runtime.Adapter.Session;
-            if (current != null && !ReferenceEquals(current, s) && current.IsAlive)
+            string? rejection = null;
+            lock (_lifecycle)
             {
-                Reject(s, "to konto jest już połączone przez inny most (zamknij duplikat)");
-                return;
+                if (_disposed || !_sessions.ContainsKey(s.Id) || s.State != SessionState.AwaitingHello)
+                {
+                    s.MarkClosed();
+                    return;
+                }
+                if (!_runtimes.TryGetValue(key, out var runtime))
+                {
+                    runtime = new AccountRuntime(key, platform, _config, _news, _log);
+                    _runtimes[key] = runtime;
+                }
+                var current = runtime.Adapter.Session;
+                if (!runtime.MatchesIdentity(hello.Account)) rejection = "zmiana tożsamości konta – wymagany restart aplikacji";
+                else if (current != null && !ReferenceEquals(current, s) && current.IsAlive)
+                    rejection = "to konto jest już połączone przez inny most (zamknij duplikat)";
+                else
+                {
+                    if (current != null && !ReferenceEquals(current, s)) _ = current.CloseAsync("sesja zastąpiona po utracie łączności");
+                    s.AccountKey = key;
+                    s.State = SessionState.Active;
+                    runtime.Attach(s);
+                }
             }
-            s.AccountKey = key;
-            s.State = SessionState.Active;
+            if (rejection != null) { Reject(s, rejection); return; }
             s.Send(new WelcomeMsg { Accepted = true, HostVersion = HostVersion, Label = _config.Config.Label });
-            runtime.Attach(s);
             _log.Info($"Połączono most {platform} {s.BridgeVersion} ({s.Transport}) – konto {(hello.Account.IsLive ? "LIVE" : "DEMO")} {hello.Account.Number} @ {hello.Account.Broker}.");
         }
 
@@ -102,7 +124,15 @@ namespace Apex.Desktop.Runtime
 
         public void Dispose()
         {
-            foreach (var r in _runtimes.Values) r.Dispose();
+            List<AccountRuntime> runtimes;
+            lock (_lifecycle)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                foreach (var session in _sessions.Values) _ = session.CloseAsync("zatrzymanie aplikacji");
+                runtimes = _runtimes.Values.ToList();
+            }
+            foreach (var r in runtimes) r.Dispose();
         }
     }
 }

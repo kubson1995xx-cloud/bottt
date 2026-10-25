@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Apex.Core.Bridge;
 using Apex.Core.Engine;
 using Apex.Core.Indicators;
@@ -17,31 +18,38 @@ namespace Apex.Desktop.Bridge
     {
         private BridgeSession? _session;
         private readonly Func<CommissionOverride?> _commission;
+        private readonly Func<bool> _canOpen;
 
-        public SessionAdapter(Func<CommissionOverride?> commission) => _commission = commission;
+        public SessionAdapter(Func<CommissionOverride?> commission) : this(commission, () => true) { }
+        public SessionAdapter(Func<CommissionOverride?> commission, Func<bool> canOpen)
+        {
+            _commission = commission;
+            _canOpen = canOpen;
+        }
 
         public TimeSpan OrderTimeout { get; set; } = TimeSpan.FromSeconds(15);
         public TimeSpan QuoteMaxAge { get; set; } = TimeSpan.FromMinutes(10);
 
-        public BridgeSession? Session => _session;
+        public BridgeSession? Session => Volatile.Read(ref _session);
 
-        public void Attach(BridgeSession s) => _session = s;
+        public void Attach(BridgeSession s) => Interlocked.Exchange(ref _session, s);
 
-        public void Detach(BridgeSession s)
-        {
-            if (ReferenceEquals(_session, s)) _session = null;
-        }
+        public void Detach(BridgeSession s) => Interlocked.CompareExchange(ref _session, null, s);
 
-        public bool IsConnected => _session?.IsAlive == true && _session.Account != null;
+        public bool IsConnected => Session?.HasFreshSnapshots == true;
 
         public AccountSnapshot GetAccount()
         {
-            var a = _session?.Account;
-            return a == null ? new AccountSnapshot() : a.ToSnapshot(DateTime.UtcNow);
+            var session = Session;
+            var a = session?.Account;
+            return a == null ? new AccountSnapshot() : a.ToSnapshot(session!.AccountReceivedUtc);
         }
 
-        public IReadOnlyList<PositionInfo> GetPositions() =>
-            _session == null ? Array.Empty<PositionInfo>() : _session.Positions.Select(p => p.ToInfo()).ToList();
+        public IReadOnlyList<PositionInfo> GetPositions()
+        {
+            var session = Session;
+            return session == null ? Array.Empty<PositionInfo>() : session.Positions.Select(p => p.ToInfo()).ToList();
+        }
 
         private static OrderOutcome MapResult(bool sent, string? json, string what)
         {
@@ -59,7 +67,8 @@ namespace Apex.Desktop.Bridge
 
         public OrderOutcome OpenMarket(OrderRequest req)
         {
-            var s = _session;
+            if (!_canOpen()) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "Nowe wejścia zablokowane przez stan Desktop.");
+            var s = Session;
             if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
             string id = s.NextId();
             var (sent, json) = s.Request(new OpenCmd
@@ -79,7 +88,7 @@ namespace Apex.Desktop.Bridge
 
         public OrderOutcome ModifyStopLoss(long positionId, double stopLoss)
         {
-            var s = _session;
+            var s = Session;
             if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
             string id = s.NextId();
             var (sent, json) = s.Request(new ModifyCmd { Id = id, PositionId = positionId, Sl = stopLoss }, id, OrderTimeout);
@@ -88,7 +97,7 @@ namespace Apex.Desktop.Bridge
 
         public OrderOutcome ClosePosition(long positionId, double? units)
         {
-            var s = _session;
+            var s = Session;
             if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
             string id = s.NextId();
             var (sent, json) = s.Request(new CloseCmd { Id = id, PositionId = positionId, Units = units }, id, OrderTimeout);
@@ -97,7 +106,7 @@ namespace Apex.Desktop.Bridge
 
         public double EstimateMargin(string symbol, TradeDirection direction, double units)
         {
-            var s = _session;
+            var s = Session;
             if (s == null) return double.NaN;
             string id = s.NextId();
             var (sent, json) = s.Request(new MarginCmd { Id = id, Symbol = symbol, Side = BridgeProtocol.SideOf(direction), Units = units }, id, TimeSpan.FromSeconds(6));
@@ -108,7 +117,7 @@ namespace Apex.Desktop.Bridge
 
         public InstrumentSpec? GetSpec(string symbol)
         {
-            var s = _session;
+            var s = Session;
             var dto = s?.Symbol(symbol);
             if (dto == null) return null;
             var q = s!.Quote(symbol);
@@ -117,7 +126,7 @@ namespace Apex.Desktop.Bridge
 
         public Quote? GetQuote(string symbol)
         {
-            var q = _session?.Quote(symbol);
+            var q = Session?.Quote(symbol);
             if (q == null) return null;
             var (dto, received) = q.Value;
             var t = dto.T > 0 ? BridgeProtocol.FromUnixMs(dto.T) : received;
@@ -127,7 +136,7 @@ namespace Apex.Desktop.Bridge
         public bool IsMarketOpen(string symbol, DateTime utc, out TimeSpan timeToClose)
         {
             timeToClose = TimeSpan.Zero;
-            var q = _session?.Quote(symbol);
+            var q = Session?.Quote(symbol);
             if (q == null) return false;
             var (dto, received) = q.Value;
             if (!dto.O) return false;
@@ -136,11 +145,11 @@ namespace Apex.Desktop.Bridge
             return true;
         }
 
-        public DateTime? LastClosedBarTime(string symbol, Tf tf, DateTime utc) => _session?.Bars.LastClosedBarTime(symbol, tf, utc);
+        public DateTime? LastClosedBarTime(string symbol, Tf tf, DateTime utc) => Session?.Bars.LastClosedBarTime(symbol, tf, utc);
 
         public bool TryGet(string symbol, Tf tf, DateTime utc, out FeatureSet features, out int index)
         {
-            var s = _session;
+            var s = Session;
             if (s == null)
             {
                 features = null!;
