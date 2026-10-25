@@ -474,12 +474,12 @@ namespace cAlgo.Robots
                 var position = result.Position;
                 double sl = position.EntryPrice + (tt == TradeType.Buy ? -1 : 1) * q.StopLossPips * sym.PipSize;
                 double tp = position.EntryPrice + (tt == TradeType.Buy ? 1 : -1) * q.TakeProfitPips!.Value * sym.PipSize;
-                var protection = _r.ModifyPosition(position, sl, tp, ProtectionType.Absolute);
-                if (!protection.IsSuccessful || !CTraderData.Protected(position))
-                {
-                    var close = _r.ClosePosition(position);
-                    return OrderOutcome.Uncertain(BrokerErrorKind.InvalidStopLossTakeProfit, "brak SL/TP; awaryjne zamknięcie: " + close);
-                }
+                string closeResult = "";
+                bool repaired = PlatformSafety.RepairOrClose(
+                    () => _r.ModifyPosition(position, sl, tp, ProtectionType.Absolute).IsSuccessful && CTraderData.Protected(position),
+                    () => closeResult = _r.ClosePosition(position).ToString());
+                if (!repaired)
+                    return OrderOutcome.Uncertain(BrokerErrorKind.InvalidStopLossTakeProfit, "brak SL/TP; awaryjne zamknięcie: " + closeResult);
             }
             if (result.IsSuccessful && result.Position == null) return OrderOutcome.Uncertain(BrokerErrorKind.TechnicalError, "brak pozycji w potwierdzeniu");
             return Map(result, null);

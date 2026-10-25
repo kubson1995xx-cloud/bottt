@@ -525,12 +525,12 @@ namespace cAlgo.Robots
                 var position = r.Position;
                 double sl = position.EntryPrice + (tt == TradeType.Buy ? -1 : 1) * c.SlPips * sym.PipSize;
                 double tp = position.EntryPrice + (tt == TradeType.Buy ? 1 : -1) * c.TpPips!.Value * sym.PipSize;
-                var protection = ModifyPosition(position, sl, tp, ProtectionType.Absolute);
-                if (!protection.IsSuccessful || !CTraderData.Protected(position))
-                {
-                    var close = ClosePosition(position);
-                    return new ResultMsg { Id = c.Id, Status = "uncertain", PositionId = position.Id, Error = "InvalidStopLossTakeProfit", Message = "broker nie potwierdził SL/TP; awaryjne zamknięcie: " + close };
-                }
+                string closeResult = "";
+                bool repaired = PlatformSafety.RepairOrClose(
+                    () => ModifyPosition(position, sl, tp, ProtectionType.Absolute).IsSuccessful && CTraderData.Protected(position),
+                    () => closeResult = ClosePosition(position).ToString());
+                if (!repaired)
+                    return new ResultMsg { Id = c.Id, Status = "uncertain", PositionId = position.Id, Error = "InvalidStopLossTakeProfit", Message = "broker nie potwierdził SL/TP; awaryjne zamknięcie: " + closeResult };
             }
             if (r.IsSuccessful && r.Position == null) return new ResultMsg { Id = c.Id, Status = "uncertain", Error = "TechnicalError", Message = "brak pozycji w potwierdzeniu brokera" };
             return Result(c.Id, r, r.Position?.Id, r.Position?.EntryPrice);

@@ -18,6 +18,23 @@ namespace Apex.Platform.Tests
         }
 
         [Fact]
+        public void ProtectionRepairExceptionStillAttemptsEmergencyClose()
+        {
+            bool closed = false;
+            bool protectedPosition = PlatformSafety.RepairOrClose(() => throw new InvalidOperationException("platform"), () => closed = true);
+            Assert.True(closed);
+            Assert.False(protectedPosition);
+        }
+
+        [Fact]
+        public void SuccessfulProtectionRepairDoesNotCloseThePosition()
+        {
+            bool closed = false;
+            Assert.True(PlatformSafety.RepairOrClose(() => true, () => closed = true));
+            Assert.False(closed);
+        }
+
+        [Fact]
         public void StorageKeysMeetActualCTraderAlphanumericAndLengthContractWithoutIdentityCollisions()
         {
             var key = PlatformSafety.StorageKey("Bridge", "Pepperstone Ltd. / Razor", 12345678, "APEX-N " + new string('x', 80));

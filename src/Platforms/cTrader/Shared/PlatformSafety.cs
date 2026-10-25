@@ -18,6 +18,14 @@ namespace Apex.Platforms.CTrader
 
         internal static bool Fresh(DateTime marketTime, DateTime now, double maximumAgeSeconds) => marketTime != default && (now - marketTime).TotalSeconds <= maximumAgeSeconds && (marketTime - now).TotalSeconds <= 5;
 
+        internal static bool RepairOrClose(Func<bool> repair, Action close)
+        {
+            try { if (repair()) return true; }
+            catch (Exception) { } // A known unprotected position still needs a close attempt.
+            close();
+            return false;
+        }
+
         // Legacy parameter is retained only so saved cBot settings remain loadable.
         internal static bool DemoAllowed(bool isLive, bool allowLive) => !isLive;
         internal static bool OwnLabel(string? label, string expected) => !string.IsNullOrWhiteSpace(expected) && string.Equals(label, expected, StringComparison.Ordinal);
