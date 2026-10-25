@@ -1,5 +1,19 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Aktywne przejęcie — 2026-10-26
+
+- Zlecenie: ukończyć technicznie wersję Windows/cTrader Pepperstone **DEMO**, bez AI Lab i bez handlu REAL. Prawdziwa transakcja DEMO dopiero po osobnym zatwierdzeniu użytkownika.
+- Punkt startowy: `a0385e40cdd9ceddd8d68d27dd0d17b8ee6e8fea`, gałąź `claude/beautiful-mccarthy-9cibo1`. Osobny świeży klon: `/home/ubuntu/projects/apex-trading-ai`; nie naruszono istniejących katalogów użytkownika.
+- Specyfikacja: `docs/superpowers/specs/2026-10-26-apex-demo-design.md`; plan: `docs/superpowers/plans/2026-10-26-apex-demo.md`.
+- Bazowe wyniki z tej sesji (Linux, SDK 8.0.427): bot **120/120**, odłożony AI Lab **181/181**, brak pominiętych i niezaliczonych testów. Oba cBoty i backtester budują się: 0 błędów, 0 ostrzeżeń. Historyczne liczby poniżej nie opisują bieżącego podziału projektów testowych.
+- Bazowe TRX: `/home/ubuntu/.hermes/cache/scratch/apex-evidence/baseline-core.trx` i `baseline-ailab.trx` (artefakty lokalne poza Git).
+- W toku: przegląd i regresje silnika/persistencji, mostów, backendu/panelu oraz pakietu Windows. Brak jeszcze dowodu rzeczywistego połączenia z Pepperstone i uruchomienia aplikacji na Windows.
+- Rozstrzygnięcie: aktualne zlecenie jest specyfikacją i zgodą na autonomiczną implementację, nie wymaga kolejnego zatwierdzania planu. Zachowujemy C#/.NET i architekturę, nie dodajemy zdalnego OAuth zamiast lokalnego mostu. Testy archiwalnego AI Lab wykonujemy oddzielnie, bez pakowania go z botem.
+
+---
+
+## Archiwalny opis poprzedniego wykonawcy (może być nieaktualny)
+
 Plik przekazania pracy dla kolejnego wykonawcy (np. Codex). Opisuje stan projektu, wykonane zmiany, zadania niedokończone i zasady pracy.
 Gałąź robocza: `claude/beautiful-mccarthy-9cibo1`.
 
