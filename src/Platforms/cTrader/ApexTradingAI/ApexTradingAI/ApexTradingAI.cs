@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using Apex.Core.Adaptive;
 using Apex.Core.Bridge;
+using Apex.Platforms.CTrader;
 using Apex.Core.Engine;
 using Apex.Core.Management;
 using Apex.Core.Model;
@@ -62,7 +63,7 @@ namespace cAlgo.Robots
         [Parameter("Etykieta pozycji bota", DefaultValue = "APEX-N", Group = "Bezpieczeństwo")]
         public string Label { get; set; } = "APEX-N";
 
-        [Parameter("Zezwól na konto LIVE", DefaultValue = false, Group = "Bezpieczeństwo")]
+        [Parameter("Historyczny LIVE (ignorowany – tylko DEMO)", DefaultValue = false, Group = "Bezpieczeństwo")]
         public bool AllowLive { get; set; }
 
         [Parameter("Potwierdzenie LIVE (fraza)", DefaultValue = "", Group = "Bezpieczeństwo")]
@@ -90,10 +91,12 @@ namespace cAlgo.Robots
 
         protected override void OnStart()
         {
+            if (!PlatformSafety.DemoAllowed(Account.IsLive, AllowLive))
+            { Print("APEX: konto REAL bezwarunkowo zablokowane – wersja wyłącznie DEMO."); Stop(); return; }
             var acc = Snapshot();
             _guard = AccountGuard.Evaluate(acc, new AccountGuardSettings
             {
-                AllowLive = AllowLive,
+                AllowLive = false,
                 LiveConfirmation = LiveConfirmation,
                 AllowedAccounts = AccountGuard.ParseAccountList(AllowedAccounts),
                 AllowedBrokers = AccountGuard.ParseList(AllowedBrokers),
@@ -102,7 +105,7 @@ namespace cAlgo.Robots
             if (ShowPanel && !IsBacktesting) _panel = new ChartPanel(this);
             if (!_guard.Allowed)
             {
-                _panel?.ShowBlocked(_guard.Reason, Account.IsLive ? AccountGuard.RequiredLivePhrase(Account.Number) : null);
+                _panel?.ShowBlocked(_guard.Reason, null);
                 Print("APEX: handel zablokowany – cBot zatrzymany.");
                 Stop();
                 return;
@@ -129,7 +132,7 @@ namespace cAlgo.Robots
                 CollectionWindowSeconds = IsBacktesting ? 0 : 20,
             };
             var book = new StrategyBook(DefaultProfile.Load(), Account.IsLive);
-            _adapter = new CTraderAdapter(this, _store);
+            _adapter = new CTraderAdapter(this, _store, cfg.Label);
             IKeyValueStore kv = IsBacktesting ? new MemoryStore() : new LocalStorageStore(this);
             _engine = new TradingEngine(cfg, book, _adapter, _adapter, _store, kv, new PrintLog(this), new PrintJournal(this), NewsFilter ? _news : null);
             _engine.SetGuard(_guard);
@@ -213,7 +216,8 @@ namespace cAlgo.Robots
             try { bars = MarketData.GetBars(ToTimeFrame(tf), symbol); }
             catch (Exception ex) { Print($"APEX: brak świec {symbol} {tf}: {ex.Message}"); return; }
             int want = tf == Tf.D1 ? 420 : 1500;
-            for (int g = 0; g < 10 && bars.Count < want + 1; g++) if (bars.LoadMoreHistory() <= 0) break;
+            for (int g = 0; g < 50 && bars.Count < want + 1; g++) if (bars.LoadMoreHistory() <= 0) break;
+            if (bars.Count < want + 1) Print($"APEX: niepełna historia {symbol} {tf}: {Math.Max(0, bars.Count - 1)}/{want}");
             var list = new List<ApexBar>(bars.Count);
             for (int i = 0; i < bars.Count - 1; i++) list.Add(Convert(bars[i])); // ostatnia świeca jest w trakcie tworzenia
             _store.Merge(symbol, tf, list, true);
@@ -273,11 +277,11 @@ namespace cAlgo.Robots
         {
             var p = args.Position;
             if (_engine == null || p.Label != _engine.Config.Label) return;
-            double gross = 0, comm = 0, swap = 0, net = 0, exit = p.CurrentPrice;
+            double gross = 0, comm = 0, swap = 0, net = 0, exit = p.CurrentPrice, volume = 0;
             DateTime exitTime = Server.TimeInUtc;
             var deals = History.FindByPositionId(p.Id);
-            foreach (var h in deals) { gross += h.GrossProfit; comm += h.Commissions; swap += h.Swap; net += h.NetProfit; exit = h.ClosingPrice; exitTime = h.ClosingTime; }
-            if (deals.Length == 0) { gross = p.GrossProfit; comm = p.Commissions; swap = p.Swap; net = p.NetProfit; }
+            foreach (var h in deals.OrderBy(h => h.ClosingTime)) { gross += h.GrossProfit; comm += h.Commissions; swap += h.Swap; net += h.NetProfit; volume += h.VolumeInUnits; exit = h.ClosingPrice; exitTime = h.ClosingTime; }
+            if (deals.Length == 0) { gross = p.GrossProfit; comm = p.Commissions; swap = p.Swap; net = p.NetProfit; volume = p.VolumeInUnits; }
             _engine.OnPositionClosed(new ClosedPositionInfo
             {
                 PositionId = p.Id,
@@ -285,7 +289,7 @@ namespace cAlgo.Robots
                 Label = p.Label ?? "",
                 Comment = p.Comment ?? "",
                 Direction = p.TradeType == TradeType.Buy ? TradeDirection.Long : TradeDirection.Short,
-                Volume = p.VolumeInUnits,
+                Volume = volume,
                 EntryPrice = p.EntryPrice,
                 ExitPrice = exit,
                 EntryTimeUtc = DateTime.SpecifyKind(p.EntryTime, DateTimeKind.Utc),
@@ -329,54 +333,44 @@ namespace cAlgo.Robots
         private readonly BarStore _store;
         private readonly Dictionary<string, SymbolDto> _dtos = new(StringComparer.OrdinalIgnoreCase);
 
-        public CTraderAdapter(Robot r, BarStore store)
+        private readonly string _label;
+        private readonly long _account;
+        private readonly string _broker;
+        private readonly string _currency;
+        private readonly CommandJournal _journal;
+        private readonly Dictionary<string, Ticks> _ticks = new(StringComparer.OrdinalIgnoreCase);
+
+        public CTraderAdapter(Robot r, BarStore store, string label)
         {
             _r = r;
             _store = store;
+            _label = label;
+            _account = r.Account.Number;
+            _broker = r.Account.BrokerName ?? "";
+            _currency = r.Account.Asset?.Name ?? "";
+            string key = PlatformSafety.StorageKey("Native", _broker, _account, label);
+            string? saved;
+            try { saved = r.IsBacktesting ? null : r.LocalStorage.GetString(key, LocalStorageScope.Type); }
+            catch (Exception) { saved = "NIEDOSTEPNY"; }
+            _journal = new CommandJournal(saved, value =>
+            {
+                if (r.IsBacktesting) return;
+                r.LocalStorage.SetString(key, value, LocalStorageScope.Type);
+                r.LocalStorage.Flush(LocalStorageScope.Type);
+            });
         }
 
-        public void Register(string symbol, SymbolDto dto) => _dtos[symbol] = dto;
-
-        private static string CommissionKind(SymbolCommissionType t) => t switch
+        private bool SafeAccount => !_r.Account.IsLive && _r.Account.Number == _account && (_r.Account.BrokerName ?? "") == _broker && (_r.Account.Asset?.Name ?? "") == _currency;
+        public void Register(string symbol, SymbolDto dto)
         {
-            SymbolCommissionType.UsdPerMillionUsdVolume => "UsdPerMillionUsdVolume",
-            SymbolCommissionType.UsdPerOneLot => "UsdPerLot",
-            SymbolCommissionType.PercentageOfTradingVolume => "PercentOfVolume",
-            SymbolCommissionType.QuoteCurrencyPerOneLot => "QuoteCurrencyPerLot",
-            _ => "Unknown",
-        };
-
-        private static double Conv(Robot r, string from)
-        {
-            try { return r.AssetConverter.Convert(1.0, from, r.Account.Asset); }
-            catch (Exception) { return 0; }
+            _dtos[symbol] = dto;
+            try { _ticks[symbol] = _r.MarketData.GetTicks(symbol); }
+            catch (Exception ex) { _r.Print("APEX: brak ticków " + symbol + ": " + ex.Message); }
         }
 
-        public static SymbolDto ToDto(Symbol s, Robot r) => new()
-        {
-            Name = s.Name,
-            Description = s.Description ?? "",
-            BaseAsset = s.BaseAsset?.Name ?? "",
-            QuoteAsset = s.QuoteAsset?.Name ?? "",
-            Digits = s.Digits,
-            PipSize = s.PipSize,
-            TickSize = s.TickSize,
-            PipValue = s.PipValue,
-            LotSize = s.LotSize,
-            VolumeMin = s.VolumeInUnitsMin,
-            VolumeStep = s.VolumeInUnitsStep,
-            VolumeMax = s.VolumeInUnitsMax,
-            MinStopPips = s.MinDistanceType == SymbolMinDistanceType.Pips ? s.MinStopLossDistance : 0,
-            TradingEnabled = s.IsTradingEnabled && s.TradingMode == SymbolTradingMode.FullAccess,
-            CloseOnly = s.TradingMode == SymbolTradingMode.CloseOnly,
-            CommissionKind = CommissionKind(s.CommissionType),
-            CommissionValue = s.Commission,
-            UsdToAccount = Conv(r, "USD"),
-            QuoteToAccount = s.QuoteAsset != null ? Conv(r, s.QuoteAsset.Name) : 0,
-            IsCustom = s.IsCustom,
-        };
+        public static SymbolDto ToDto(Symbol s, Robot r) => CTraderData.Describe(s, r);
 
-        public bool IsConnected => _r.IsBacktesting || _r.Server.IsConnected;
+        public bool IsConnected => SafeAccount && (_r.IsBacktesting || _r.Server.IsConnected);
 
         public AccountSnapshot GetAccount() => new()
         {
@@ -390,6 +384,7 @@ namespace cAlgo.Robots
             FreeMargin = _r.Account.FreeMargin,
             MarginLevel = _r.Account.MarginLevel,
             TimeUtc = _r.Server.TimeInUtc,
+            IsHedging = _r.Account.AccountType == AccountType.Hedged,
         };
 
         public IReadOnlyList<PositionInfo> GetPositions() => _r.Positions.Select(p => new PositionInfo
@@ -435,63 +430,127 @@ namespace cAlgo.Robots
 
         public OrderOutcome OpenMarket(OrderRequest q)
         {
-            if (!(q.StopLossPips > 0)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "brak SL");
+            if (!SafeAccount || !IsConnected) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "wymagane aktywne konto DEMO");
+            if (!PlatformSafety.OwnLabel(q.Label, _label) || string.IsNullOrWhiteSpace(q.Comment)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "nieprawidłowa etykieta/sygnał");
+            string id = string.IsNullOrEmpty(q.SignalId) ? q.Comment : q.SignalId;
+            string fingerprint = BridgeProtocol.Serialize(new { q.Symbol, q.Direction, q.VolumeUnits, q.StopLossPips, q.TakeProfitPips, q.Label, q.Comment, q.MaxSlippagePips });
+            var result = _journal.Run(id, fingerprint, _label + "|" + q.Comment, () =>
+            {
+                var outcome = OpenProtected(q);
+                return new ResultMsg { Id = id, Status = outcome.Status == OrderStatus.Filled ? "filled" : outcome.Status == OrderStatus.Rejected ? "rejected" : "uncertain",
+                    PositionId = outcome.PositionId, Price = outcome.FillPrice, Error = outcome.Error.ToString(), Message = outcome.Message };
+            });
+            return result.Status == "filled" ? OrderOutcome.Filled(result.PositionId ?? 0, result.Price ?? 0) : result.Status == "rejected"
+                ? OrderOutcome.Rejected(BridgeProtocol.ParseError(result.Error), result.Message ?? "") : OrderOutcome.Uncertain(BridgeProtocol.ParseError(result.Error), result.Message ?? "");
+        }
+
+        private OrderOutcome OpenProtected(OrderRequest q)
+        {
+            if (!PlatformSafety.Protection(q.StopLossPips, q.TakeProfitPips)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "wymagane skończone dodatnie SL i TP");
             var sym = _r.Symbols.GetSymbol(q.Symbol);
-            if (sym == null) return OrderOutcome.Rejected(BrokerErrorKind.UnknownSymbol, "nieznany symbol");
+            if (sym == null || !_dtos.ContainsKey(q.Symbol)) return OrderOutcome.Rejected(BrokerErrorKind.UnknownSymbol, "symbol nie jest zarejestrowany");
+            var dto = ToDto(sym, _r);
+            if (InstrumentClassifier.IsCrypto(sym.Name, sym.Description, sym.BaseAsset?.Name, sym.QuoteAsset?.Name) || dto.CommissionKind == "Unknown" || !dto.TradingEnabled)
+                return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "instrument lub koszt niezweryfikowany");
+            var quote = GetQuote(q.Symbol);
+            if (!quote.HasValue || !quote.Value.IsValid || !PlatformSafety.Fresh(quote.Value.TimeUtc, _r.Server.TimeInUtc, 30))
+                return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak świeżego ticka brokera");
+            if (!sym.MarketHours.IsOpened()) return OrderOutcome.Rejected(BrokerErrorKind.MarketClosed, "rynek zamknięty");
+            if (!CTraderData.StopsAllowed(sym, q.StopLossPips, q.TakeProfitPips)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "SL/TP poniżej minimum brokera");
+            if (!PlatformSafety.Volume(q.VolumeUnits, sym.VolumeInUnitsMin, sym.VolumeInUnitsMax)) return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "nieprawidłowy wolumen w jednostkach");
             double vol = sym.NormalizeVolumeInUnits(q.VolumeUnits, RoundingMode.Down);
-            if (vol < sym.VolumeInUnitsMin) return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "wolumen poniżej minimum");
+            if (Math.Abs(vol - q.VolumeUnits) > sym.VolumeInUnitsStep * 1e-8) return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "nieprawidłowy krok wolumenu");
+            if (q.MaxSlippagePips.HasValue && !PlatformSafety.Positive(q.MaxSlippagePips.Value)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "nieprawidłowy poślizg");
+            var prior = _r.Positions.FirstOrDefault(p => p.Label == q.Label && p.Comment == q.Comment);
+            if (prior != null) return prior.StopLoss.HasValue && prior.TakeProfit.HasValue ? OrderOutcome.Filled(prior.Id, prior.EntryPrice)
+                : OrderOutcome.Uncertain(BrokerErrorKind.InvalidStopLossTakeProfit, "sygnał istnieje bez pełnej ochrony – nie otwarto ponownie");
+            if (_r.History.Any(h => h.Label == q.Label && h.Comment == q.Comment)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "sygnał już w historii brokera");
             var tt = q.Direction == TradeDirection.Long ? TradeType.Buy : TradeType.Sell;
-            TradeResult r = q.MaxSlippagePips is double slip && slip > 0
+            var result = q.MaxSlippagePips is double slip
                 ? _r.ExecuteMarketRangeOrder(tt, sym.Name, vol, slip, tt == TradeType.Buy ? sym.Ask : sym.Bid, q.Label, q.StopLossPips, q.TakeProfitPips, q.Comment)
                 : _r.ExecuteMarketOrder(tt, sym.Name, vol, q.Label, q.StopLossPips, q.TakeProfitPips, q.Comment);
-            return Map(r, null);
+            if (result.IsSuccessful && result.Position != null && !CTraderData.Protected(result.Position))
+            {
+                var position = result.Position;
+                double sl = position.EntryPrice + (tt == TradeType.Buy ? -1 : 1) * q.StopLossPips * sym.PipSize;
+                double tp = position.EntryPrice + (tt == TradeType.Buy ? 1 : -1) * q.TakeProfitPips!.Value * sym.PipSize;
+                var protection = _r.ModifyPosition(position, sl, tp, ProtectionType.Absolute);
+                if (!protection.IsSuccessful || !CTraderData.Protected(position))
+                {
+                    var close = _r.ClosePosition(position);
+                    return OrderOutcome.Uncertain(BrokerErrorKind.InvalidStopLossTakeProfit, "brak SL/TP; awaryjne zamknięcie: " + close);
+                }
+            }
+            if (result.IsSuccessful && result.Position == null) return OrderOutcome.Uncertain(BrokerErrorKind.TechnicalError, "brak pozycji w potwierdzeniu");
+            return Map(result, null);
         }
 
         public OrderOutcome ModifyStopLoss(long positionId, double stopLoss)
         {
-            var p = _r.Positions.FirstOrDefault(x => x.Id == positionId);
-            if (p == null) return OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak pozycji");
-            return Map(p.ModifyStopLossPrice(stopLoss), stopLoss);
+            if (!SafeAccount) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "konto REAL lub zmiana konta");
+            var position = _r.Positions.FirstOrDefault(x => x.Id == positionId && PlatformSafety.OwnLabel(x.Label, _label));
+            if (position == null) return OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak własnej pozycji");
+            if (!PlatformSafety.Positive(stopLoss) ||
+                (position.TradeType == TradeType.Buy && (stopLoss >= position.Symbol.Bid || (position.StopLoss.HasValue && stopLoss < position.StopLoss.Value))) ||
+                (position.TradeType == TradeType.Sell && (stopLoss <= position.Symbol.Ask || (position.StopLoss.HasValue && stopLoss > position.StopLoss.Value))))
+                return OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "nieprawidłowy lub zwiększający ryzyko SL");
+            return Map(position.ModifyStopLossPrice(stopLoss), position.StopLoss);
         }
 
         public OrderOutcome ClosePosition(long positionId, double? units)
         {
-            var p = _r.Positions.FirstOrDefault(x => x.Id == positionId);
-            if (p == null) return OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak pozycji");
-            if (units.HasValue && units.Value < p.VolumeInUnits)
-                return Map(_r.ClosePosition(p, p.Symbol.NormalizeVolumeInUnits(units.Value, RoundingMode.Down)), p.CurrentPrice);
-            return Map(_r.ClosePosition(p), p.CurrentPrice);
+            if (!SafeAccount) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "konto REAL lub zmiana konta");
+            var position = _r.Positions.FirstOrDefault(x => x.Id == positionId && PlatformSafety.OwnLabel(x.Label, _label));
+            if (position == null) return OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak własnej pozycji");
+            if (!PlatformSafety.PartialClose(units, position.VolumeInUnits, position.Symbol.VolumeInUnitsMin, position.Symbol.VolumeInUnitsStep))
+                return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "nieprawidłowy wolumen zamknięcia");
+            var result = units.HasValue && units.Value < position.VolumeInUnits ? _r.ClosePosition(position, units.Value) : _r.ClosePosition(position);
+            double? fill = null;
+            if (result.IsSuccessful)
+            {
+                try { fill = _r.History.FindByPositionId(position.Id).OrderBy(h => h.ClosingTime).LastOrDefault()?.ClosingPrice; }
+                catch (Exception) { } // Keep the confirmed close, but do not invent an execution price.
+            }
+            return result.IsSuccessful ? new OrderOutcome { Status = OrderStatus.Filled, PositionId = position.Id, FillPrice = fill } : Map(result, null);
         }
 
         public double EstimateMargin(string symbol, TradeDirection direction, double units)
         {
             try
             {
+                if (!IsConnected) return double.NaN;
                 var s = _r.Symbols.GetSymbol(symbol);
-                return s == null ? double.NaN : s.GetEstimatedMargin(direction == TradeDirection.Long ? TradeType.Buy : TradeType.Sell, units);
+                if (s == null || !PlatformSafety.Volume(units, s.VolumeInUnitsMin, s.VolumeInUnitsMax)) return double.NaN;
+                double normalized = s.NormalizeVolumeInUnits(units, RoundingMode.Down);
+                if (Math.Abs(normalized - units) > s.VolumeInUnitsStep * 1e-8) return double.NaN;
+                double margin = s.GetEstimatedMargin(direction == TradeDirection.Long ? TradeType.Buy : TradeType.Sell, normalized);
+                return double.IsFinite(margin) && margin >= 0 ? margin : double.NaN;
             }
             catch (Exception) { return double.NaN; }
         }
 
         public InstrumentSpec? GetSpec(string symbol)
         {
-            if (!_dtos.TryGetValue(symbol, out var dto)) return null;
+            if (!_dtos.ContainsKey(symbol)) return null;
             var s = _r.Symbols.GetSymbol(symbol);
-            return SpecMapper.ToSpec(dto, s?.PipValue, null);
+            if (s == null) return null;
+            var dto = ToDto(s, _r); // Re-read conversion and broker constraints, never frozen startup rates.
+            return SpecMapper.ToSpec(dto, dto.PipValue, null);
         }
 
         public Quote? GetQuote(string symbol)
         {
             var s = _r.Symbols.GetSymbol(symbol);
-            if (s == null || double.IsNaN(s.Bid) || double.IsNaN(s.Ask)) return null;
-            return new Quote(s.Bid, s.Ask, _r.Server.TimeInUtc);
+            if (s == null || !_ticks.TryGetValue(symbol, out var ticks)) return null;
+            var quote = CTraderData.Quote(s, ticks, _r);
+            return quote == null ? null : new Quote(quote.B, quote.A, BridgeProtocol.FromUnixMs(quote.T));
         }
 
         public bool IsMarketOpen(string symbol, DateTime utc, out TimeSpan timeToClose)
         {
             timeToClose = TimeSpan.Zero;
             var s = _r.Symbols.GetSymbol(symbol);
-            if (s == null) return false;
+            if (s == null || !IsConnected) return false;
             try
             {
                 if (!s.MarketHours.IsOpened()) return false;
@@ -609,7 +668,7 @@ namespace cAlgo.Robots
         {
             _mode.Text = "HANDEL ZABLOKOWANY";
             _mode.ForegroundColor = Color.FromHex("#EF6B6B");
-            _body.Text = reason + (phrase != null ? $"\nAby świadomie dopuścić konto LIVE: włącz \"Zezwól na konto LIVE\", dodaj numer konta do listy dozwolonych i wpisz frazę: {phrase}" : "");
+            _body.Text = reason + "\nTa wersja obsługuje wyłącznie konto DEMO.";
         }
 
         public void Message(string m) => _msg.Text = m;

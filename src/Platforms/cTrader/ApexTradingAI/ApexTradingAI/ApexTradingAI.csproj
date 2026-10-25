@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="cTrader.Automate" Version="1.0.21" />
+    <Compile Include="../../Shared/*.cs" LinkBase="Platform" />
     <Compile Include="..\..\..\..\Apex.Core\**\*.cs" Exclude="..\..\..\..\Apex.Core\obj\**;..\..\..\..\Apex.Core\bin\**" LinkBase="Core" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,102 @@
+using System;
+using System.IO;
+using Apex.Core.Bridge;
+using Apex.Platforms.CTrader;
+using Xunit;
+
+namespace Apex.Platform.Tests
+{
+    public class CommandJournalTests
+    {
+        private static ResultMsg Filled(string id) => new() { Id = id, Status = "filled", PositionId = 42, Price = 1.2 };
+
+        [Fact]
+        public void RepeatedCommandExecutesOnlyOnceAndReturnsOriginalResult()
+        {
+            int calls = 0;
+            var journal = new CommandJournal(null, _ => { });
+            journal.Run("one", "open 1000", "signal", () => { calls++; return Filled("one"); });
+            var result = journal.Run("one", "open 1000", "signal", () => { calls++; return Filled("one"); });
+            Assert.Equal(1, calls);
+            Assert.Equal(42, result.PositionId);
+        }
+
+        [Fact]
+        public void ChangedPayloadForSameIdIsRejected()
+        {
+            var journal = new CommandJournal(null, _ => { });
+            journal.Run("one", "close 1000", null, () => Filled("one"));
+            Assert.Equal("rejected", journal.Run("one", "close 2000", null, () => Filled("one")).Status);
+        }
+
+        [Fact]
+        public void SignalCannotExecuteAgainAfterRestartWithDifferentCommandId()
+        {
+            string saved = "";
+            var journal = new CommandJournal(null, s => saved = s);
+            journal.Run("old", "open 1000", "signal", () => Filled("old"));
+            var restored = new CommandJournal(saved, _ => { });
+            int calls = 0;
+            var result = restored.Run("new", "open 1000", "signal", () => { calls++; return Filled("new"); });
+            Assert.Equal(0, calls);
+            Assert.Equal("new", result.Id);
+            Assert.Equal(42, result.PositionId);
+        }
+
+        [Fact]
+        public void ReservationIsDurableBeforeBrokerAction()
+        {
+            string saved = "";
+            var journal = new CommandJournal(null, s => saved = s);
+            bool reserved = false;
+            journal.Run("one", "open", "signal", () =>
+            {
+                var restored = new CommandJournal(saved, _ => { });
+                reserved = restored.Run("one", "open", "signal", () => Filled("one")).Status == "uncertain";
+                return Filled("one");
+            });
+            Assert.True(reserved);
+        }
+
+        [Fact]
+        public void FailedReservationNeverCallsBroker()
+        {
+            int calls = 0;
+            var journal = new CommandJournal(null, _ => throw new IOException("disk"));
+            var result = journal.Run("one", "open", null, () => { calls++; return Filled("one"); });
+            Assert.Equal(0, calls);
+            Assert.Equal("rejected", result.Status);
+        }
+
+        [Fact]
+        public void FailedResultSaveCannotBeRetriedAndRemainsUncertain()
+        {
+            int writes = 0, calls = 0;
+            var journal = new CommandJournal(null, _ => { if (++writes > 1) throw new IOException("disk"); });
+            var result = journal.Run("one", "open", "signal", () => { calls++; return Filled("one"); });
+            Assert.Equal("uncertain", result.Status);
+            Assert.Equal("uncertain", journal.Run("one", "open", "signal", () => { calls++; return Filled("one"); }).Status);
+            Assert.Equal(1, calls);
+        }
+
+        [Fact]
+        public void CorruptJournalFailsClosed()
+        {
+            int calls = 0;
+            var journal = new CommandJournal("broken", _ => { });
+            var result = journal.Run("one", "open", null, () => { calls++; return Filled("one"); });
+            Assert.Equal(0, calls);
+            Assert.Equal("rejected", result.Status);
+        }
+
+        [Fact]
+        public void BrokerExceptionLeavesUncertainReservationAcrossRestart()
+        {
+            string saved = "";
+            var journal = new CommandJournal(null, s => saved = s);
+            Assert.Equal("uncertain", journal.Run("one", "open", "signal", () => throw new Exception("transport")).Status);
+            var restored = new CommandJournal(saved, _ => { });
+            Assert.Equal("uncertain", restored.Run("one", "open", "signal", () => Filled("one")).Status);
+        }
+    }
+}

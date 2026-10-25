@@ -21,7 +21,7 @@
 input string InpPairingKey  = "";          // Klucz parowania (z panelu APEX)
 input string InpHost        = "127.0.0.1"; // Adres APEX Desktop
 input int    InpPort        = 5078;        // Port TCP APEX Desktop
-input bool   InpAllowLive   = false;       // Zezwól na konto LIVE (świadoma decyzja!)
+input bool   InpAllowLive   = false;       // Parametr historyczny; REAL zawsze zablokowane
 input long   InpMagic       = 770077;      // Numer magic pozycji APEX
 input string InpLabel       = "APEX";      // Etykieta APEX (musi zgadzać się z ustawieniem APEX Desktop)
 input int    InpMaxSymbols  = 60;          // Maks. subskrybowanych instrumentów
@@ -280,9 +280,9 @@ string SymbolJson(string sym)
           JNum("tickSize", SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE), 10) + "," + JNum("pipValue", PipValuePerUnit(sym), 12) + "," +
           JNum("lotSize", contract, 4) + "," + JNum("volumeMin", SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN) * contract, 6) + "," +
           JNum("volumeStep", SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP) * contract, 6) + "," + JNum("volumeMax", SymbolInfoDouble(sym, SYMBOL_VOLUME_MAX) * contract, 2) + "," +
-          JNum("minStopPips", stopsPips, 2) + "," + JBool("tradingEnabled", tm == SYMBOL_TRADE_MODE_FULL) + "," + JBool("closeOnly", tm == SYMBOL_TRADE_MODE_CLOSEONLY) + "," +
+          JNum("minStopPips", stopsPips, 2) + "," + JBool("tradingEnabled", tm == SYMBOL_TRADE_MODE_FULL && AccountInfoString(ACCOUNT_CURRENCY) == "USD") + "," + JBool("closeOnly", tm == SYMBOL_TRADE_MODE_CLOSEONLY) + "," +
           // MT5 nie udostępnia prowizji przez API – APEX Desktop wymaga jej ręcznego ustawienia.
-          JStr("commissionKind", "Unknown") + "," + JNum("commissionValue", 0, 2) + "," + JNum("usdToAccount", 1, 2) + "," + JNum("quoteToAccount", 1, 2) + "," +
+          JStr("commissionKind", "Unknown") + "," + JNum("commissionValue", 0, 2) + "," + JNum("usdToAccount", AccountInfoString(ACCOUNT_CURRENCY) == "USD" ? 1 : 0, 2) + "," + JNum("quoteToAccount", pip > 0 ? PipValuePerUnit(sym) / pip : 0, 12) + "," +
           JBool("isCustom", SymbolInfoInteger(sym, SYMBOL_CUSTOM) != 0) + "}";
 }
 
@@ -452,7 +452,8 @@ string ErrorName(uint rc)
 
 string StatusOf(uint rc)
 {
-   if(rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_DONE_PARTIAL || rc == TRADE_RETCODE_PLACED) return "filled";
+   if(rc == TRADE_RETCODE_DONE || rc == TRADE_RETCODE_DONE_PARTIAL) return "filled";
+   if(rc == TRADE_RETCODE_PLACED) return "uncertain"; // przyjęcie nie jest potwierdzeniem wykonania
    if(rc == TRADE_RETCODE_TIMEOUT || rc == TRADE_RETCODE_CONNECTION || rc == TRADE_RETCODE_ERROR || rc == 0) return "uncertain";
    return "rejected";
 }
@@ -473,7 +474,7 @@ void Reject(string id, string error, string message)
 bool LiveBlocked(string id)
 {
    bool live = (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL;
-   if(live && !InpAllowLive) { Reject(id, "NoTradingPermission", "Konto LIVE zablokowane w moście MT5."); return true; }
+   if(live) { Reject(id, "NoTradingPermission", "Konto REAL bezwarunkowo zablokowane – tylko DEMO."); return true; }
    return false;
 }
 
@@ -489,8 +490,11 @@ void OnOpen(string json)
    double maxSlip = JGetNumber(json, "maxSlipPips", 0);
    string comment = JGetString(json, "comment");
    string label = JGetString(json, "label");
-   if(StringFind(label, InpLabel) != 0) { Reject(id, "InvalidRequest", "nieprawidłowa etykieta"); return; }
-   if(slPips <= 0) { Reject(id, "InvalidStopLossTakeProfit", "zlecenie bez SL jest niedozwolone"); return; }
+   if(label != InpLabel || StringLen(InpLabel) == 0) { Reject(id, "InvalidRequest", "nieprawidłowa etykieta"); return; }
+   if(!MathIsValidNumber(slPips) || !MathIsValidNumber(tpPips) || slPips <= 0 || tpPips <= 0) { Reject(id, "InvalidStopLossTakeProfit", "wymagane dodatnie SL i TP"); return; }
+   if(side != "buy" && side != "sell") { Reject(id, "InvalidRequest", "nieznany kierunek"); return; }
+   if(!MathIsValidNumber(units) || units <= 0) { Reject(id, "BadVolume", "nieprawidłowe jednostki"); return; }
+   if(AccountInfoString(ACCOUNT_CURRENCY) != "USD") { Reject(id, "InvalidRequest", "MT5: konwersja waluty konta niezweryfikowana – handel zablokowany"); return; }
    if(IsCryptoPath(sym)) { Reject(id, "InvalidRequest", "kryptowaluty wykluczone"); return; }
    if(!SymbolSelect(sym, true)) { Reject(id, "UnknownSymbol", "nieznany symbol"); return; }
    double contract = SymbolInfoDouble(sym, SYMBOL_TRADE_CONTRACT_SIZE);
@@ -498,7 +502,7 @@ void OnOpen(string json)
    if(contract <= 0 || step <= 0) { Reject(id, "BadVolume", "brak specyfikacji wolumenu"); return; }
    double lots = MathFloor(units / contract / step + 1e-9) * step; // zaokrąglenie wyłącznie w dół
    if(lots < vmin) { Reject(id, "BadVolume", "wolumen poniżej minimum"); return; }
-   if(lots > vmax) lots = MathFloor(vmax / step) * step;
+   if(lots > vmax) { Reject(id, "BadVolume", "wolumen powyżej maksimum"); return; }
    int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
    double pip = PipSize(sym);
    MqlTick tick;
@@ -532,6 +536,7 @@ void OnModify(string json)
    ulong ticket = (ulong)JGetNumber(json, "positionId", 0);
    double sl = JGetNumber(json, "sl", 0);
    if(!SelectOwn(ticket, id)) return;
+   if(!MathIsValidNumber(sl) || sl <= 0) { Reject(id, "InvalidStopLossTakeProfit", "SL nie może zostać usunięty"); return; }
    string sym = PositionGetString(POSITION_SYMBOL);
    sl = NormalizeDouble(sl, (int)SymbolInfoInteger(sym, SYMBOL_DIGITS));
    g_trade.SetExpertMagicNumber(InpMagic);
@@ -542,18 +547,22 @@ void OnModify(string json)
 void OnClose(string json)
 {
    string id = JGetString(json, "id");
+   if(LiveBlocked(id)) return;
    ulong ticket = (ulong)JGetNumber(json, "positionId", 0);
    double units = JGetNumber(json, "units", 0);
    if(!SelectOwn(ticket, id)) return;
+   if(JFind(json, "units") >= 0 && (!MathIsValidNumber(units) || units <= 0)) { Reject(id, "BadVolume", "nieprawidłowy wolumen zamknięcia"); return; }
    string sym = PositionGetString(POSITION_SYMBOL);
    double contract = SymbolInfoDouble(sym, SYMBOL_TRADE_CONTRACT_SIZE), step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
    double vol = PositionGetDouble(POSITION_VOLUME);
+   if(units > 0 && (contract <= 0 || step <= 0 || units > vol * contract)) { Reject(id, "BadVolume", "wolumen zamknięcia powyżej pozycji lub brak specyfikacji"); return; }
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetTypeFillingBySymbol(sym);
    if(units > 0 && contract > 0 && units / contract < vol)
    {
       double lots = MathFloor(units / contract / step + 1e-9) * step;
-      if(lots <= 0) { Reject(id, "BadVolume", "wolumen częściowego zamknięcia za mały"); return; }
+      double vmin = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+      if(lots < vmin || vol - lots < vmin) { Reject(id, "BadVolume", "wolumen częściowego zamknięcia lub reszta poniżej minimum"); return; }
       g_trade.PositionClosePartial(ticket, lots);
    }
    else g_trade.PositionClose(ticket);
@@ -623,6 +632,7 @@ void Handle(string json)
       SendLine("{" + JStr("type", "account") + ",\"account\":" + AccountJson() + "}");
       SendPositions();
    }
+   else if(!g_welcomed) return;
    else if(type == "subscribe") OnSubscribe(json);
    else if(type == "open") OnOpen(json);
    else if(type == "modify") OnModify(json);
@@ -637,11 +647,12 @@ void Handle(string json)
 int OnInit()
 {
    bool live = (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL;
-   if(live && !InpAllowLive)
+   if(live)
    {
-      Alert("APEX Bridge: konto LIVE – most zablokowany. Działa tylko na DEMO, chyba że świadomie włączysz 'Zezwól na konto LIVE'.");
+      Alert("APEX Bridge: konto REAL bezwarunkowo zablokowane. Ta wersja obsługuje wyłącznie DEMO.");
       return INIT_FAILED;
    }
+   if(InpHost != "127.0.0.1" || StringLen(InpLabel) == 0) return INIT_PARAMETERS_INCORRECT;
    if(StringLen(InpPairingKey) < 8)
    {
       Alert("APEX Bridge: wpisz klucz parowania z panelu APEX (Połączenia platform).");
