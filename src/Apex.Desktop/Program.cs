@@ -199,7 +199,7 @@ namespace Apex.Desktop
             string url = $"http://127.0.0.1:{port}/";
             log.Info($"APEX Desktop {AccountManager.HostVersion} uruchomiony: {url}  (dane: {dataDir})");
             log.Info($"Klucz parowania mostów: {config.Config.PairingKey}  | WebSocket: ws://127.0.0.1:{port}/bridge | TCP: 127.0.0.1:{config.Config.BridgeTcpPort}");
-            if (!config.Config.LiveTradingFeature) log.Info("Handel na kontach LIVE: WYŁĄCZONY (bezpieczne ustawienie domyślne).");
+            log.Info("Handel na kontach LIVE: TRWALE WYŁĄCZONY (wersja DEMO).");
             if (config.Config.OpenBrowserOnStart && !args.Contains("--no-browser")) OpenBrowser(url);
 
             app.Lifetime.ApplicationStopping.Register(() =>

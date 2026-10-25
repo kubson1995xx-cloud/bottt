@@ -170,7 +170,7 @@ namespace Apex.Desktop.Runtime
             }
         }
 
-        /// <summary>Wykonuje polecenie na wątku silnika i zwraca komunikat (lub błąd po 20 s).</summary>
+        /// <summary>Polecenie oczekujące ponad 30 s jest anulowane. Rozpoczęte polecenie zwraca faktyczny wynik, nie pozorny timeout.</summary>
         public Task<string> Command(Func<TradingEngine?, string> f)
         {
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -234,7 +234,6 @@ namespace Apex.Desktop.Runtime
                     e.SaveState(now, true);
                     return stopped;
                 case "pause": return e.CmdPauseEntries();
-                case "emergency": return e.CmdEmergencyStop(now, "przycisk AWARYJNY STOP w panelu");
                 case "resetEmergency":
                     _store.Set("desktop-control", "{\"EmergencyStopped\":false}");
                     _emergencyLatched = false;
@@ -262,13 +261,13 @@ namespace Apex.Desktop.Runtime
                         if (TryNum(args, "riskPerTradePct", out var rp)) copy.RiskPerTradePct = rp;
                         var err = copy.Validate();
                         if (err != null) return "Odrzucono: " + err;
+                        _config.Update(c => { if (!c.Accounts.TryGetValue(Key, out var a)) c.Accounts[Key] = a = new AccountSettings(); a.Risk = copy.Clone(); });
                         var target = e.Config.Risk;
                         target.MaxDailyLossPct = copy.MaxDailyLossPct;
                         target.MaxDrawdownPct = copy.MaxDrawdownPct;
                         target.MaxOpenPositions = copy.MaxOpenPositions;
                         target.MaxEffectiveLeverage = copy.MaxEffectiveLeverage;
                         e.CmdSetRisk(copy.RiskPerTradePct);
-                        _config.Update(c => { if (!c.Accounts.TryGetValue(Key, out var a)) c.Accounts[Key] = a = new AccountSettings(); a.Risk = target.Clone(); });
                         return $"Limity zapisane: ryzyko {copy.RiskPerTradePct:F2}%, dzienny {copy.MaxDailyLossPct:F2}%, DD {copy.MaxDrawdownPct:F2}%, pozycje {copy.MaxOpenPositions}, dźwignia {copy.MaxEffectiveLeverage:F1}x";
                     }
                 case "toggleStrategy":
@@ -285,7 +284,7 @@ namespace Apex.Desktop.Runtime
                     }
                 case "setUniverse":
                     {
-                        var u = Settings.Universe ?? new UniverseSettings();
+                        var u = JsonSerializer.Deserialize<UniverseSettings>(JsonSerializer.Serialize(Settings.Universe ?? new UniverseSettings(), ConfigStore.Json), ConfigStore.Json)!;
                         if (args.TryGetProperty("mode", out var m)) u.Mode = m.GetString() == "manual" ? "manual" : "auto";
                         if (args.TryGetProperty("symbols", out var list) && list.ValueKind == JsonValueKind.Array)
                             u.Manual = list.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).Take(100).ToList();
@@ -764,6 +763,9 @@ namespace Apex.Desktop.Runtime
                 _cancelCommands.Clear();
                 _wake.Set();
             }
+            // Samo zatrzymanie pętli nie anuluje operacji oczekujących na blokadę transportu.
+            var session = _adapter.Session;
+            if (session != null) _ = session.CloseAsync("zatrzymanie środowiska konta");
             if (Thread.CurrentThread != _thread) _thread.Join(TimeSpan.FromSeconds(5));
             // Zapis należy wyłącznie do wątku silnika; nigdy równolegle po nieudanym Join.
         }

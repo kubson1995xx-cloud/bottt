@@ -53,6 +53,7 @@ namespace Apex.Desktop.Runtime
 
         public void Unregister(BridgeSession s)
         {
+            s.MarkClosed();
             _sessions.TryRemove(s.Id, out _);
             if (s.AccountKey != null && _runtimes.TryGetValue(s.AccountKey, out var r))
             {

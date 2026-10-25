@@ -326,6 +326,77 @@ namespace Apex.Tests
         }
 
         [Fact]
+        public async Task RuntimeDisposeCancelsTransportQueueBeforeLateOpen()
+        {
+            var transport = new Transport();
+            var r = Runtime();
+            var s = Session(transport); Symbols(s); r.Attach(s);
+            await r.Command(_ => "ready");
+            transport.Sent.Clear();
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            transport.Block = _ => release.Task;
+            var holdingSend = s.SendAsync(new SimpleMsg());
+            r.Adapter.OrderTimeout = TimeSpan.FromSeconds(2);
+            var queuedOpen = Task.Run(() => r.Adapter.OpenMarket(new OrderRequest { Symbol = "EURUSD", VolumeUnits = 1000, StopLossPips = 10, TakeProfitPips = 20 }));
+            await Task.Delay(50);
+            r.Dispose();
+            release.TrySetResult();
+            try { await holdingSend; } catch (OperationCanceledException) { }
+            await queuedOpen;
+            Assert.DoesNotContain(transport.Sent, x => BridgeProtocol.ReadType(x) == "open");
+        }
+
+        [Fact]
+        public void UnregisterRetiresTransportRatherThanOnlyDetachingAdapter()
+        {
+            var cfg = Config();
+            using var m = new AccountManager(cfg, new NewsCalendar(), new AppLog(Path.Combine(_dir, "logs")));
+            var s = new BridgeSession(new Transport()); m.Register(s);
+            s.Handle(BridgeProtocol.Serialize(new HelloMsg { Key = cfg.Config.PairingKey, Platform = "cTrader", Account = Account() }));
+            m.Unregister(s);
+            Assert.Equal(SessionState.Closed, s.State);
+        }
+
+        [Fact]
+        public async Task TransportStateRaceAfterSendAttemptIsUncertain()
+        {
+            var t = new Transport { Block = _ => Task.FromException(new InvalidOperationException("socket state raced")) };
+            var s = Session(t);
+            var outcome = await Task.Run(() => s.Request(new OpenCmd { Id = "race" }, "race", TimeSpan.FromMilliseconds(40)));
+            Assert.True(outcome.sent);
+            Assert.Null(outcome.response);
+            Assert.False(s.IsAlive);
+        }
+
+        [Fact]
+        public async Task FailedUniverseWriteCannotLeakIntoPublishedConfig()
+        {
+            var cfg = Config();
+            cfg.Update(c => c.Accounts["cTrader:Pepperstone:910001"] = new AccountSettings { Universe = new UniverseSettings { Mode = "auto" } });
+            using var r = Runtime(cfg);
+            var s = Session(); Symbols(s); r.Attach(s); await r.Command(_ => "ready");
+            File.Delete(cfg.Path_); Directory.CreateDirectory(cfg.Path_);
+            var result = await r.Command(e => r.ExecuteAction(e, "setUniverse", JsonSerializer.SerializeToElement(new { mode = "manual" })));
+            Assert.StartsWith("Błąd:", result);
+            Assert.Equal("auto", cfg.Account(r.Key).Universe!.Mode);
+        }
+
+        [Fact]
+        public async Task FailedLimitWriteCannotChangeEffectiveEngineLimits()
+        {
+            var cfg = Config();
+            using var r = Runtime(cfg);
+            var s = Session(); Symbols(s); r.Attach(s); await r.Command(_ => "ready");
+            File.Delete(cfg.Path_); Directory.CreateDirectory(cfg.Path_);
+            double before = 0, after = 0;
+            await r.Command(e => { before = e!.Config.Risk.MaxDailyLossPct; return "before"; });
+            var result = await r.Command(e => r.ExecuteAction(e, "setLimits", JsonSerializer.SerializeToElement(new { maxDailyLossPct = 1.0 })));
+            await r.Command(e => { after = e!.Config.Risk.MaxDailyLossPct; return "after"; });
+            Assert.StartsWith("Błąd:", result);
+            Assert.Equal(before, after);
+        }
+
+        [Fact]
         public async Task ConcurrentHelloCannotAcceptTwoOwners()
         {
             var cfg = Config();

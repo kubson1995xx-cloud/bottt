@@ -274,7 +274,7 @@ namespace Apex.Desktop.Bridge
         public void Send<T>(T msg)
         {
             try { SendAsync(msg).GetAwaiter().GetResult(); }
-            catch (Exception ex) when (ex is OperationCanceledException || ex is System.IO.IOException || ex is System.Net.WebSockets.WebSocketException || ex is ObjectDisposedException) { }
+            catch (Exception ex) when (ex is OperationCanceledException || ex is System.IO.IOException || ex is System.Net.WebSockets.WebSocketException || ex is InvalidOperationException) { }
         }
 
         public string NextId() => $"{Id}-{Interlocked.Increment(ref _requestSeq)}";
@@ -304,7 +304,7 @@ namespace Apex.Desktop.Bridge
                 acquired = false;
                 return (true, await tcs.Task.WaitAsync(deadline.Token).ConfigureAwait(false));
             }
-            catch (Exception ex) when (ex is OperationCanceledException || ex is System.IO.IOException || ex is System.Net.WebSockets.WebSocketException || ex is ObjectDisposedException)
+            catch (Exception ex) when (ex is OperationCanceledException || ex is System.IO.IOException || ex is System.Net.WebSockets.WebSocketException || ex is InvalidOperationException)
             {
                 if (started) _ = CloseAsync("niepewny wynik wysłania – wymagane ponowne połączenie");
                 return (started, null);

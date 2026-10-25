@@ -13,7 +13,7 @@ namespace Apex.Desktop.Services
     /// <summary>Ustawienia pojedynczego konta (klucz: platforma:broker:numer).</summary>
     public sealed class AccountSettings
     {
-        /// <summary>Zezwolenie na LIVE dla tego konta. Działa tylko gdy globalne LiveTradingFeature = true (edycja pliku).</summary>
+        /// <summary>Pole historyczne, zachowane dla zgodności plików. Wersja DEMO ignoruje zezwolenie na LIVE.</summary>
         public bool AllowLive { get; set; }
         public string LiveConfirmation { get; set; } = "";
         public RiskSettings? Risk { get; set; }
@@ -33,8 +33,7 @@ namespace Apex.Desktop.Services
         public string ApiToken { get; set; } = "";
         public string Label { get; set; } = "APEX";
         /// <summary>
-        /// GŁÓWNY WYŁĄCZNIK HANDLU NA KONTACH LIVE. Domyślnie false. Celowo NIE da się go zmienić z panelu –
-        /// wymaga świadomej edycji pliku konfiguracyjnego. Dopiero potem w panelu można odblokować konkretne konto LIVE frazą.
+        /// Pole historyczne konfiguracji. Nawet true nie odblokowuje LIVE w wersji DEMO.
         /// </summary>
         public bool LiveTradingFeature { get; set; }
         public List<string> AllowedBrokers { get; set; } = new();
