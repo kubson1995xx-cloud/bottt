@@ -61,6 +61,41 @@ SHA-256; uszkodzona, obca albo niejednoznaczna koperta blokuje, nie odtwarza si�
 Restart/reconnect nigdy nie uruchamia strategii; zapisane full-close intents ponawiają się z backoff
 15…300 s do autorytatywnego rozliczenia. Bez połączenia lub trwałego zapisu nie ma gwarancji likwidacji.
 
+## Etap rozszerzenia zakresu — dowód opening fill (nie gotowy bootstrap)
+
+**To jest etap pośredni, nie odblokowanie cTrader.** Nie ma jeszcze konfiguracji świeżego
+zakresu, trwałego manifestu Core ani permitu nowego ryzyka. `CoverageUnknown` nadal blokuje
+prawdziwy test-open i START. Sama nazwa `Symulator`, pole JSON czy `IsBacktest` nie są dowodem
+zaufanej kompozycji — ich strukturalne odseparowanie od produkcji pozostaje wymaganą pracą.
+Nie uruchamiać testu transakcyjnego w celu sprawdzenia tego etapu.
+
+`open.signalId` jest opcjonalnym, dokładnym identyfikatorem Core, niezależnym od komentarza
+brokera. Odpowiedź `result` może zawierać `openingFill` także przy `uncertain`:
+
+- `request`: oryginalne `executionId`, `signalId`, symbol, kierunek (`1` long / `-1` short),
+  **żądany** `volumeUnits`, `stopLossPips`, `takeProfitPips`, label, comment i maxSlippagePips;
+- `positionId`, **rzeczywisty zaobserwowany pierwotny** `initialVolumeUnits`, `volumeStep`,
+  `entryPrice`, `entryTimeUtc`;
+- `openingDeals[]`: `dealId:Int64`, `orderId`, `positionId`, `volumeUnits`, `price`, `timeUtc`,
+  symbol, direction, label, comment. Czasy w tym obiekcie to ISO8601 UTC (nie UNIX ms).
+
+Dowód jest zamrażany z `Position.Deals` na wątku platformy bezpośrednio po odpowiedzi SDK,
+**przed** naprawą ochrony lub jej awaryjnym close, a następnie zapisywany jako checkpoint
+niepewnego wyniku w journalu platformy. Odpowiedź końcowa, kopia, restart i powtórka sygnału
+z innym commandId zachowują oryginalny executionId i dowód. Błąd zapisu nie zmienia się w `filled`
+i nie pozwala na drugie wykonanie. Przy niejednoznacznym zapisie obserwacja może pozostać tylko
+w pamięci/odpowiedzi — nie jest to gwarancja trwałości fizycznego LocalStorage.
+
+Minimalna obsługa: dokładnie jeden widoczny, wypełniony opening deal zgodny z żądaniem i quantum.
+Brak grafu, multi-fill/addition, niezgodna tożsamość/czas/cena, wzrost remaining, niepoprawny quantum
+lub niewystarczająca precyzja oznacza **brak dowodu**, nie podstawienie żądanego ani remaining volume.
+Opening `dealId` nigdy nie zastępuje kanonicznego klucza **closingDealId:Int32→Int64**.
+Deserializacja `openingFill` sama nie nadaje własności ani prawa do handlu; Core musi jeszcze
+powiązać go z trwałym wcześniejszym admission i uzgodnić `C+O=V0` w bieżącym zakresie/generacji.
+SDK nie gwarantuje pełnej retencji grafu; nie można wykryć dowolnych ukrytych zewnętrznych mutacji.
+Przyszła minimalna polityka to dedykowane, wyłączne konto **DEMO hedging**, bez obcych otwartych
+pozycji i pending orders. Ten etap nie implementuje jeszcze kontroli tej polityki ani setupu.
+
 ## Transport
 
 | Transport | Adres | Ramkowanie |

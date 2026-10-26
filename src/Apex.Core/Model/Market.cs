@@ -236,9 +236,10 @@ namespace Apex.Core.Model
         public BrokerErrorKind Error { get; init; }
         public string Message { get; init; } = "";
         public double? FillPrice { get; init; }
+        public OpeningFillEvidence? OpeningFill { get; init; }
 
-        public static OrderOutcome Filled(long positionId, double fillPrice) =>
-            new() { Status = OrderStatus.Filled, PositionId = positionId, FillPrice = fillPrice };
+        public static OrderOutcome Filled(long positionId, double fillPrice, OpeningFillEvidence? openingFill = null) =>
+            new() { Status = OrderStatus.Filled, PositionId = positionId, FillPrice = fillPrice, OpeningFill = openingFill };
 
         public static OrderOutcome Rejected(BrokerErrorKind error, string message) =>
             new() { Status = OrderStatus.Rejected, Error = error, Message = message };

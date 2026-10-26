@@ -293,8 +293,41 @@ namespace Apex.Core.Bridge
         public string Status { get; set; } = "";
         public long? PositionId { get; set; }
         public double? Price { get; set; }
+        /// <summary>Optional immutable original actual opening fill; absent means unknown, not zero.</summary>
+        public OpeningFillEvidence? OpeningFill { get; set; }
         public string? Error { get; set; }
         public string? Message { get; set; }
+    }
+
+    /// <summary>One lossless result boundary for Desktop and Native, including uncertain fills.
+    /// Evidence is transported, not authorized: only Core's future scope validator can admit it.</summary>
+    public static class ProtocolResult
+    {
+        public static OrderOutcome ToOutcome(ResultMsg result) => new()
+        {
+            Status = result.Status?.ToLowerInvariant() switch
+            {
+                "filled" => OrderStatus.Filled,
+                "rejected" => OrderStatus.Rejected,
+                _ => OrderStatus.Uncertain,
+            },
+            PositionId = result.PositionId,
+            FillPrice = result.Price,
+            OpeningFill = result.OpeningFill,
+            Error = BridgeProtocol.ParseError(result.Error),
+            Message = result.Message ?? result.Error ?? "stan niepewny",
+        };
+
+        public static ResultMsg FromOutcome(string id, OrderOutcome outcome) => new()
+        {
+            Id = id,
+            Status = outcome.Status == OrderStatus.Filled ? "filled" : outcome.Status == OrderStatus.Rejected ? "rejected" : "uncertain",
+            PositionId = outcome.PositionId,
+            Price = outcome.FillPrice,
+            OpeningFill = outcome.OpeningFill,
+            Error = outcome.Error.ToString(),
+            Message = outcome.Message,
+        };
     }
 
     public sealed class MarginResultMsg
@@ -334,6 +367,7 @@ namespace Apex.Core.Bridge
     {
         public string Type { get; set; } = "open";
         public string Id { get; set; } = "";
+        public string? SignalId { get; set; }
         public string Symbol { get; set; } = "";
         public string Side { get; set; } = "buy";
         public double Units { get; set; }

@@ -15,5 +15,6 @@
     <Compile Include="..\..\..\..\Apex.Core\Bridge\Protocol.cs" Link="Shared\Protocol.cs" />
     <Compile Include="..\..\..\..\Apex.Core\Model\Enums.cs" Link="Shared\Enums.cs" />
     <Compile Include="..\..\..\..\Apex.Core\Model\Market.cs" Link="Shared\Market.cs" />
+    <Compile Include="../../../../Apex.Core/Model/OpeningEvidence.cs" Link="Shared/OpeningEvidence.cs" />
   </ItemGroup>
 </Project>

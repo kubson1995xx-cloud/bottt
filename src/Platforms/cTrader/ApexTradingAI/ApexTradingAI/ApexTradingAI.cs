@@ -448,15 +448,13 @@ namespace cAlgo.Robots
             string fingerprint = BridgeProtocol.Serialize(new { q.Symbol, q.Direction, q.VolumeUnits, q.StopLossPips, q.TakeProfitPips, q.Label, q.Comment, q.MaxSlippagePips });
             var result = _journal.Run(id, fingerprint, _label + "|" + q.Comment, () =>
             {
-                var outcome = OpenProtected(q);
-                return new ResultMsg { Id = id, Status = outcome.Status == OrderStatus.Filled ? "filled" : outcome.Status == OrderStatus.Rejected ? "rejected" : "uncertain",
-                    PositionId = outcome.PositionId, Price = outcome.FillPrice, Error = outcome.Error.ToString(), Message = outcome.Message };
+                var outcome = OpenProtected(q, id);
+                return ProtocolResult.FromOutcome(id, outcome);
             });
-            return result.Status == "filled" ? OrderOutcome.Filled(result.PositionId ?? 0, result.Price ?? 0) : result.Status == "rejected"
-                ? OrderOutcome.Rejected(BridgeProtocol.ParseError(result.Error), result.Message ?? "") : OrderOutcome.Uncertain(BridgeProtocol.ParseError(result.Error), result.Message ?? "");
+            return ProtocolResult.ToOutcome(result);
         }
 
-        private OrderOutcome OpenProtected(OrderRequest q)
+        private OrderOutcome OpenProtected(OrderRequest q, string executionId)
         {
             if (!PlatformSafety.Protection(q.StopLossPips, q.TakeProfitPips)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "wymagane skończone dodatnie SL i TP");
             var sym = _r.Symbols.GetSymbol(q.Symbol);
@@ -481,6 +479,10 @@ namespace cAlgo.Robots
             var result = q.MaxSlippagePips is double slip
                 ? _r.ExecuteMarketRangeOrder(tt, sym.Name, vol, slip, tt == TradeType.Buy ? sym.Ask : sym.Bid, q.Label, q.StopLossPips, q.TakeProfitPips, q.Comment)
                 : _r.ExecuteMarketOrder(tt, sym.Name, vol, q.Label, q.StopLossPips, q.TakeProfitPips, q.Comment);
+            // Capture now, before repair or its emergency close mutates the broker object.
+            var openingFill = result.IsSuccessful && result.Position != null
+                ? CTraderOpeningEvidence.Capture(result.Position, q, executionId, sym.VolumeInUnitsStep) : null;
+            if (openingFill != null) _journal.RecordOpeningFill(executionId, openingFill);
             if (result.IsSuccessful && result.Position != null && !CTraderData.Protected(result.Position))
             {
                 var position = result.Position;
@@ -491,10 +493,11 @@ namespace cAlgo.Robots
                     () => _r.ModifyPosition(position, sl, tp, ProtectionType.Absolute).IsSuccessful && CTraderData.Protected(position),
                     () => closeResult = _r.ClosePosition(position).ToString());
                 if (!repaired)
-                    return OrderOutcome.Uncertain(BrokerErrorKind.InvalidStopLossTakeProfit, "brak SL/TP; awaryjne zamknięcie: " + closeResult);
+                    return new OrderOutcome { Status = OrderStatus.Uncertain, PositionId = position.Id, FillPrice = openingFill?.EntryPrice,
+                        OpeningFill = openingFill, Error = BrokerErrorKind.InvalidStopLossTakeProfit, Message = "brak SL/TP; awaryjne zamknięcie: " + closeResult };
             }
             if (result.IsSuccessful && result.Position == null) return OrderOutcome.Uncertain(BrokerErrorKind.TechnicalError, "brak pozycji w potwierdzeniu");
-            return Map(result, null);
+            return result.IsSuccessful ? OrderOutcome.Filled(result.Position!.Id, result.Position.EntryPrice, openingFill) : Map(result, null);
         }
 
         public OrderOutcome ModifyStopLoss(long positionId, double stopLoss)

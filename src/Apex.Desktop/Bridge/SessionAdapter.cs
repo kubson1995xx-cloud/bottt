@@ -58,12 +58,7 @@ namespace Apex.Desktop.Bridge
             if (json == null) return OrderOutcome.Uncertain(BrokerErrorKind.Timeout, $"{what}: brak odpowiedzi mostu w czasie – stan niepewny");
             var r = BridgeProtocol.Deserialize<ResultMsg>(json);
             if (r == null) return OrderOutcome.Uncertain(BrokerErrorKind.Other, $"{what}: nieczytelna odpowiedź mostu");
-            switch (r.Status?.ToLowerInvariant())
-            {
-                case "filled": return OrderOutcome.Filled(r.PositionId ?? 0, r.Price ?? 0);
-                case "rejected": return OrderOutcome.Rejected(BridgeProtocol.ParseError(r.Error), r.Message ?? r.Error ?? "odrzucone");
-                default: return OrderOutcome.Uncertain(BridgeProtocol.ParseError(r.Error), r.Message ?? "stan niepewny");
-            }
+            return ProtocolResult.ToOutcome(r);
         }
 
         public OrderOutcome OpenMarket(OrderRequest req)
@@ -76,6 +71,7 @@ namespace Apex.Desktop.Bridge
             var (sent, json) = s.Request(new OpenCmd
             {
                 Id = id,
+                SignalId = req.SignalId,
                 Symbol = req.Symbol,
                 Side = BridgeProtocol.SideOf(req.Direction),
                 Units = req.VolumeUnits,

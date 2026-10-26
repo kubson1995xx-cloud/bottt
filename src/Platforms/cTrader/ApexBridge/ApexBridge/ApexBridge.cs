@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Apex.Core.Bridge;
+using Apex.Core.Model;
 using Apex.Core.Safety;
 using Apex.Platforms.CTrader;
 using System.Text.Json;
@@ -538,6 +539,13 @@ namespace cAlgo.Robots
             TradeResult r = c.MaxSlipPips is double slip
                 ? ExecuteMarketRangeOrder(tt, sym.Name, vol, slip, tt == TradeType.Buy ? sym.Ask : sym.Bid, c.Label, c.SlPips, c.TpPips, c.Comment)
                 : ExecuteMarketOrder(tt, sym.Name, vol, c.Label, c.SlPips, c.TpPips, c.Comment);
+            // Freeze original opening graph before any protection repair/emergency liquidation.
+            var openingFill = r.IsSuccessful && r.Position != null ? CTraderOpeningEvidence.Capture(r.Position, new OrderRequest
+            {
+                Symbol = c.Symbol, Direction = side.Value, VolumeUnits = c.Units, StopLossPips = c.SlPips, TakeProfitPips = c.TpPips,
+                Label = c.Label, Comment = c.Comment, SignalId = c.SignalId ?? "", MaxSlippagePips = c.MaxSlipPips,
+            }, c.Id, sym.VolumeInUnitsStep) : null;
+            if (openingFill != null) _journal?.RecordOpeningFill(c.Id, openingFill);
             if (r.IsSuccessful && r.Position != null && !CTraderData.Protected(r.Position))
             {
                 var position = r.Position;
@@ -548,10 +556,13 @@ namespace cAlgo.Robots
                     () => ModifyPosition(position, sl, tp, ProtectionType.Absolute).IsSuccessful && CTraderData.Protected(position),
                     () => closeResult = ClosePosition(position).ToString());
                 if (!repaired)
-                    return new ResultMsg { Id = c.Id, Status = "uncertain", PositionId = position.Id, Error = "InvalidStopLossTakeProfit", Message = "broker nie potwierdził SL/TP; awaryjne zamknięcie: " + closeResult };
+                    return new ResultMsg { Id = c.Id, Status = "uncertain", PositionId = position.Id, Price = openingFill?.EntryPrice, OpeningFill = openingFill,
+                        Error = "InvalidStopLossTakeProfit", Message = "broker nie potwierdził SL/TP; awaryjne zamknięcie: " + closeResult };
             }
             if (r.IsSuccessful && r.Position == null) return new ResultMsg { Id = c.Id, Status = "uncertain", Error = "TechnicalError", Message = "brak pozycji w potwierdzeniu brokera" };
-            return Result(c.Id, r, r.Position?.Id, r.Position?.EntryPrice);
+            var response = Result(c.Id, r, r.Position?.Id, r.Position?.EntryPrice);
+            response.OpeningFill = openingFill;
+            return response;
         }
 
         private Position? FindOwn(long id) => Positions.FirstOrDefault(x => x.Id == id && IsOwn(x));
