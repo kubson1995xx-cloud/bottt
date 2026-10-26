@@ -15,7 +15,7 @@ namespace Apex.Backtester
 {
     public static class Program
     {
-        public const string SemanticsVersion = "backtest-v2-cashflow-purged";
+        public const string SemanticsVersion = "backtest-v2.1-complete-account-evidence";
         public static int Main(string[] args)
         {
             if (args.Length == 0 || args[0] == "help" || args[0] == "--help")
@@ -82,7 +82,9 @@ namespace Apex.Backtester
                     { BaseCost = cost, TrainingYears = isYears, MaxCombos = maxCombos, MaxRuns = maxRuns, Parallelism = parallel, RequestedSymbols = symbols };
                     if (args[0] == "research") pipeline.Run();
                     else pipeline.RunPortfolioOnly(Required("--profiles").Split(','));
-                    result = new { runs = pipeline.RunCount, results = pipeline.MachineResults, warning = "research candidate report only; no production profile written or enabled; no untouched holdout claimed" };
+                    result = new { runs = pipeline.RunCount, results = pipeline.MachineResults,
+                        isolatedEvidence = pipeline.IsolatedRuns.Select(r => new { r.RunId, r.EvidenceFile }).ToArray(),
+                        warning = "research candidate report only; no production profile written or enabled; no untouched holdout claimed" };
                 }
                 else throw new ArgumentException("Unknown command: " + args[0]);
                 WriteReport(outDir, new { success = true, semantics = SemanticsVersion, source = SourceHashes(), config, dataSource = loader.Source, data = loader.Evidence, result });

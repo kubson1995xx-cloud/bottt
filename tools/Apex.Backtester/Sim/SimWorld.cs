@@ -8,6 +8,11 @@ using Apex.Core.Model;
 
 namespace Apex.Backtester.Sim
 {
+    /// <summary>Actual USD balance deltas; entry fee is paid once, not allocated again on reductions.</summary>
+    public sealed record SimCashflow(long PositionId, string Symbol, DateTime TimeUtc, string Kind,
+        double Units, double Price, double QuoteToUsd, double Gross, double Commission, double Swap,
+        double Delta, double BalanceAfter, double RemainingUnits);
+
     /// <summary>Scenariusz kosztów transakcyjnych (mnożniki względem modelu bazowego).</summary>
     public sealed class CostScenario
     {
@@ -78,6 +83,7 @@ namespace Apex.Backtester.Sim
 
         public DateTime Now { get; private set; }
         public double Balance { get; private set; }
+        public List<SimCashflow> Cashflows { get; } = new();
         public Action<ClosedPositionInfo>? OnClosed { get; set; }
         public bool IsConnected => true;
         public int OpenCount => _positions.Count;
@@ -264,7 +270,7 @@ namespace Apex.Backtester.Sim
                 Math.Abs(r.VolumeUnits / sd.Def.VolumeStep - Math.Round(r.VolumeUnits / sd.Def.VolumeStep)) > 1e-7)
                 return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "invalid volume");
             if (!(r.StopLossPips > 0)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "brak SL");
-            _ = QuoteToUsd(sd.Def, Now); // validate before any mutation, including entry fee
+            double q2u = QuoteToUsd(sd.Def, Now); // validate before any mutation, including entry fee
             var q = GetQuote(r.Symbol)!.Value;
             double spread = q.Spread;
             double slip = _cost.SlippageMult * (0.25 * spread + 0.01 * AtrH1(sd, Now));
@@ -288,6 +294,8 @@ namespace Apex.Backtester.Sim
                 EntryCommission = Commission(sd.Def, r.VolumeUnits),
             };
             Balance -= pos.EntryCommission;
+            Cashflows.Add(new(pos.Id, pos.Symbol, Now, "Entry", pos.Units, fill, q2u,
+                0, -pos.EntryCommission, 0, -pos.EntryCommission, Balance, pos.Units));
             _positions.Add(pos);
             return OrderOutcome.Filled(pos.Id, fill);
         }
@@ -351,6 +359,8 @@ namespace Apex.Backtester.Sim
             p.RealizedSwap += swap;
             p.RealizedNet += net;
             p.Units -= units;
+            Cashflows.Add(new(p.Id, p.Symbol, time, reason, units, price, q2u, gross, -exitCommission, swap,
+                gross - exitCommission + swap, Balance, p.Units));
             if (p.Units <= 1e-9)
             {
                 _positions.Remove(p);

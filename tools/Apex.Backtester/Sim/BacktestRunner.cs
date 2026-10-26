@@ -26,6 +26,7 @@ namespace Apex.Backtester.Sim
     public sealed class BacktestResult
     {
         public List<TradeRecord> Trades { get; } = new();
+        public List<SimCashflow> Cashflows { get; } = new();
         public List<(DateTime Time, double Equity)> DailyEquity { get; } = new();
         public double StartEquity { get; set; }
         public double EndEquity { get; set; }
@@ -127,6 +128,7 @@ namespace Apex.Backtester.Sim
             if (peak > 0) maxDd = Math.Max(maxDd, (peak - result.EndEquity) / peak);
             result.DailyEquity.Add((end, result.EndEquity));
             result.MaxEquityDrawdownPct = maxDd * 100;
+            result.Cashflows.AddRange(world.Cashflows);
             return result;
         }
     }
