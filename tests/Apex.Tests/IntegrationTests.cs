@@ -284,7 +284,7 @@ namespace Apex.Tests
 
             // Używamy tej samej ścieżki domyślnego instrumentu co przycisk panelu, nie ręcznego obejścia.
             string msg = await _host.Command(s.Key, "executionTest");
-            Assert.Contains("rozpoczęty", msg);
+            Assert.True(msg.Contains("rozpoczęty"), msg + " STATUS " + await _host.Account(s.Key) + " HOST " + _host.Output);
             string? verdict = null;
             Assert.True(await WaitFor(async () =>
             {

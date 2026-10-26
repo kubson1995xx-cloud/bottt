@@ -66,7 +66,7 @@ public sealed class ScopedHostProcessTests
         var status = await h.Status(a => a.GetProperty("scope").GetProperty("baselineId").GetGuid() != Guid.Empty); string label = status.GetProperty("scope").GetProperty("label").GetString()!;
         await h.Connect(label); await h.Status(a => a.GetProperty("scope").GetProperty("eligibleTechnicalTest").GetBoolean());
         Assert.Contains("rozpoczęty", await h.Command("executionTest", new { symbol = "US500", confirmDemoTrade = true }));
-        await h.Status(a => a.GetProperty("executionTest").EnumerateArray().Any(x => x.GetString()!.Contains("Krok 1 OK")), 20); // positive read-only journal hook bound original
+        await h.Status(a => a.GetProperty("engineReady").GetBoolean() && a.GetProperty("scope").GetProperty("uncertainOpenings").GetInt32() == 0, 20); // positive read-only original witness; partial test must fail certification
         status = await h.Status(a => !a.GetProperty("scope").GetProperty("eligibleTechnicalTest").GetBoolean());
         Assert.NotEqual("Conflict", status.GetProperty("scope").GetProperty("status").GetString());
         Assert.Equal(0, status.GetProperty("engine").GetProperty("tradesTotal").GetInt32()); Assert.Equal(1, h.Opens);
@@ -146,7 +146,9 @@ public sealed class ScopedHostProcessTests
         status = await h.Status(a => a.GetProperty("engine").GetProperty("tradesTotal").GetInt32() == 1, 45);
         Assert.Equal(7.5, status.GetProperty("engine").GetProperty("realizedTotal").GetDouble());
         Assert.Equal(1, h.Modifies); Assert.True(h.Closes >= 1); Assert.Equal(1, h.Opens);
-        Assert.Contains("PASS", await h.Command("start"));
+        status = await h.Status(a => a.GetProperty("scope").GetProperty("certificate").GetProperty("canStart").GetBoolean(), 15);
+        Assert.True(status.GetProperty("scope").GetProperty("certificate").GetProperty("canStart").GetBoolean());
+        Assert.Contains("uruchomiony", await h.Command("start"));
         var files = Directory.GetFiles(h.Dir, "*.json", SearchOption.AllDirectories);
         using var persisted = JsonDocument.Parse(File.ReadAllText(files.Single(p => File.ReadAllText(p).Contains("\"OperationId\""))));
         var admission = persisted.RootElement.GetProperty("OpenAdmissions")[0];
@@ -160,7 +162,19 @@ public sealed class ScopedHostProcessTests
         Assert.Equal(1, h.Opens);
         h.HistoryEnabled = true; await h.Publish();
         await h.Status(a => a.GetProperty("scope").GetProperty("eligibleTechnicalTest").GetBoolean(), 20);
-        Assert.Contains("PASS", await h.Command("start")); Assert.Equal(1, h.Opens);
+        status = await h.Status(a => a.GetProperty("scope").GetProperty("certificate").GetProperty("canStart").GetBoolean());
+        Assert.Equal("Stopped", status.GetProperty("engine").GetProperty("mode").GetString());
+        Assert.Contains("uruchomiony", await h.Command("start")); Assert.Equal(1, h.Opens);
+        await h.Outage();
+        status = await h.Status(a => a.GetProperty("scope").GetProperty("brokerEpoch").GetString() == "synthetic-start:3"
+            && a.GetProperty("engine").GetProperty("mode").GetString() == "Stopped" && !a.GetProperty("scope").GetProperty("certificate").GetProperty("canStart").GetBoolean());
+        Assert.True(status.GetProperty("scope").GetProperty("certificate").GetProperty("valid").GetBoolean());
+        Assert.False(status.GetProperty("scope").GetProperty("certificate").GetProperty("canStart").GetBoolean());
+        Assert.DoesNotContain("uruchomiony", await h.Command("start"));
+        h.HistoryEnabled = true; await h.Publish();
+        status = await h.Status(a => a.GetProperty("scope").GetProperty("certificate").GetProperty("canStart").GetBoolean());
+        Assert.Equal("Stopped", status.GetProperty("engine").GetProperty("mode").GetString());
+        Assert.Contains("uruchomiony", await h.Command("start")); Assert.Equal(1, h.Opens);
     }
 
     internal sealed class Host : IAsyncDisposable

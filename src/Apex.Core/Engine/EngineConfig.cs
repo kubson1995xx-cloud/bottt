@@ -52,7 +52,8 @@ namespace Apex.Core.Engine
     /// <summary>Stan silnika zapisywany trwale (odporność na restart).</summary>
     public sealed class EngineState
     {
-        public int SchemaVersion { get; set; } = 3;
+        public int SchemaVersion { get; set; } = 4;
+        public ExecutionTestCertificate? ExecutionTest { get; set; }
         public long DurableRevision { get; set; }
         public RecoveryBaseline? Baseline { get; set; }
         public List<OpenAdmission> OpenAdmissions { get; set; } = new();

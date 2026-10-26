@@ -130,10 +130,14 @@ function canOpenTrades(acc) {
     && S.lastOk > 0 && Date.now() - S.lastOk < 6000);
 }
 
+function canStartStrategies(acc) {
+  return canOpenTrades(acc) && (!acc.scope || (acc.scope.strategyStartBlocked === false && acc.scope.certificate?.canStart === true));
+}
+
 async function command(action, args, confirm) {
   const acc = currentAccount();
   if (!acc) { toast('Brak wybranego konta.'); return; }
-  if (action === 'start' && acc.scope?.strategyStartBlocked) { toast('START strategii zablokowany do trwałego PASS Task2. ScopedReady dopuszcza tylko osobno zatwierdzony test DEMO.'); return; }
+  if (action === 'start' && !canStartStrategies(acc)) { toast(acc.scope?.certificate?.message || 'START wymaga trwałego PASS testu DEMO oraz świeżej synchronizacji i gotowości ryzyka.'); return; }
   const opens = action === 'start' || action === 'executionTest';
   if (opens && !canOpenTrades(acc)) { toast('Handel wymaga połączonego, zweryfikowanego konta DEMO i aktualnego panelu.'); return; }
   if (confirm) {
@@ -141,7 +145,7 @@ async function command(action, args, confirm) {
     if (!ok) return;
   }
   // Podczas otwartego potwierdzenia mogło zmienić się konto, połączenie lub typ rachunku.
-  if ((opens || action === 'setupScope') && (currentAccount()?.key !== acc.key || !canOpenTrades(currentAccount()))) {
+  if ((opens || action === 'setupScope') && (currentAccount()?.key !== acc.key || !canOpenTrades(currentAccount()) || (action === 'start' && !canStartStrategies(currentAccount())))) {
     toast('Stan konta zmienił się podczas potwierdzania. Sprawdź konto i spróbuj ponownie.'); return;
   }
   try {
@@ -311,7 +315,7 @@ function viewDashboard() {
       el('span', { class: 'badge ' + (e.dailyPnl >= 0 ? 'good' : 'critical') }, el('span', { class: 'dot' }), 'Dziś ' + signed(e.dailyPnl) + ' ' + ccy + ' (' + signed(e.dailyPnlPct) + '%)'),
       el('span', { class: 'muted', text: 'Saldo ' + money(e.balance, ccy) })),
     el('div', { class: 'controls' },
-      el('button', { class: 'btn primary', onclick: () => command('start', null, { title: 'Uruchomić automatyczny handel DEMO?', body: 'APEX będzie samodzielnie otwierał i zamykał transakcje DEMO na koncie ' + e.accountNumber + '. Najpierw zakończ test wykonania i sprawdź SL/TP oraz limity ryzyka. Po restarcie ponownie wymagany jest START.', button: 'Uruchom handel DEMO' }), disabled: e.mode === 'Running' || !canOpenTrades(acc) || acc.scope?.strategyStartBlocked }, icon('play'), 'START'),
+      el('button', { class: 'btn primary', onclick: () => command('start', null, { title: 'Uruchomić automatyczny handel DEMO?', body: 'APEX będzie samodzielnie otwierał i zamykał transakcje DEMO na koncie ' + e.accountNumber + '. Najpierw zakończ test wykonania i sprawdź SL/TP oraz limity ryzyka. Po restarcie ponownie wymagany jest START.', button: 'Uruchom handel DEMO' }), disabled: e.mode === 'Running' || !canStartStrategies(acc) }, icon('play'), 'START'),
       el('button', { class: 'btn', onclick: () => command('pause'), disabled: e.mode !== 'Running' }, icon('pause'), 'Wstrzymaj nowe'),
       el('button', { class: 'btn', onclick: () => command('stop', null, { title: 'Zatrzymać bota?', body: 'Bot przestanie otwierać i zarządzać pozycjami. Otwarte pozycje pozostaną chronione przez SL/TP u brokera.', button: 'Zatrzymaj' }) }, icon('stop'), 'STOP'),
       el('button', { class: 'btn danger', onclick: () => command('closeAll', null, { title: 'Zamknąć pozycje bota?', body: 'Zostaną zamknięte WSZYSTKIE pozycje otwarte przez APEX na tym koncie. Pozycje ręczne i innych botów nie są dotykane.', button: 'Zamknij pozycje bota', danger: true }) }, icon('x'), 'Zamknij pozycje bota'),
@@ -690,6 +694,14 @@ function viewConnections() {
 
 /* ------------------------------------------------------------------ Diagnostyka */
 
+function certificatePanel(c) {
+  const i = c?.identity;
+  return el('div', { class: 'stack' },
+    el('strong', { text: 'Certyfikat testu DEMO: ' + (c?.status || 'brak PASS') }),
+    el('p', { class: 'note', text: c?.message || 'START zablokowany: brak trwałego PASS. Wymagana synchronizacja i osobno potwierdzony test DEMO.' }),
+    i ? el('p', { text: (c.valid ? 'Konto certyfikowane: ' : 'Zakres próby (brak ważnego PASS): ') + i.platform + ' / ' + i.broker + ' / ' + i.accountNumber + ' / ' + i.currency + ' · DEMO hedging · etykieta ' + i.label + ' · zakres ' + c.baselineId + ' · ścieżka ' + i.executionPath + ' · safety ' + i.safetyVersion + ' · protokół ' + c.protocolVersion + ' · test ' + c.testVersion }) : null);
+}
+
 function scopePanel(acc) {
   const s = acc.scope || {};
   const proposed = s.baselineId && s.baselineId !== '00000000-0000-0000-0000-000000000000';
@@ -698,7 +710,7 @@ function scopePanel(acc) {
     copyField(s.label || '', 'Dokładna etykieta cBota (kopiuj bez zmian)'),
     el('p', { class: 'muted', text: 'ID zakresu: ' + (s.baselineId || 'brak') + ' · początek epoki: ' + (s.startUtc || 'jeszcze nie ustanowiona') }),
     el('p', { text: 'Broker CoverageUnknown – NIE certyfikujemy pełnej historii brokera. ' + (s.eligibleTechnicalTest ? 'ScopedReady: można osobno zatwierdzić test techniczny DEMO.' : 'AwaitingEvidence/Conflict: nowe ryzyko zablokowane.') }),
-    el('p', { class: 'note', text: 'START strategii zablokowany: wymagany trwały PASS Task2. Wynik obecnej procedury testowej nie jest tym PASS.' }),
+    certificatePanel(s.certificate),
     el('p', { class: 'muted', text: 'Epoka brokera: ' + (s.brokerEpoch || 'brak') + ' · łączność: ' + (s.brokerConnected ? 'aktywna' : 'niepotwierdzona') }),
     el('p', { text: s.message || '' }), feed(s.pendingDeficits || [], true),
     el('p', { text: s.nextAction || '' }),
@@ -715,7 +727,7 @@ function viewDiagnostics() {
       el('p', { class: 'muted', style: 'margin:0', text: 'Test otwiera pozycję o minimalnym wolumenie z SL i TP, po ok. 20 s przesuwa SL, a następnie zamyka pozycję. Każdy krok jest weryfikowany na podstawie faktycznego stanu u brokera.' }),
       el('div', { class: 'controls' }, el('button', { class: 'btn primary', disabled: !canOpenTrades(acc) || (acc.scope && !acc.scope.eligibleTechnicalTest), onclick: () => command('executionTest', { symbol: acc.testSymbol, confirmDemoTrade: true }, { title: 'Uruchomić test wykonania na DEMO?', body: 'Zatwierdzasz otwarcie rzeczywistej transakcji DEMO na koncie ' + acc.engine.accountNumber + ', na ' + (acc.testSymbol || 'instrumencie spełniającym limity ryzyka') + ', z SL i TP i próbą zamknięcia po ok. minucie. Przez cały test obserwuj pozycję w cTrader.', button: 'Zatwierdzam transakcję DEMO' }) }, icon('test'), 'Test wykonania (DEMO)'),
         isLive ? el('span', { class: 'muted', text: 'Niedostępny na koncie LIVE.' }) : null),
-      feed(acc.executionTest, false));
+      certificatePanel(acc.scope?.certificate), feed(acc.executionTest, false));
     wrap.appendChild(card('Test otwarcia, zarządzania i zamknięcia pozycji', 'tylko DEMO', test));
     wrap.appendChild(el('div', { class: 'grid cols-2' },
       card('Zdarzenia konta', null, feed(acc.events, false)),

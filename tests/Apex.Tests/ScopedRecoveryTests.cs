@@ -9,7 +9,7 @@ using Xunit;
 
 namespace Apex.Tests;
 
-public sealed class ScopedRecoveryTests
+public sealed partial class ScopedRecoveryTests
 {
     [Fact]
     public void RuntimeSynchronizationConsumesCurrentScopeInsteadOfUniversalCoverageAndStartStillNeedsTask2()
@@ -68,6 +68,8 @@ public sealed class ScopedRecoveryTests
     sealed class Broker : FakeBroker
     {
         internal Func<OrderRequest, OrderOutcome>? OnOpen;
+        internal Func<long, double?, OrderOutcome>? OnClose;
+        public override OrderOutcome ClosePosition(long id, double? units) => OnClose?.Invoke(id, units) ?? base.ClosePosition(id, units);
         public override OrderOutcome OpenMarket(OrderRequest r) { Orders.Add(r); return OnOpen!(r); }
         public override BrokerHistorySnapshot GetHistory() => new() { AccountNumber = AccountNumber, Generation = "transport", Complete = true, Positions = GetPositions(), Closed = ClosedDeals.ToArray() };
     }
@@ -136,7 +138,7 @@ public sealed class ScopedRecoveryTests
         }
         internal void Restart()
         {
-            Engine = new TradingEngine(new EngineConfig { Label = Proposal.Identity.Label }, new Apex.Core.Adaptive.StrategyBook(Scenarios.DipOnlyProfile()), new OrdinaryGateway(Broker), Broker, new Apex.Core.Bridge.BarStore(), Store, new NullLog(), Journal);
+            Engine = new TradingEngine(new EngineConfig { Label = Proposal.Identity.Label, News = new() { Enabled = false } }, new Apex.Core.Adaptive.StrategyBook(Scenarios.DipOnlyProfile()), new OrdinaryGateway(Broker), Broker, new Apex.Core.Bridge.BarStore(), Store, new NullLog(), Journal);
             Engine.SetGuard(new Apex.Core.Safety.AccountGuardResult { Allowed = true }); Engine.Initialize(Now);
             Authority = new ScopedReceiptAuthority(Engine, _ => Current, () => Tick);
         }
@@ -410,7 +412,7 @@ public sealed class ScopedRecoveryTests
             if (stage == "establish") { f.Store.Fail = true; Assert.False(f.Engine.EstablishBaseline(f.Receipt(), f.Authority, Now)); }
             else { Assert.True(f.Engine.EstablishBaseline(f.Receipt(), f.Authority, Now));
                 if (stage == "admit") { f.Store.Fail = true; f.Send(); Assert.Empty(f.Broker.Orders); }
-                if (stage == "bind") { f.Broker.OnOpen = r => { f.Store.Fail = true; return OrderOutcome.Filled(42, 4000, f.Fill(r)); }; f.Engine.SendAdmittedOpen(f.Request, new() { RiskAmount = 10 }, Now); }
+                if (stage == "bind") { f.Broker.OnOpen = r => { f.Store.Fail = true; return OrderOutcome.Filled(42, 4000, f.Fill(r)); }; f.Engine.SendAdmittedOpen(f.Request, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now); }
                 if (stage == "account") { f.Send(); f.Broker.ClosedDeals.Add(f.Deal(1, 2)); f.Store.Fail = true; Assert.False(f.Engine.ReconcileScoped(f.Receipt(), f.Authority, Now)); Assert.Equal(0, f.State.TradesTotal); Assert.Equal(0, f.State.RealizedTotal); }
             }
         }
@@ -421,7 +423,7 @@ public sealed class ScopedRecoveryTests
     {
         var f = new Fixture(); f.Establish(); OpeningFillEvidence? observed = null;
         f.Broker.OnOpen = r => { observed = f.Fill(r); return OrderOutcome.Uncertain(BrokerErrorKind.Timeout, "unknown"); };
-        f.Engine.SendAdmittedOpen(f.Request, new() { RiskAmount = 10 }, Now);
+        f.Engine.SendAdmittedOpen(f.Request, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now);
         f.Restart(); Assert.False(f.Engine.ReconcileScoped(f.Receipt(), f.Authority, Now)); Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));
         Assert.True(f.Engine.RecoverOpeningOutcome(observed!.Request.ExecutionId, OrderOutcome.Filled(42, 4000, observed), Now));
         Assert.False(f.Engine.ReconcileScoped(f.Receipt(), f.Authority, Now)); // missing actual closing deals, not disappearance
@@ -431,9 +433,9 @@ public sealed class ScopedRecoveryTests
     public void RejectionDischargesButCannotResendSameSignal()
     {
         var f = new Fixture(); f.Establish(); f.Broker.OnOpen = _ => OrderOutcome.Rejected(BrokerErrorKind.NoMoney, "definitive rejection");
-        f.Engine.SendAdmittedOpen(f.Request, new() { RiskAmount = 10 }, Now);
+        f.Engine.SendAdmittedOpen(f.Request, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now);
         Assert.Equal(AdmissionStage.Rejected, f.State.OpenAdmissions[0].Stage); Assert.True(f.Engine.ReconcileScoped(f.Receipt(), f.Authority, Now));
-        f.Engine.SendAdmittedOpen(f.Request, new() { RiskAmount = 10 }, Now); Assert.Single(f.Broker.Orders);
+        f.Engine.SendAdmittedOpen(f.Request, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now); Assert.Single(f.Broker.Orders);
     }
 
     [Fact]
@@ -465,12 +467,12 @@ public sealed class ScopedRecoveryTests
         var r = new OrderRequest { SignalId = "large", Symbol = "US500", Direction = TradeDirection.Long, VolumeUnits = 100000000,
             Label = f.Request.Label, Comment = f.Request.Comment, StopLossPips = 10, TakeProfitPips = 20 };
         f.Broker.OnOpen = q => OrderOutcome.Filled(42, 4000, f.Fill(q, 100000000, 0.1));
-        f.Engine.SendAdmittedOpen(r, new() { RiskAmount = 10 }, Now);
+        f.Engine.SendAdmittedOpen(r, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now);
         Assert.False(f.Engine.ReconcileScoped(f.Receipt(f.Position(99999999.9)), f.Authority, Now));
         Assert.Equal(ScopedRecoveryStatus.AwaitingEvidence, f.Engine.ScopedStatus);
         f.Broker.ClosedDeals.Add(f.Deal(1, 0.1)); Assert.True(f.Engine.ReconcileScoped(f.Receipt(f.Position(99999999.9)), f.Authority, Now));
         var g = new Fixture(); g.Establish(); g.Broker.OnOpen = q => OrderOutcome.Filled(42, 4000, g.Fill(q, 2, Math.BitIncrement(0.1)));
-        g.Engine.SendAdmittedOpen(g.Request, new() { RiskAmount = 10 }, Now); Assert.Null(g.State.OpenAdmissions[0].Fill); Assert.Null(g.Engine.GetScopedPermit(g.Authority, Now));
+        g.Engine.SendAdmittedOpen(g.Request, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now); Assert.Null(g.State.OpenAdmissions[0].Fill); Assert.Null(g.Engine.GetScopedPermit(g.Authority, Now));
     }
     [Theory][InlineData("position")][InlineData("closing")][InlineData("pending")]
     public void UnknownExactLabelObjectsCannotBeAdoptedByComment(string kind)
@@ -498,7 +500,7 @@ public sealed class ScopedRecoveryTests
     {
         var f = new Fixture(); f.Establish(); OpeningFillEvidence? fill = null;
         f.Broker.OnOpen = q => { fill = f.Fill(q); return OrderOutcome.Uncertain(BrokerErrorKind.Timeout, "unknown"); };
-        f.Engine.SendAdmittedOpen(f.Request, new() { RiskAmount = 10 }, Now);
+        f.Engine.SendAdmittedOpen(f.Request, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now);
         var bad = new OpeningFillEvidence(fill!.Request with { VolumeUnits = 3 }, 42, 2, 0.1, 4000, Now, fill.OpeningDeals);
         Assert.False(f.Engine.RecoverOpeningOutcome(fill.Request.ExecutionId, OrderOutcome.Filled(42, 4000, bad), Now)); Assert.Null(f.State.OpenAdmissions[0].Fill);
         var g = new Fixture(); g.Establish(); g.Send(); var old = g.Receipt(g.Position(2));
@@ -540,7 +542,7 @@ public sealed class ScopedRecoveryTests
             if (stage == "bind")
             {
                 f.Broker.OnOpen = q => { f.Store.AfterWrite = () => throw new IOException("bound publication ambiguous"); return OrderOutcome.Filled(42, 4000, f.Fill(q)); };
-                Assert.Equal(OrderStatus.Uncertain, f.Engine.SendAdmittedOpen(f.Request, new() { RiskAmount = 10 }, Now).Status);
+                Assert.Equal(OrderStatus.Uncertain, f.Engine.SendAdmittedOpen(f.Request, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now).Status);
                 Assert.NotNull(f.State.OpenAdmissions[0].Fill);
             }
             else
@@ -564,7 +566,7 @@ public sealed class ScopedRecoveryTests
         f.Broker.OnOpen = _ => OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "should not send");
         var req = new OrderRequest { SignalId = "bad-units", Symbol = "US500", Direction = TradeDirection.Long, VolumeUnits = 2.05,
             Label = f.Request.Label, Comment = f.Request.Comment, StopLossPips = 10, TakeProfitPips = 20 };
-        f.Engine.SendAdmittedOpen(req, new() { RiskAmount = 10 }, Now); Assert.Empty(f.Broker.Orders); Assert.Empty(f.State.OpenAdmissions);
+        f.Engine.SendAdmittedOpen(req, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now); Assert.Empty(f.Broker.Orders); Assert.Empty(f.State.OpenAdmissions);
     }
 
     [Theory]
@@ -597,7 +599,7 @@ public sealed class ScopedRecoveryTests
             var f = new Fixture(new Apex.Desktop.Services.FileStore(Path.Combine(dir, "state")), new Apex.Desktop.Services.FileJournal(Path.Combine(dir, "csv")));
             f.Establish(); OpeningFillEvidence? actual = null;
             f.Broker.OnOpen = q => { actual = f.Fill(q, 1); f.Store.Fail = true; return OrderOutcome.Filled(42, 4000, actual); };
-            Assert.Equal(OrderStatus.Uncertain, f.Engine.SendAdmittedOpen(f.Request, new() { RiskAmount = 10 }, Now).Status);
+            Assert.Equal(OrderStatus.Uncertain, f.Engine.SendAdmittedOpen(f.Request, new() { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now).Status);
             Assert.Null(f.State.OpenAdmissions[0].Fill); f.Store.Fail = false;
             f.Store.Inner = new Apex.Desktop.Services.FileStore(Path.Combine(dir, "state")); f.Restart();
             Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));

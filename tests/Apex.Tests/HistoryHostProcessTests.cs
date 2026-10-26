@@ -84,7 +84,7 @@ public sealed partial class HistoryIntegrationTests
                     }
                     else
                     {
-                        Assert.Contains("histori", await Command("start"));
+                        Assert.Contains("PASS", await Command("start")); // production now rejects earlier on missing certificate, never opens
                         var retry = await Receive("close"); Assert.Equal(42, retry.GetProperty("positionId").GetInt64());
                         await Send(new ResultMsg { Id = retry.GetProperty("id").GetString()!, PositionId = 42, Status = "filled", Price = 4010 });
                         await Send(new PositionsMsg { Items = new() { foreign } }); await Send(new ClosedMsg { Position = deal2 });

@@ -141,16 +141,18 @@ public sealed partial class AccountRuntime
     {
         var b = _engine?.ScopedBaseline ?? Settings.ScopeReservation;
         bool eligible = _engine != null && _authority != null && _engine.GetScopedPermit(_authority, DateTime.UtcNow) != null;
+        var certificate = _engine?.GetExecutionReadiness(DateTime.UtcNow);
         return new { baselineId = b?.BaselineId ?? Guid.Empty, label = b?.Identity.Label ?? ResolvedLabel,
             startUtc = b?.Stage == BaselineStage.Established ? b.EstablishedUtc : (DateTime?)null,
             status = eligible ? "ScopedReady" : _engine?.ScopedStatus == ScopedRecoveryStatus.Ready ? "AwaitingEvidence" : _engine?.ScopedStatus.ToString() ?? "Unestablished", brokerCoverageUnknown = true,
-            eligibleTechnicalTest = eligible, strategyStartBlocked = true, pendingDeficits = _engine?.ScopedDeficits ?? Array.Empty<string>(),
+            eligibleTechnicalTest = eligible && certificate?.Status != "InProgress", strategyStartBlocked = certificate?.CanStart != true,
+            certificate, pendingDeficits = _engine?.ScopedDeficits ?? Array.Empty<string>(),
             uncertainOpenings = _engine?.ScopedAdmissions.Count(a => a.Stage == AdmissionStage.OutcomeUnknown) ?? 0,
             message = !eligible && _engine?.ScopedStatus == ScopedRecoveryStatus.Ready
                 ? "AwaitingEvidence: receipt wygasła lub zmieniły się epoka/revizja/połączenie – wymagane świeże uzgodnienie"
                 : _engine?.ScopedBaseline != null ? _engine.ScopedMessage : _scopeSetupMessage,
             brokerEpoch = _adapter.Session?.BrokerEpoch, brokerConnected = _adapter.Session?.BrokerConnected == true,
-            nextAction = eligible ? "Osobno zatwierdź test techniczny DEMO. START wymaga Task2 PASS; test nie uruchamia strategii."
+            nextAction = eligible ? certificate?.Message ?? "Osobno zatwierdź test techniczny DEMO. START wymaga trwałego PASS; test nie uruchamia strategii."
                 : b == null ? _scopeSetupMessage : _adapter.Session?.ProtocolFault == true ? "Błąd protokołu: połącz most ponownie; bez kasowania stanu."
                 : "Sprawdź dokładną etykietę/epokę, świeżą synchronizację i brakujące dowody. Nie usuwaj stanu ani rezerwacji. " + _engine?.ScopedMessage,
             policy = "Dedykowane konto DEMO hedged, wyłączny pisarz; brak cudzych pozycji/zleceń. Broker CoverageUnknown. Statystyki dotyczą tej epoki, ryzyko całego obserwowanego konta." };

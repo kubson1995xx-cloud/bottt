@@ -248,6 +248,7 @@ namespace Apex.Core.Engine
                 _state.ModeReason = "start/restart – wymagany jawny START użytkownika";
             }
             _risk = new RiskManager(_cfg.Risk, _state.Risk);
+            InterruptExecutionTest("restart – test nie jest wznawiany; rozliczenie i ochronne close pozostają aktywne", utc);
             if (_state.RiskPerTradeOverride.HasValue)
             {
                 _cfg.Risk.RiskPerTradePct = _state.RiskPerTradeOverride.Value;
@@ -279,7 +280,7 @@ namespace Apex.Core.Engine
             try
             {
                 var st = JsonSerializer.Deserialize<EngineState>(json!, StateJson);
-                if (st == null || st.AccountNumber != account || (st.SchemaVersion != 1 && st.SchemaVersion != 2 && st.SchemaVersion != 3) || !Enum.IsDefined(typeof(EngineMode), st.Mode)
+                if (st == null || st.AccountNumber != account || st.SchemaVersion is < 1 or > 4 || !Enum.IsDefined(typeof(EngineMode), st.Mode)
                     || st.Risk == null || st.Ledger == null || st.Plans == null || st.Suspended == null || st.RecentTrades == null
                     || st.DisabledStrategies == null || st.DisabledClasses == null
                     || st.Plans.Any(p => p == null) || st.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId)))
@@ -327,6 +328,13 @@ namespace Apex.Core.Engine
                     if (requiredScope.Any(n => !scopeDocument.RootElement.TryGetProperty(n, out _))) throw new JsonException("missing v3 scope fields");
                     ValidateScopeDocument(scopeDocument.RootElement);
                     ValidateScopeState(st);
+                }
+                if (st.SchemaVersion < 4) { st.ExecutionTest = null; st.SchemaVersion = 4; }
+                else
+                {
+                    using var certificateDocument = JsonDocument.Parse(json!);
+                    ValidateExecutionDocument(certificateDocument.RootElement);
+                    ValidateExecutionState(st);
                 }
                 ScopedStatus = st.ScopeConflict.Length != 0 ? ScopedRecoveryStatus.Conflict
                     : st.Baseline == null ? ScopedRecoveryStatus.Unestablished : ScopedRecoveryStatus.AwaitingEvidence;
@@ -443,7 +451,7 @@ namespace Apex.Core.Engine
         /// <summary>Pozycja testu wykonania bez aktywnego testu (np. po restarcie) jest zamykana.</summary>
         private void CloseOrphanTest(PositionInfo pos, DateTime utc)
         {
-            if (_test != null) return;
+            if (_test != null || _pendingCloses.ContainsKey(pos.Id)) return;
             if (ExecutionLedger.TryParseComment(pos.Comment, out var st, out _) && st == StrategyId.ExecutionTest && _initialized)
             {
                 _log.Warn($"Osierocona pozycja testu wykonania #{pos.Id} {pos.Symbol} – zamykam.");
@@ -511,6 +519,7 @@ namespace Apex.Core.Engine
             {
                 if (_connected) AddError("Utracono połączenie z serwerem – wstrzymano wszystkie operacje.");
                 _connected = false;
+                InterruptExecutionTest("utrata połączenia – wymagany nowy jawny test po synchronizacji", utc);
                 BlockHistory("utracono połączenie");
                 return;
             }
@@ -565,15 +574,11 @@ namespace Apex.Core.Engine
             EnsurePlans(own, utc);
             if (_state.Mode == EngineMode.EmergencyStopped)
             {
-                if (_test != null)
-                {
-                    _test.Log.Add("TEST NIEZALICZONY – awaryjne zatrzymanie");
-                    LastExecutionTest = _test.Log.ToList();
-                    _test = null;
-                }
+                InterruptExecutionTest("awaryjne zatrzymanie", utc);
                 foreach (var pos in own)
                     if (!_pendingCloses.ContainsKey(pos.Id)) RequestClose(pos.Id, "awaryjne zatrzymanie", utc);
             }
+            ObserveTechnicalProtection(own);
             ProtectPositions(own, utc);
             ResolvePending(own, utc);
             ProcessPendingCloses(utc);
@@ -608,6 +613,7 @@ namespace Apex.Core.Engine
         {
             foreach (var pos in own)
             {
+                CloseOrphanTest(pos, utc); // retained plans must not hide a late post-restart test position
                 if (_plans.ContainsKey(pos.Id)) continue;
                 // Pozycja bota, której nie znamy: albo wynik niepewnego zlecenia (obsłuży ResolvePending), albo odtworzenie.
                 if (ExecutionLedger.TryParseComment(pos.Comment, out _, out var sid) && _pendingInfo.ContainsKey(sid)) continue;
@@ -1415,14 +1421,18 @@ namespace Apex.Core.Engine
             _journal.Event(msg);
         }
 
-        public string CmdStart()
+        public string CmdStart(DateTime? ownerUtc = null)
         {
+            var utc = ownerUtc ?? _broker.GetAccount().TimeUtc;
             if (!GuardAllowed) return "Nie można uruchomić: " + GuardMessage;
-            if (!_trustedSimulation && _state.Baseline != null) return "START strategii zablokowany: wymagany trwały PASS Task2 dla tego konta/zakresu/ścieżki. Test techniczny jest osobnym jawnym poleceniem.";
-            if (_initialized) SynchronizeHistory(_broker.GetAccount().TimeUtc);
+            if (!_trustedSimulation && !CertificateMatchesCurrent()) return "Nie można uruchomić: START strategii zablokowany: " + GetExecutionReadiness(utc).Message;
+            if (_initialized) SynchronizeHistory(utc);
             if (!_initialized || !HistoryReady || !_persistenceHealthy || !CanOperate(out _)) return "Nie można uruchomić: brak bezpiecznego konta/połączenia, historii lub trwałego zapisu. " + HistoryMessage;
             if (_state.Mode == EngineMode.EmergencyStopped) return "Najpierw zresetuj awaryjne zatrzymanie.";
             if (_risk.State.MaxDrawdownHit) return "Najpierw zresetuj blokadę maksymalnego obsunięcia.";
+            _risk.Update(_broker.GetAccount(), utc);
+            if (_risk.NewEntriesBlocked(out var blocked)) return "START zablokowany: " + blocked;
+            if (_test != null) return "START zablokowany: trwa test wykonania.";
             _consecutiveErrors = 0;
             SetMode(EngineMode.Running, "uruchomiono przez użytkownika");
             return "Bot uruchomiony.";
@@ -1586,10 +1596,13 @@ namespace Apex.Core.Engine
                 var t = new ExecTest { Symbol = sym, SignalId = sid, Started = utc, StepTime = utc, Direction = TradeDirection.Long };
                 t.Log.Add($"{utc:HH:mm:ss} START testu na {sym}: wolumen min. {spec.VolumeMin}, SL {slPips} pips, TP {tpPips} pips");
                 if (!_ledger.TryReserve(sid, sym, utc)) return "Test z tym identyfikatorem już był wykonany – spróbuj za minutę.";
+                _pool.Clear();
+                SetMode(EngineMode.Stopped, "jawny test techniczny – strategie pozostają STOP do osobnego START");
                 _dirty = true;
                 // Scoped dispatch atomically commits this ledger reservation WITH the complete
                 // admission before sending. A preliminary save would consume its current permit.
                 if (_state.Baseline == null && !TrySaveState(utc, true)) return "Test zablokowany: zapis rezerwacji nieudany.";
+                _test = t; // procedure authority is present only for this explicit command
                 var res = SendAdmittedOpen(new OrderRequest
                 {
                     Symbol = sym, Direction = TradeDirection.Long, VolumeUnits = spec.VolumeMin, StopLossPips = slPips, TakeProfitPips = tpPips,
@@ -1598,6 +1611,8 @@ namespace Apex.Core.Engine
                     InitialVolume = units, InitialRisk = stop, RiskAmount = risk, EntryAtr = atr, EntryReason = "test wykonania", Exit = new ExitPlan() }, utc);
                 if (res.Status == OrderStatus.Rejected)
                 {
+                    SaveExecutionEvidence(c => c with { Outcome = ExecutionTestOutcome.Failed, CompletedUtc = utc, Message = res.Message }, utc);
+                    _test = null;
                     _ledger.MarkConsumed(sid, res.Message, utc);
                     _dirty = true;
                     TrySaveState(utc, true);
@@ -1606,6 +1621,7 @@ namespace Apex.Core.Engine
                     return "Test nieudany: zlecenie odrzucone – " + res.Message;
                 }
                 t.Step = 1;
+                t.Failed = !_trustedSimulation && res.Status != OrderStatus.Filled; // recovery may account, never certify an uncertain original open
                 t.PositionId = res.PositionId ?? 0;
                 t.Log.Add($"{utc:HH:mm:ss} Krok 1: odpowiedź serwera {res.Status} (pozycja #{t.PositionId}) – weryfikuję stan.");
                 _test = t;
@@ -1620,11 +1636,22 @@ namespace Apex.Core.Engine
         {
             var t = _test;
             if (t == null) return;
-            if (_state.Baseline != null && _state.OpenAdmissions.Any(a => a.Request.SignalId == t.SignalId && a.Fill == null && a.Stage == AdmissionStage.OutcomeUnknown)) return;
             var own = OwnPositions();
             var pos = own.FirstOrDefault(p => ExecutionLedger.TryParseComment(p.Comment, out var sidStrat, out var sid) && sidStrat == StrategyId.ExecutionTest && sid == t.SignalId);
+            if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds)
+            {
+                if (pos != null) RequestClose(pos.Id, "test: przekroczony czas kroku", utc);
+                Finish("TEST NIEZALICZONY – przekroczony czas kroku; brak lub spóźnione dowody. Ochronne close i rozliczenie pozostają aktywne."); return;
+            }
+            if (_state.Baseline != null && _state.OpenAdmissions.Any(a => a.Request.SignalId == t.SignalId && a.Fill == null && a.Stage == AdmissionStage.OutcomeUnknown))
+            {
+                if ((utc - t.Started).TotalSeconds <= _cfg.VerificationTimeoutSeconds) return;
+                Finish("TEST NIEZALICZONY – brak pozytywnego dowodu pierwotnego fill; rezerwacja pozostaje"); return;
+            }
             void Finish(string verdict)
             {
+                if (_state.ExecutionTest?.Outcome == ExecutionTestOutcome.InProgress)
+                    SaveExecutionEvidence(c => c with { Outcome = verdict.Contains("PRZERWANY") ? ExecutionTestOutcome.Interrupted : ExecutionTestOutcome.Failed, CompletedUtc = utc, Message = verdict }, utc);
                 t.Log.Add($"{utc:HH:mm:ss} {verdict} (czas {(utc - t.Started).TotalSeconds:F0} s)");
                 LastExecutionTest = t.Log.ToList();
                 _journal.Event("TEST WYKONANIA: " + verdict);
@@ -1641,8 +1668,10 @@ namespace Apex.Core.Engine
                         if (!_plans.ContainsKey(pos.Id))
                             _plans[pos.Id] = new TradePlan { PositionId = pos.Id, SignalId = t.SignalId, Symbol = pos.Symbol, Strategy = StrategyId.ExecutionTest, Direction = pos.Direction, EntryPrice = pos.EntryPrice, InitialStop = pos.StopLoss ?? 0, InitialRisk = pos.StopLoss.HasValue ? Math.Abs(pos.EntryPrice - pos.StopLoss.Value) : 0, InitialVolume = pos.VolumeUnits, EntryTimeUtc = pos.EntryTimeUtc, EntryReason = "test wykonania", Exit = new ExitPlan() };
                         _dirty = true;
-                        if (!(pos.StopLoss is > 0) || !double.IsFinite(pos.StopLoss.Value) || !HasValidTarget(pos)) { RequestClose(pos.Id, "test: brak SL/TP", utc); Finish("TEST NIEZALICZONY – pozycja otwarta bez poprawnego SL/TP"); return; }
-                        t.InitialStop = pos.StopLoss.Value;
+                        if (t.Failed || !TechnicalPositionMatches(pos, t, true)) { RequestClose(pos.Id, "test: brak SL/TP lub zgodnego fill", utc); Finish("TEST NIEZALICZONY – pozycja otwarta bez poprawnego SL/TP lub zgodnego fill"); return; }
+                        if (!SaveExecutionEvidence(c => c with { PositionId = pos.Id, InitialStop = pos.StopLoss!.Value, TakeProfit = pos.TakeProfit!.Value, ProtectionObservedUtc = utc }, utc))
+                        { RequestClose(pos.Id, "test: błąd trwałego dowodu ochrony", utc); Finish("TEST NIEZALICZONY – błąd zapisu dowodu ochrony"); return; }
+                        t.InitialStop = pos.StopLoss!.Value;
                         t.Log.Add($"{utc:HH:mm:ss} Krok 1 OK: pozycja #{pos.Id} otwarta po {pos.EntryPrice}, SL {pos.StopLoss}, TP {pos.TakeProfit}, wolumen {pos.VolumeUnits}");
                         t.Step = 2;
                         t.StepTime = utc;
@@ -1655,6 +1684,7 @@ namespace Apex.Core.Engine
                     break;
                 case 2:
                     if (pos == null) { Finish("TEST PRZERWANY – pozycja zniknęła przed zmianą SL (np. trafiony SL/TP lub zamknięta ręcznie)"); return; }
+                    if (t.Failed || !TechnicalPositionMatches(pos, t, true)) { RequestClose(pos.Id, "test: zmieniona ochrona/tożsamość", utc); Finish("TEST NIEZALICZONY – zmieniona ochrona/tożsamość"); return; }
                     if ((utc - t.StepTime).TotalSeconds < 20) return;
                     {
                         double newSl = pos.EntryPrice - 0.75 * (pos.EntryPrice - t.InitialStop);
@@ -1668,6 +1698,8 @@ namespace Apex.Core.Engine
                             Finish("TEST NIEZALICZONY – nie można bezpiecznie zacieśnić SL");
                             return;
                         }
+                        if (!SaveExecutionEvidence(c => c with { TightenedStop = newSl, ModifyRequestedUtc = utc }, utc))
+                        { RequestClose(pos.Id, "test: zapis modify nieudany", utc); Finish("TEST NIEZALICZONY – zapis modify nieudany"); return; }
                         var r = _broker.ModifyStopLoss(pos.Id, newSl);
                         if (r.Status == OrderStatus.Rejected)
                         {
@@ -1683,8 +1715,10 @@ namespace Apex.Core.Engine
                     break;
                 case 3:
                     if (pos == null) { Finish("TEST PRZERWANY – pozycja zniknęła przed weryfikacją SL"); return; }
-                    if (pos.StopLoss.HasValue && Math.Abs(pos.StopLoss.Value - t.InitialStop) <= Math.Abs(t.InitialStop) * 1e-6 + 1e-9)
+                    if (!t.Failed && TechnicalPositionMatches(pos, t, false) && StopMatches(pos.Symbol, pos.StopLoss, t.InitialStop))
                     {
+                        if (!SaveExecutionEvidence(c => c with { ModifyObservedUtc = utc }, utc))
+                        { RequestClose(pos.Id, "test: zapis obserwacji modify nieudany", utc); Finish("TEST NIEZALICZONY – zapis obserwacji modify nieudany"); return; }
                         t.Log.Add($"{utc:HH:mm:ss} Krok 2 OK: SL potwierdzony u brokera ({pos.StopLoss}).");
                         t.Step = 4;
                         t.StepTime = utc;
@@ -1699,14 +1733,19 @@ namespace Apex.Core.Engine
                 case 4:
                     if (pos == null) { Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono zmiany SL" : "TEST PRZERWANY – pozycja zniknęła przed wysłaniem polecenia zamknięcia; ścieżka close niezweryfikowana"); return; }
                     if ((utc - t.StepTime).TotalSeconds < 20) return;
+                    if (!TechnicalPositionMatches(pos, t, false) || !StopMatches(pos.Symbol, pos.StopLoss, t.InitialStop)) t.Failed = true;
+                    if (!SaveExecutionEvidence(c => c with { CloseRequestedUtc = utc }, utc)) t.Failed = true;
                     t.Log.Add($"{utc:HH:mm:ss} Krok 3: zamykanie pozycji #{pos.Id}.");
                     var closeResult = RequestClose(pos.Id, "test wykonania – zamknięcie", utc);
-                    if (closeResult?.Status != OrderStatus.Filled) t.Failed = true;
+                    if (closeResult?.Status != OrderStatus.Filled || closeResult.PositionId != pos.Id) t.Failed = true;
+                    else if (!SaveExecutionEvidence(c => c with { CloseConfirmedUtc = utc }, utc)) t.Failed = true;
                     t.Step = 5;
                     t.StepTime = utc;
                     break;
                 case 5:
-                    if (pos == null) Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono wszystkich poleceń zmiany SL i zamknięcia" : "TEST ZALICZONY – otwarcie, zmiana SL i zamknięcie potwierdzone u brokera");
+                    if (t.Failed) Finish("TEST NIEZALICZONY – nie potwierdzono wszystkich poleceń zmiany SL i zamknięcia");
+                    else if (pos == null && _trustedSimulation) Finish("TEST ZALICZONY – wyłącznie symulacja; bez certyfikatu produkcyjnego");
+                    else if (pos == null && PublishExecutionPass(utc)) Finish("TEST ZALICZONY – trwały PASS po pełnym rozliczeniu ekonomicznym");
                     else if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds) Finish("TEST NIEZALICZONY – pozycja nadal otwarta po próbie zamknięcia (ponawiam zamykanie w tle)");
                     break;
             }

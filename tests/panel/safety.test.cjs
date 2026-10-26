@@ -128,7 +128,7 @@ test('scope panel separates app readiness from broker coverage and copies exact 
   assert.match(view.textContent, /CoverageUnknown/);
   assert.match(view.textContent, /ScopedReady/);
   assert.match(view.textContent, /scope-id/);
-  assert.match(view.textContent, /Task2.*PASS|PASS.*Task2/);
+  assert.match(view.textContent, /PASS/);
 });
 
 test('scope readiness and generic history cannot enable strategy START before Task2 PASS', async () => {
@@ -146,6 +146,31 @@ test('technical test confirmation sends explicit DEMO approval but scope setup n
   execution.click(); await new Promise(setImmediate);
   const command = p.calls.find(c => c.opts?.body && JSON.parse(c.opts.body).action === 'executionTest');
   assert.ok(command); assert.equal(JSON.parse(command.opts.body).args.confirmDemoTrade, true);
+});
+
+test('certificate panel shows bound account path version and enables only explicit ready START', () => {
+  const p = panel();
+  selectAccount(p, `S.host.pairingKey='key'; S.host.wsUrl='ws://127.0.0.1:5077/bridge'; S.host.tcpPort=5078;
+    S.data.data.accounts[0].scope={eligibleTechnicalTest:true,strategyStartBlocked:false,
+    certificate:{valid:true,canStart:true,status:'PASS',message:'Możesz osobno potwierdzić START',baselineId:'cert-scope',protocolVersion:1,testVersion:'demo-execution-v1',
+    identity:{platform:'cTrader',broker:'Pepperstone',accountNumber:123,currency:'USD',label:'ExactLabel',executionPath:'DesktopBridge',safetyVersion:'scoped-demo-v1'}}};`);
+  const view = p.run('viewConnections()');
+  assert.match(view.textContent, /PASS/); assert.match(view.textContent, /123/); assert.match(view.textContent, /DesktopBridge/);
+  assert.match(view.textContent, /demo-execution-v1/); assert.match(view.textContent, /ExactLabel/);
+  const start = [...p.run('viewDashboard()').querySelectorAll('button')].find(b => b.textContent === 'START');
+  assert.ok(!start.hasAttribute('disabled')); start.click(); assert.ok(p.document.querySelector('[role="dialog"]'));
+  p.run(`S.data.data.accounts[0].scope.certificate.canStart=false;`);
+  const blocked = [...p.run('viewDashboard()').querySelectorAll('button')].find(b => b.textContent === 'START');
+  assert.ok(blocked.hasAttribute('disabled'));
+});
+
+test('interrupted certificate and required sync remain actionable and cannot enable START', () => {
+  const p = panel();
+  selectAccount(p, `S.data.data.accounts[0].scope={eligibleTechnicalTest:false,strategyStartBlocked:true,
+    certificate:{valid:false,canStart:false,status:'Interrupted',message:'Test przerwany. Wymagana świeża synchronizacja i osobno potwierdzony test DEMO.'}};`);
+  assert.match(p.run('viewConnections()').textContent, /Test przerwany.*synchronizacja/);
+  const start = [...p.run('viewDashboard()').querySelectorAll('button')].find(b => b.textContent === 'START');
+  assert.ok(start.hasAttribute('disabled'));
 });
 
 test('shipped interface has no AI Lab or automatic update controls', () => {

@@ -29,11 +29,7 @@ public sealed partial class TradingEngine
     {
         _scopedPermit = null; _lastScopedReceipt = null; HistoryReady = false;
         if (_state.Baseline == null) return;
-        if (_test != null)
-        {
-            _test.Log.Add("TEST PRZERWANY – " + reason + "; brak automatycznego wznowienia/PASS");
-            LastExecutionTest = _test.Log.ToArray(); _test = null;
-        }
+        InterruptExecutionTest(reason, _broker.GetAccount().TimeUtc);
         if (ScopedStatus != ScopedRecoveryStatus.Conflict) ScopedStatus = ScopedRecoveryStatus.AwaitingEvidence;
         ScopedMessage = reason + "; wymagane świeże uzgodnienie i jawne nowe polecenie";
         CmdStop();
@@ -71,7 +67,7 @@ public sealed partial class TradingEngine
         if (_stateReadFault || !_persistenceHealthy) return false;
         try
         {
-            ValidateFinancialState(next); ValidateScopeState(next);
+            ValidateFinancialState(next); ValidateScopeState(next); ValidateExecutionState(next);
             next.DurableRevision = checked(_state.DurableRevision + 1); next.SavedUtc = utc;
             _store.Set(StoreKey(next.AccountNumber), JsonSerializer.Serialize(next, StateJson)); _store.Flush();
             if (next.ClosedRecords.Count != _state.ClosedRecords.Count) _projectionReconciled = false;
@@ -178,6 +174,8 @@ public sealed partial class TradingEngine
     // Production without Phase C cannot obtain _scopedAuthority/permit from this internal API.
     internal OrderOutcome SendAdmittedOpen(OrderRequest request, TradePlan plan, DateTime utc)
     {
+        if (!_trustedSimulation && plan.Strategy != StrategyId.ExecutionTest && !CertificateMatchesCurrent())
+            return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "strategy requires durable execution-test PASS");
         // CommitScope consumes the issued object. Retain its ORIGINAL deadline locally for
         // the final send fence; a durable admission is not permission to send stale evidence.
         var permit = _scopedPermit;
@@ -214,6 +212,8 @@ public sealed partial class TradingEngine
             BrokerGeneration = receipt?.BrokerGeneration ?? "unknown", TransportGeneration = receipt?.TransportGeneration ?? _historyGeneration,
             PositionRevision = receipt?.PositionRevision ?? 0, PendingOrderRevision = receipt?.PendingOrderRevision ?? 0 };
         var next = ScopeCandidate(); next.OpenAdmissions.Add(admission);
+        if (!_trustedSimulation && plan.Strategy == StrategyId.ExecutionTest && _test?.SignalId == request.SignalId && _state.Baseline != null)
+            next.ExecutionTest = NewExecutionCertificate(op, utc);
         if (!CommitScope(next, utc)) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "pre-send durability failed; not sent");
         var send = new OrderRequest { ExecutionId = op, SignalId = evidence.SignalId, Symbol = evidence.Symbol, Direction = evidence.Direction,
             VolumeUnits = evidence.VolumeUnits, StopLossPips = evidence.StopLossPips, TakeProfitPips = evidence.TakeProfitPips,
@@ -230,6 +230,7 @@ public sealed partial class TradingEngine
                 ? scopedGateway.OpenScoped(send, new ScopedDispatchAuthorization(receipt, r =>
                     r.ExecutionId == op && RequestEvidence(r, op) == evidence && authority != null
                     && !_stateReadFault && _persistenceHealthy && _state.ScopeConflict.Length == 0
+                    && (plan.Strategy == StrategyId.ExecutionTest || _trustedSimulation || CertificateMatchesCurrent())
                     && _state.OpenAdmissions.Any(a => a.OperationId == op && a.Request == evidence && a.Stage == AdmissionStage.OutcomeUnknown)
                     && CurrentScopedReceipt(receipt, authority, utc, permit!.Expires)))
                 : _broker.OpenMarket(send);
