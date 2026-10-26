@@ -236,11 +236,21 @@ Kody `error` (wielkość liter bez znaczenia, nieznany kod = `Other`): `None, Te
 | `subscribe` | `symbols[], tfs[], history{tf:liczba}` | wyślij historię (`bars` snapshot), potem bieżące notowania i nowe świece |
 | `open` | `id,signalId,symbol,side,units,slPips,tpPips,label,comment,maxSlipPips?,scoped` | wymagane dodatnie skończone SL i TP, aktualny scoped capture i exact identity; REAL zawsze odrzucony, bez wyjątku parametru |
 | `modify` | `id, positionId, sl` | tylko pozycje z etykietą APEX |
-| `close` | `id, positionId, units?` | tylko pozycje z etykietą APEX; `units` = częściowe zamknięcie |
+| `close` | `id, positionId, units?, signalId?, observedUnits?` | pełne close bez units; partial wymaga stabilnego Core actionId jako id, exact signal/comment i obserwowanego wolumenu, świeżych danych oraz SL/TP; tylko exact label DEMO |
 | `margin` | `id, symbol, side, units` | odpowiedz `marginResult` |
 | `ping` | – | dowolny komunikat w odpowiedzi |
 
 Każde polecenie z `id` wymaga dokładnie jednej odpowiedzi `result` (lub `marginResult`) z tym samym `id`.
+
+## Partial i trwały rejestr (Task2B)
+
+Rozszerzenie v1 aktualizuj razem w host/bridge/native. `result.reductionFill` jest dodatnim SDK witness tylko po udanym partial: `actionId,positionId,signalId,label,symbol,beforeUnits,closedUnits,remainingUnits`. Wspólny mapper `ProtocolResult` zachowuje je również przy uncertain. Checkpoint `CommandJournal.RecordReductionFill` poprzedza końcowy zapis/odpowiedź; błąd zapisu zatrzymuje dalsze mutacje, nigdy nie odblokowuje retry. Brak witness oznacza UNKNOWN, nie sukces z samej różnicy wolumenu.
+
+Core `EngineState` v5 zachowuje certyfikat v4 i przechowuje `TradePlan.Partial` w tym samym autorytatywnym commit co księgowanie. Stany: Reserved → AwaitingEvidence → Confirmed, albo pewny Rejected → świeża ocena/backoff/nowy actionId; Skipped i LegacyUnknown nie ponawiają. Nowe v5 wymaga wszystkich pól intencji; v1–v4 nie wymyślają partial success. Dowód egzekucji + exact opening/closing/remainder union wymagane przed PartialDone. Pełny close nie udaje partial success.
+
+Istniejące `historyRequest.recoverOperations` obejmuje także nierozstrzygnięte actionId partial. Most wyłącznie odczytuje `Lookup`; brak wyniku nie wysyła niczego do brokera. Snapshot przekazuje `recoveredResults`, a `SessionAdapter.LookupPartial` czyta zaakceptowany wynik. Oryginalny opening request/fill nadal odzyskiwany przez `LookupOpeningRequest`/SDK graph, również z tombstone. Identyfikator transportowy replay nie zmienia oryginalnej tożsamości witness.
+
+Journal v2: schemaVersion, generation, SHA-256 semantycznego snapshotu, entries i tombstones. Migruje starą dictionary v1 przy pierwszym bezpiecznym zapisie; błędne/nieznane dane zostają na dysku w kwarantannie. Limit cache 256 terminalnych pełnych rezultatów + maksymalnie 20 000 uncertain, limit replay łącznie 100 000 ID i 64 MiB UTF-8. Tombstone to minimalny rezultat bez diagnostycznego message, z dokładnym fingerprint/signal i wymaganymi dodatnimi witnesses. Żadnej retencji przez sam wiek/licznik; pełne close ma oddzielny exact-owned/DEMO path także przy awarii lub pełnym rejestrze. Nie ma broad bypass dla partial/modify/open. Pojedynczy key+flush przed SDK, publikacja compact candidate po udanym zapisie; ambiguous failure zamraża proces do restartu i nie nadpisuje potencjalnie nowszej rezerwacji. Integralność/generation nie dowodzą fizycznej trwałości SDK ani ochrony przed pełnym rollbackiem/usunięciem całego magazynu; szybkość pełnych snapshotów nie została odebrana w cTrader.
 
 ## Identyfikacja pozycji
 
