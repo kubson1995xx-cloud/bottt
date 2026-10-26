@@ -1,0 +1,130 @@
+{
+  "base": "351e4897480f11dce981cf664c4cfe503e2a05d7",
+  "builds": {
+    "src/Apex.Core/bin/Release/net6.0/Apex.Core.dll": "d707266f7481c3cb4c399c011fe8fc3dc6df7930e61c8d6681160fec5607171e",
+    "tests/Apex.Backtester.Tests/bin/Release/net8.0/Apex.Backtester.Tests.dll": "d9fc4c3e2bd7f6c16092c3d1bc0bb3186d1f8fb0721c5ded2c000290a24bc030",
+    "tests/Apex.Tests/bin/Release/net8.0/Apex.Tests.dll": "53e99426fd62d7b35644836b1243ff8bee5ced09df7a7543f059dde71679bb60",
+    "tools/Apex.Backtester/bin/Release/net8.0/Apex.Backtester.dll": "c88977af2ff2d72e6a00e88353ceb760d65e2bb938483ef29987e047b6e304f5"
+  },
+  "evidenceRoot": "/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task4-strategies-research",
+  "fixtureFailure": "4 initial empty-position failures + 1 diagnostic execution. Missing IsBacktest=true at direct SimWorld construction; corrected only test to existing immutable trusted BacktestRunner composition, all4 pass. No production bug RED\u2192GREEN claimed.",
+  "newFullIntegratedGate": false,
+  "newUniqueLatestPassingCases": 69,
+  "preregistrationCommit": "90f4941409a277d4af6572ae4074a37a1e15b20a",
+  "productionChanges": [],
+  "research": {
+    "attemptPlanSha256": "1e68b58389c47c3b1df64b4f4db5aa7dbf0496c555594b8573159c45e7c16c40",
+    "attemptsJsonlSha256": "ea834240e54e35284ac05c17304597031ad340c927a802fe40f39ee2f98ce76a",
+    "completedAccounts": 0,
+    "evaluatedCombinations": 0,
+    "fixedInvocations": 48,
+    "invocations": 64,
+    "metrics": null,
+    "preflightFailed": 64,
+    "success": 0,
+    "successfulZeroTradeRuns": 0,
+    "wfInvocations": 16
+  },
+  "retainedSourceInputsUnchanged": 163,
+  "reusedHistoricalEvidence": "accepted Task3 60 backtester; prior 569 Core/Desktop,126 platform,16 panel, not rerun and not a new integrated test count",
+  "sourceInputManifestSha256": "5dd7b96115626a8e031c216a9f61bf7fc05cb3d88888f2ef94c9b4854d88d706",
+  "tests": {
+    "behavior-attempt1.trx": {
+      "counters": {
+        "aborted": "0",
+        "completed": "0",
+        "disconnected": "0",
+        "error": "0",
+        "executed": "65",
+        "failed": "0",
+        "inProgress": "0",
+        "inconclusive": "0",
+        "notExecuted": "0",
+        "notRunnable": "0",
+        "passed": "65",
+        "passedButRunAborted": "0",
+        "pending": "0",
+        "timeout": "0",
+        "total": "65",
+        "warning": "0"
+      },
+      "enumeratedOutcomes": {
+        "Passed": 65
+      },
+      "sha256": "b601f9f54cf7fe8e9d7341680b995776fc49ffedfeecd4aca8ab30ba72d3d096"
+    },
+    "protection-attempt1.trx": {
+      "counters": {
+        "aborted": "0",
+        "completed": "0",
+        "disconnected": "0",
+        "error": "0",
+        "executed": "4",
+        "failed": "4",
+        "inProgress": "0",
+        "inconclusive": "0",
+        "notExecuted": "0",
+        "notRunnable": "0",
+        "passed": "0",
+        "passedButRunAborted": "0",
+        "pending": "0",
+        "timeout": "0",
+        "total": "4",
+        "warning": "0"
+      },
+      "enumeratedOutcomes": {
+        "Failed": 4
+      },
+      "sha256": "49f82bf49a6a5e227bca4d526fc202c5a947f09bc5fd82a50e245f0b1387535e"
+    },
+    "protection-attempt2.trx": {
+      "counters": {
+        "aborted": "0",
+        "completed": "0",
+        "disconnected": "0",
+        "error": "0",
+        "executed": "4",
+        "failed": "0",
+        "inProgress": "0",
+        "inconclusive": "0",
+        "notExecuted": "0",
+        "notRunnable": "0",
+        "passed": "4",
+        "passedButRunAborted": "0",
+        "pending": "0",
+        "timeout": "0",
+        "total": "4",
+        "warning": "0"
+      },
+      "enumeratedOutcomes": {
+        "Passed": 4
+      },
+      "sha256": "8f56b5686c5e114c1fd1896421f45848e9b0985138acfc8c2d34632efd966412"
+    },
+    "protection-diagnostic.trx": {
+      "counters": {
+        "aborted": "0",
+        "completed": "0",
+        "disconnected": "0",
+        "error": "0",
+        "executed": "1",
+        "failed": "1",
+        "inProgress": "0",
+        "inconclusive": "0",
+        "notExecuted": "0",
+        "notRunnable": "0",
+        "passed": "0",
+        "passedButRunAborted": "0",
+        "pending": "0",
+        "timeout": "0",
+        "total": "1",
+        "warning": "0"
+      },
+      "enumeratedOutcomes": {
+        "Failed": 1
+      },
+      "sha256": "5e25df4746217d3cab0f3c748e2581813bc4ab19527f6bef739c34765e5bb9d8"
+    }
+  },
+  "totalBoundSourceInputs": 166
+}

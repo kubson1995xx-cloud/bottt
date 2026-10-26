@@ -1,0 +1,414 @@
+{
+  "actualDefaultProfileMatchesConfig": true,
+  "binding": {
+    "adapterSha256": "be91b9dd24488e7fc872fe4b4511e2c09e88954118e3687dca8c468436c9a1f3",
+    "base": "351e4897480f11dce981cf664c4cfe503e2a05d7",
+    "gitHeadBeforeRuns": "90f4941409a277d4af6572ae4074a37a1e15b20a",
+    "preregistrationSha256": "fd6d96af2c280c04627e3c0a27df29574808f1605c921a56e6f55097cda82fc5"
+  },
+  "data": [
+    {
+      "adaptedFile": "/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task4-strategies-research/research/data/EURUSD_H1.csv",
+      "adaptedSha256": "6a3d914a9a1f83d5e37b98a85deb9f6ad552ef5c46a6c0b1ed6c7d23f2f022f1",
+      "annualRows": {
+        "2010": 6273,
+        "2011": 6240,
+        "2012": 6260,
+        "2013": 6228,
+        "2014": 6229,
+        "2015": 6227,
+        "2016": 6240,
+        "2017": 6225,
+        "2018": 6226,
+        "2019": 6226,
+        "2020": 6249,
+        "2021": 6240,
+        "2022": 6240,
+        "2023": 6225,
+        "2024": 6250,
+        "2025": 6226
+      },
+      "class": "Forex",
+      "coverage": {
+        "IS": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 43622,
+          "first": "2012-01-01T22:00:00+00:00",
+          "lastOpen": "2020-12-31T21:00:00+00:00",
+          "unverifiedInteriorGaps": 482,
+          "warmupBars": 12488
+        },
+        "OOS": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 18705,
+          "first": "2019-01-01T22:00:00+00:00",
+          "lastOpen": "2023-12-29T21:00:00+00:00",
+          "unverifiedInteriorGaps": 265,
+          "warmupBars": 12475
+        },
+        "candidate": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 12476,
+          "first": "2022-01-02T22:00:00+00:00",
+          "lastOpen": "2025-12-31T21:00:00+00:00",
+          "unverifiedInteriorGaps": 213,
+          "warmupBars": 12465
+        }
+      },
+      "first": "2010-01-01T00:00:00+00:00",
+      "intervalHours": {
+        "1": 98953,
+        "14": 1,
+        "15": 7,
+        "24": 1,
+        "25": 4,
+        "26": 1,
+        "48": 32,
+        "49": 779,
+        "50": 18,
+        "6": 1,
+        "63": 2,
+        "73": 4
+      },
+      "lastOpen": "2025-12-31T21:00:00+00:00",
+      "numericTokenReadback": "all 5 numeric columns exact for every row",
+      "rows": 99804,
+      "source": "/home/ubuntu/.hermes/cache/scratch/apex-autonomy-new-data/output/EURUSD_H1_BID.csv",
+      "sourceSha256": "860d716745586a638e75992f62269d58beaa97e3d17f8df76ea4617d469818a0",
+      "symbol": "EURUSD",
+      "unverifiedGapEvents": 850,
+      "volume": "provider best-price volume, not tick count or traded volume"
+    },
+    {
+      "adaptedFile": "/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task4-strategies-research/research/data/XAUUSD_H1.csv",
+      "adaptedSha256": "58379a8790df7bd0faf275bb186c26f7141858ea0ff03daf1db0085a195b8428",
+      "annualRows": {
+        "2010": 6210,
+        "2011": 6165,
+        "2012": 6161,
+        "2013": 6049,
+        "2014": 6047,
+        "2015": 5988,
+        "2016": 5927,
+        "2017": 5912,
+        "2018": 5906,
+        "2019": 5910,
+        "2020": 5927,
+        "2021": 5907,
+        "2022": 5915,
+        "2023": 5890,
+        "2024": 5938,
+        "2025": 5913
+      },
+      "class": "Metal",
+      "coverage": {
+        "IS": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 41617,
+          "first": "2012-01-01T23:00:00+00:00",
+          "lastOpen": "2020-12-31T21:00:00+00:00",
+          "unverifiedInteriorGaps": 1700,
+          "warmupBars": 12210
+        },
+        "OOS": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 17712,
+          "first": "2019-01-01T23:00:00+00:00",
+          "lastOpen": "2023-12-29T21:00:00+00:00",
+          "unverifiedInteriorGaps": 1293,
+          "warmupBars": 11837
+        },
+        "candidate": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 11851,
+          "first": "2022-01-02T23:00:00+00:00",
+          "lastOpen": "2025-12-31T21:00:00+00:00",
+          "unverifiedInteriorGaps": 1032,
+          "warmupBars": 11805
+        }
+      },
+      "first": "2010-01-01T00:00:00+00:00",
+      "intervalHours": {
+        "1": 92671,
+        "2": 2164,
+        "23": 1,
+        "24": 1,
+        "26": 5,
+        "29": 5,
+        "3": 1,
+        "30": 1,
+        "31": 1,
+        "4": 25,
+        "49": 12,
+        "5": 23,
+        "50": 759,
+        "51": 19,
+        "52": 3,
+        "53": 11,
+        "54": 4,
+        "6": 29,
+        "7": 2,
+        "73": 1,
+        "74": 24,
+        "77": 2
+      },
+      "lastOpen": "2025-12-31T21:00:00+00:00",
+      "numericTokenReadback": "all 5 numeric columns exact for every row",
+      "rows": 95765,
+      "source": "/home/ubuntu/.hermes/cache/scratch/apex-autonomy-new-data/output/XAUUSD_H1_BID.csv",
+      "sourceSha256": "21377b316d617a471cf75391f45a7d642d3f95b35f8d30ab22ead0e0fff51b23",
+      "symbol": "XAUUSD",
+      "unverifiedGapEvents": 3093,
+      "volume": "provider best-price volume, not tick count or traded volume"
+    },
+    {
+      "adaptedFile": "/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task4-strategies-research/research/data/US500_H1.csv",
+      "adaptedSha256": "aa4d85b9dd0dfae6518a28ca0f1dbc4757baa206fa167956a50b462aa6fb188f",
+      "annualRows": {
+        "2011": 36,
+        "2012": 2391,
+        "2013": 4130,
+        "2014": 5845,
+        "2015": 4400,
+        "2016": 3873,
+        "2017": 3756,
+        "2018": 5250,
+        "2019": 5900,
+        "2020": 5898,
+        "2021": 5923,
+        "2022": 5903,
+        "2023": 5872,
+        "2024": 5920,
+        "2025": 5882
+      },
+      "class": "Index",
+      "coverage": {
+        "IS": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 34922,
+          "first": "2012-01-16T00:00:00+00:00",
+          "lastOpen": "2020-12-31T21:00:00+00:00",
+          "unverifiedInteriorGaps": 2265,
+          "warmupBars": 6521
+        },
+        "OOS": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 17698,
+          "first": "2019-01-01T23:00:00+00:00",
+          "lastOpen": "2023-12-29T21:00:00+00:00",
+          "unverifiedInteriorGaps": 1299,
+          "warmupBars": 11798
+        },
+        "candidate": {
+          "completeAccountMetrics": null,
+          "evaluationBars": 11802,
+          "first": "2022-01-02T23:00:00+00:00",
+          "lastOpen": "2025-12-31T21:00:00+00:00",
+          "unverifiedInteriorGaps": 1034,
+          "warmupBars": 11775
+        }
+      },
+      "first": "2011-09-18T21:00:00+00:00",
+      "intervalHours": {
+        "1": 67413,
+        "10": 526,
+        "11": 140,
+        "12": 8,
+        "13": 27,
+        "14": 28,
+        "15": 46,
+        "16": 12,
+        "17": 49,
+        "18": 2,
+        "2": 1642,
+        "20": 1,
+        "21": 2,
+        "22": 1,
+        "23": 1,
+        "25": 1,
+        "26": 4,
+        "2754": 1,
+        "29": 5,
+        "3": 33,
+        "30": 1,
+        "32": 1,
+        "33": 1,
+        "34": 1,
+        "36": 2,
+        "4": 34,
+        "41": 1,
+        "49": 13,
+        "5": 19,
+        "50": 412,
+        "51": 27,
+        "52": 19,
+        "53": 9,
+        "54": 6,
+        "55": 1,
+        "56": 1,
+        "57": 10,
+        "58": 127,
+        "59": 31,
+        "6": 73,
+        "60": 1,
+        "61": 4,
+        "62": 1,
+        "63": 12,
+        "65": 20,
+        "66": 1,
+        "67": 1,
+        "677": 1,
+        "68": 1,
+        "7": 108,
+        "70": 1,
+        "71": 1,
+        "73": 1,
+        "74": 11,
+        "75": 1,
+        "76": 2,
+        "77": 1,
+        "8": 45,
+        "82": 4,
+        "83": 3,
+        "85": 1,
+        "86": 1,
+        "9": 25
+      },
+      "lastOpen": "2025-12-31T21:00:00+00:00",
+      "numericTokenReadback": "all 5 numeric columns exact for every row",
+      "rows": 70979,
+      "source": "/home/ubuntu/.hermes/cache/scratch/apex-autonomy-new-data/output/US500_H1_BID.csv",
+      "sourceSha256": "8adfa9186949ec2a3e08774998229ee022ea8b1639c0a456020abcb99733df13",
+      "symbol": "US500",
+      "unverifiedGapEvents": 3565,
+      "volume": "provider best-price volume, not tick count or traded volume"
+    }
+  ],
+  "gaps": "all observed gaps unverified; no session calendar in supplied instrument metadata; no blanket declarations",
+  "holdout": "chronological candidate, NOT certified untouched; no strategy outcomes available",
+  "manifest": {
+    "files": [
+      {
+        "file": "EURUSD_H1.csv",
+        "quoteBasis": "BID",
+        "sessionGaps": [],
+        "sha256": "6a3d914a9a1f83d5e37b98a85deb9f6ad552ef5c46a6c0b1ed6c7d23f2f022f1"
+      },
+      {
+        "file": "XAUUSD_H1.csv",
+        "quoteBasis": "BID",
+        "sessionGaps": [],
+        "sha256": "58379a8790df7bd0faf275bb186c26f7141858ea0ff03daf1db0085a195b8428"
+      },
+      {
+        "file": "US500_H1.csv",
+        "quoteBasis": "BID",
+        "sessionGaps": [],
+        "sha256": "aa4d85b9dd0dfae6518a28ca0f1dbc4757baa206fa167956a50b462aa6fb188f"
+      }
+    ],
+    "source": "Dukascopy jetta native BID H1; local acquisition handoff; downloader 33a6c6e3de97fab9904afc80a3a2fac8b46d8bfb; NO verified session calendar",
+    "timezone": "UTC"
+  },
+  "manifestSha256": "5cb2a3a1bf71bfe3d2186593facf1df5ee9f869aee2b0f58236d789d26b9ff4d",
+  "offlineProfileCopies": [
+    {
+      "class": "Forex",
+      "file": "DailyTrend-EURUSD.json",
+      "sha256": "60d984e243fb8e599921690cf092f40611368074e0f79982e6db677a3b97a697",
+      "strategy": "DailyTrend"
+    },
+    {
+      "class": "Index",
+      "file": "DailyTrend-US500.json",
+      "sha256": "72c77c90711450d5de153c4bb27424f1f9c9db27ea3e49197405bd46fc112c16",
+      "strategy": "DailyTrend"
+    },
+    {
+      "class": "Metal",
+      "file": "DailyTrend-XAUUSD.json",
+      "sha256": "bd90c40b905a656701dd5374b63d4c83f9a43f4df81f1e3a8b3b0fcf6826d3bb",
+      "strategy": "DailyTrend"
+    },
+    {
+      "class": "Forex",
+      "file": "DonchianBreakout-EURUSD.json",
+      "sha256": "00164d3d0c6da528e98322f799ca4d50128e1e3d69f56912cf96d17bb3493965",
+      "strategy": "DonchianBreakout"
+    },
+    {
+      "class": "Index",
+      "file": "DonchianBreakout-US500.json",
+      "sha256": "f4fd1176c9f993bc8f0ee7d89535a765a0c0c03643dd345cba1b6a5376bef147",
+      "strategy": "DonchianBreakout"
+    },
+    {
+      "class": "Metal",
+      "file": "DonchianBreakout-XAUUSD.json",
+      "sha256": "7e327bc4a22cac7a1487815208970c3bcc781405f6c852a66d44cc6401b66445",
+      "strategy": "DonchianBreakout"
+    },
+    {
+      "class": "Index",
+      "file": "IndexDipBuy-US500.json",
+      "sha256": "fcc26df665fbb6f632514fb6efadc0d7100d4832940ffee622bb796ca04a75c9",
+      "strategy": "IndexDipBuy"
+    },
+    {
+      "class": "Forex",
+      "file": "MeanReversion-EURUSD.json",
+      "sha256": "d40c51454c12cc552e505663d65aafafa0bed6587de44e8c237cf65b36ae5fb6",
+      "strategy": "MeanReversion"
+    },
+    {
+      "class": "Index",
+      "file": "MeanReversion-US500.json",
+      "sha256": "b8b863d323d6b4c87fd1de3eb63569d46ffd9b3f13bda099979fa5ecfc6dd94c",
+      "strategy": "MeanReversion"
+    },
+    {
+      "class": "Metal",
+      "file": "MeanReversion-XAUUSD.json",
+      "sha256": "cd8e18fdb49482005e940eae95b870fc23aaee0645520d2e38d38a91cf8eddd1",
+      "strategy": "MeanReversion"
+    },
+    {
+      "class": "Forex",
+      "file": "MomentumImpulse-EURUSD.json",
+      "sha256": "bf12f27beea5311d9c5baa3457f36ddcb1cb53adae748745695b1ef79fc2a02f",
+      "strategy": "MomentumImpulse"
+    },
+    {
+      "class": "Index",
+      "file": "MomentumImpulse-US500.json",
+      "sha256": "f9c43d22cfc9555f5e3e2e7ce760abb39b233c1d2aaf89a10c5d27b6f9a3479c",
+      "strategy": "MomentumImpulse"
+    },
+    {
+      "class": "Metal",
+      "file": "MomentumImpulse-XAUUSD.json",
+      "sha256": "b8152536b9125df6b89322f5312477e76531470f38b2eae428a49d273246303d",
+      "strategy": "MomentumImpulse"
+    },
+    {
+      "class": "Forex",
+      "file": "TrendPullback-EURUSD.json",
+      "sha256": "b7d2c97a1aba665bac494c2d9e408c6db9a3e5b403440b581dc3e7973014db09",
+      "strategy": "TrendPullback"
+    },
+    {
+      "class": "Index",
+      "file": "TrendPullback-US500.json",
+      "sha256": "cff6c04c79466dde8762108b9ded624c23c533d2692c8eaf4acf27a99f6daf0b",
+      "strategy": "TrendPullback"
+    },
+    {
+      "class": "Metal",
+      "file": "TrendPullback-XAUUSD.json",
+      "sha256": "378d04ca2d462901898500372946174c69b8818b35d24d50864c15770d871751",
+      "strategy": "TrendPullback"
+    }
+  ],
+  "productionDefaultProfileSha256": "6e509d7b171705fea23a2b8198eab1acef6f02cae9ea6beab2de577eac06c3c2",
+  "quote": "native BID; product models MID; no actual ASK/broker costs claim"
+}
