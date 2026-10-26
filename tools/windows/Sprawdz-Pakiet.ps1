@@ -2,7 +2,11 @@
 param([string]$Pakiet = $PSScriptRoot)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "TestEvidence.ps1")
-$base = (Resolve-Path -LiteralPath $Pakiet).Path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+$resolved = (Resolve-Path -LiteralPath $Pakiet).Path
+# Compare canonical .NET paths on both sides; PowerShell may retain mixed separators.
+$canonical = [IO.Path]::GetFullPath($resolved)
+if ($resolved -cne $canonical) { Write-Host "Normalizacja sciezki pakietu: $resolved -> $canonical" }
+$base = $canonical.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 foreach ($required in @("APEX-Desktop/ApexDesktop.exe", "APEX-Desktop/wwwroot/index.html", "APEX-Desktop/wwwroot/app.js", "APEX-Desktop/wwwroot/decision-center.js", "cTrader/ApexBridge.algo", "Uruchom APEX.cmd", "apex-build.json", "manifest.sha256")) {
     if (-not (Test-Path -LiteralPath (Join-Path $base $required) -PathType Leaf)) { throw "Brak pliku: $required" }
 }
@@ -22,7 +26,7 @@ foreach ($line in [IO.File]::ReadAllLines((Join-Path $base "manifest.sha256"))) 
     $relative = $Matches[2]
     if ([IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[/\\])\.\.([/\\]|$)') { throw "Niedozwolona sciezka manifestu." }
     $file = [IO.Path]::GetFullPath((Join-Path $base $relative))
-    if (-not $file.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { throw "Sciezka poza pakietem." }
+    if (-not $file.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { throw "Sciezka poza pakietem: $relative (plik=$file; katalog=$base)." }
     if ($listed.ContainsKey($relative)) { throw "Powtorzony wpis manifestu: $relative" }
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Brak pliku z manifestu: $relative" }
     if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "Niezgodna suma: $relative" }

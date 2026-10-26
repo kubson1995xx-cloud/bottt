@@ -25,6 +25,12 @@ dotnet test tests/Apex.Tests/Apex.Tests.csproj -c Release --filter 'FullyQualifi
 
 Manifest Task4 wiąże 166 inputs (SHA256 `5dd7b96115626a8e031c216a9f61bf7fc05cb3d88888f2ef94c9b4854d88d706`). Task5 celowo zmienia harness i polską dokumentację; pozostałe źródła produktu, domyślny profil i konfiguracja bramek zachowują te same bajty. Stare binaria/uruchomienia nie są przedstawiane jako nowy test Windows.
 
+## Pierwszy rzeczywisty Windows run Task5 — zachowane niepowodzenie pakietu
+
+[40358374972](https://github.com/kubson1995xx-cloud/bottt/actions/runs/40358374972), source `ce2d3ff7e8253cbe3fa73a510ac1c3322a4abc13`: pełny Release build 0 warnings/errors; **634/634 Core/Desktop, 126/126 platform, 64/64 Backtester**, zero failures/skips. Oba poprawione przypadki ścieżek i procesowy synthetic lifecycle przeszły na Windows. Następnie kontrolowany fixture pakietu zatrzymał verifier: `Sciezka poza pakietem`. **Cały run failure; EXE smoke i ZIP nie powstały.** Log/TRX zachowane, to nie zielone wydanie.
+
+Delta naprawcza dotyczy wyłącznie verifiera i jego fixture: kanonizacja katalogu przez to samo `.NET GetFullPath`, które już obejmuje ścieżki plików, plus diagnostyka rzeczywistych porównywanych ścieżek. Kontrola containment nie jest usunięta. Nowe focused fixtures sprawdzają alternate-separator/trailing path i odrzucenie `../outside.txt`; komplet **10 kontrolowanych przypadków PASS na PS7/Linux**, nie Windows proof. Poprzednie 8 kontrolek także przeszło lokalnie przed poprawką; różnica platform pozostaje do potwierdzenia w kolejnym actual runie. Nie powtarzano lokalnych suite produktu.
+
 ## Rzeczywisty gate Windows i pakiet
 
 Istniejący workflow **APEX Windows DEMO** na `windows-2022` używa **Windows PowerShell 5.1**. Buduje pełne rozwiązanie Release, uruchamia twardo wszystkie suite produktu (Core/Desktop z procesowymi recovery/certification/SL/TP/net, platform, actual-source Backtester), fixtures bramki pakietu, panel i JS check, publikuje samodzielny `win-x64` oraz zgodne oba cBoty. Następnie uruchamia **prawdziwy opublikowany EXE**: HTTP, token, polski panel, brak AI Lab/REAL, zero kont i zleceń. To wymagane odrębne target-OS acceptance, nie powtórka niezmienionego Linux baseline.

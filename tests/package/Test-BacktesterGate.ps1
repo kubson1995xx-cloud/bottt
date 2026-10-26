@@ -39,6 +39,18 @@ function Write-PackageManifest {
 }
 Write-PackageManifest
 & (Join-Path $Source 'tools/windows/Sprawdz-Pakiet.ps1') -Pakiet $package
+# The caller may use forward/mixed separators on Windows; verify the same physical package.
+$alternatePath = $package.Replace([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::AltDirectorySeparatorChar
+& (Join-Path $Source 'tools/windows/Sprawdz-Pakiet.ps1') -Pakiet $alternatePath
+# Canonicalizing the root must not weaken the manifest containment boundary.
+[IO.File]::WriteAllText((Join-Path $package 'manifest.sha256'), (('0' * 64) + '  ../outside.txt'))
+$rejected = $false
+try { & (Join-Path $Source 'tools/windows/Sprawdz-Pakiet.ps1') -Pakiet $package } catch {
+    if ($_.Exception.Message -notmatch 'Niedozwolona sciezka manifestu') { throw }
+    $rejected = $true
+}
+if (-not $rejected) { throw 'Verifier accepted parent traversal' }
+Write-PackageManifest
 foreach ($fault in @('missing-flag','wrong-count','missing-trx')) {
     $meta.backtesterTestsRun = $fault -ne 'missing-flag'
     $meta.testCounts.backtester.total = 1
@@ -49,4 +61,4 @@ foreach ($fault in @('missing-flag','wrong-count','missing-trx')) {
     try { & (Join-Path $Source 'tools/windows/Sprawdz-Pakiet.ps1') -Pakiet $package } catch { $rejected=$true }
     if (-not $rejected) { throw "Verifier accepted $fault" }
 }
-Write-Output 'PASS package gates: 8 controlled fixture cases (4 TRX, 4 package); these are not product test totals or Windows runtime proof'
+Write-Output 'PASS package gates: 10 controlled fixture cases (4 TRX, 6 package); these are not product test totals or Windows runtime proof'
