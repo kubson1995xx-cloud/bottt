@@ -14,7 +14,7 @@ namespace Apex.Desktop.Bridge
     /// po rozłączeniu silnik widzi IsConnected = false (wstrzymuje działania), po powrocie – uzgadnia stan pozycji.
     /// Każde polecenie handlowe bez odpowiedzi po wysłaniu jest raportowane jako NIEPEWNE (silnik najpierw sprawdza pozycje).
     /// </summary>
-    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider, ITrustedSimulationGateway, IScopedDispatchGateway
+    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider, ITrustedSimulationGateway, IScopedDispatchGateway, IPartialCloseGateway
     {
         private readonly bool _trustedSimulation;
         bool ITrustedSimulationGateway.TrustedSimulation => _trustedSimulation;
@@ -117,6 +117,15 @@ namespace Apex.Desktop.Bridge
             var (sent, json) = s.Request(new CloseCmd { Id = id, PositionId = positionId, Units = units }, id, OrderTimeout);
             return MapResult(sent, json, "zamknięcie");
         }
+
+        public OrderOutcome ClosePartial(string actionId, long positionId, string signalId, double observedUnits, double units)
+        {
+            var s = Session;
+            if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
+            var (sent, json) = s.Request(new CloseCmd { Id = actionId, PositionId = positionId, Units = units, SignalId = signalId, ObservedUnits = observedUnits }, actionId, OrderTimeout);
+            return MapResult(sent, json, "częściowe zamknięcie");
+        }
+        public OrderOutcome? LookupPartial(string actionId) => Session?.LookupRecovered(actionId) is ResultMsg result ? ProtocolResult.ToOutcome(result) : null;
 
         public double EstimateMargin(string symbol, TradeDirection direction, double units)
         {

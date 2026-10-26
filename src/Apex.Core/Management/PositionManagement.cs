@@ -34,6 +34,7 @@ namespace Apex.Core.Management
         public string Regime { get; set; } = "";
         public bool BreakEvenDone { get; set; }
         public bool PartialDone { get; set; }
+        public PartialCloseIntent? Partial { get; set; }
         /// <summary>Najkorzystniejsza cena od wejścia (maksimum dla long, minimum dla short) – z ekstremów zamkniętych świec.</summary>
         public double BestPrice { get; set; }
         public int BarsHeld { get; set; }
@@ -137,15 +138,11 @@ namespace Apex.Core.Management
             }
 
             // 4) Częściowe zamknięcie.
-            if (!p.PartialDone && exit.PartialAtR > 0 && exit.PartialFraction > 0 && closeR >= exit.PartialAtR)
+            if (!p.PartialDone && (p.Partial == null || p.Partial.Stage == PartialCloseStage.Rejected) && exit.PartialAtR > 0 && exit.PartialFraction > 0 && closeR >= exit.PartialAtR)
             {
                 double target = m.Spec.NormalizeVolumeDown(pos.VolumeUnits * exit.PartialFraction);
-                double remaining = pos.VolumeUnits - target;
-                if (target >= m.Spec.VolumeMin && remaining >= m.Spec.VolumeMin)
-                {
-                    actions.Add(new ManagementAction { Kind = ManagementActionKind.PartialClose, CloseUnits = target, Reason = $"częściowa realizacja przy {closeR:F2}R" });
-                }
-                p.PartialDone = true; // także gdy wolumen nie pozwala – nie próbujemy w kółko
+                // Evaluation proposes only. Durable execution decides minimum/skipped/retry.
+                actions.Add(new ManagementAction { Kind = ManagementActionKind.PartialClose, CloseUnits = target, Reason = $"częściowa realizacja przy {closeR:F2}R" });
             }
 
             // 5) Nowy SL: break-even i trailing – wybieramy najciaśniejszy, tylko jeśli poprawia obecny SL.

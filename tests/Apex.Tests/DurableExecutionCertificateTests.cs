@@ -217,7 +217,7 @@ public sealed partial class ScopedRecoveryTests
         var old = System.Text.Json.Nodes.JsonNode.Parse(f.Store.Get(f.Key)!)!;
         old["SchemaVersion"] = 3; old["LastExecutionTest"] = "TEST ZALICZONY";
         f.Store.Set(f.Key, old.ToJsonString()); f.Restart();
-        Assert.Equal(4, f.State.SchemaVersion);
+        Assert.Equal(5, f.State.SchemaVersion);
         using var document = JsonDocument.Parse(f.Store.Get(f.Key)!);
         Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("ExecutionTest").ValueKind);
         Assert.Contains("PASS", f.Engine.CmdStart());

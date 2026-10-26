@@ -68,7 +68,9 @@ public sealed partial class AccountRuntime
     private void UpdateRecoveryOperations()
     {
         if (_engine == null || _adapter.Session == null) return;
-        _adapter.Session.RecoverOperations = _engine.ScopedAdmissions.Where(a => a.Stage == AdmissionStage.OutcomeUnknown).Select(a => a.OperationId).ToArray();
+        _adapter.Session.RecoverOperations = _engine.ScopedAdmissions.Where(a => a.Stage == AdmissionStage.OutcomeUnknown).Select(a => a.OperationId)
+            .Concat(_engine.Plans.Values.Where(p => p.Partial?.Stage is Apex.Core.Management.PartialCloseStage.Reserved or Apex.Core.Management.PartialCloseStage.AwaitingEvidence)
+                .Select(p => p.Partial!.ActionId)).Distinct(StringComparer.Ordinal).ToArray();
     }
     internal void OnScopedHistory(BridgeSession s, ScopedSnapshot snapshot)
     {

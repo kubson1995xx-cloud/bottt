@@ -69,13 +69,17 @@ public sealed partial class ScopedRecoveryTests
     {
         internal Func<OrderRequest, OrderOutcome>? OnOpen;
         internal Func<long, double?, OrderOutcome>? OnClose;
+        internal Func<string, long, string, double, double, OrderOutcome>? OnPartial;
+        internal readonly System.Collections.Generic.Dictionary<string, OrderOutcome> PartialResults = new();
         public override OrderOutcome ClosePosition(long id, double? units) => OnClose?.Invoke(id, units) ?? base.ClosePosition(id, units);
         public override OrderOutcome OpenMarket(OrderRequest r) { Orders.Add(r); return OnOpen!(r); }
         public override BrokerHistorySnapshot GetHistory() => new() { AccountNumber = AccountNumber, Generation = "transport", Complete = true, Positions = GetPositions(), Closed = ClosedDeals.ToArray() };
     }
     // Retain fixture data without exposing FakeBroker's trusted-simulation capability.
-    sealed class OrdinaryGateway(Broker broker) : IBrokerGateway, IBrokerHistory
+    sealed class OrdinaryGateway(Broker broker) : IBrokerGateway, IBrokerHistory, IPartialCloseGateway
     {
+        public OrderOutcome ClosePartial(string actionId, long id, string signal, double observed, double units) => broker.OnPartial?.Invoke(actionId, id, signal, observed, units) ?? broker.ClosePosition(id, units);
+        public OrderOutcome? LookupPartial(string actionId) => broker.PartialResults.TryGetValue(actionId, out var result) ? result : null;
         public bool IsConnected => broker.IsConnected;
         public AccountSnapshot GetAccount() => broker.GetAccount();
         public System.Collections.Generic.IReadOnlyList<PositionInfo> GetPositions() => broker.GetPositions();

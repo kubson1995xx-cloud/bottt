@@ -644,10 +644,25 @@ namespace cAlgo.Robots
             if (position == null) return Reject(c.Id, "EntityNotFound", "brak własnej pozycji o dokładnej etykiecie");
             if (!PlatformSafety.PartialClose(c.Units, position.VolumeInUnits, position.Symbol.VolumeInUnitsMin, position.Symbol.VolumeInUnitsStep))
                 return Reject(c.Id, "BadVolume", "wolumen zamknięcia nieprawidłowy lub zostawia niedozwoloną resztę");
-            TradeResult r = c.Units.HasValue && c.Units.Value < position.VolumeInUnits
-                ? ClosePosition(position, c.Units.Value) : ClosePosition(position);
-            double? fill = r.IsSuccessful ? History.FindByPositionId(position.Id).OrderBy(h => h.ClosingTime).LastOrDefault()?.ClosingPrice : null;
-            return Result(c.Id, r, position.Id, fill);
+            double before = position.VolumeInUnits;
+            if (c.Units.HasValue && (!_ticks.TryGetValue(position.SymbolName, out var ticks)
+                || CTraderData.Quote(position.Symbol, ticks, this) is not { } quote
+                || !PlatformSafety.Fresh(BridgeProtocol.FromUnixMs(quote.T), DateTime.UtcNow, 30)))
+                return Reject(c.Id, "Disconnected", "partial requires fresh broker observation");
+            if (c.Units.HasValue && (c.ObservedUnits != before || c.Units.Value >= before || !CTraderData.Protected(position)
+                || !PlatformSafety.SignalMatches(position.Comment, c.SignalId)))
+                return Reject(c.Id, "InvalidRequest", "partial requires exact stable action/signal/observed volume/protection");
+            TradeResult r = c.Units.HasValue ? ClosePosition(position, c.Units.Value) : ClosePosition(position);
+            var result = Result(c.Id, r, position.Id, null);
+            if (c.Units.HasValue)
+            {
+                result.ReductionFill = PlatformSafety.ReductionWitness(r.IsSuccessful, c.Id, position.Id, c.SignalId!, LabelPrefix,
+                    position.SymbolName, before, c.Units.Value, FindOwn(position.Id)?.VolumeInUnits ?? 0, position.Symbol.VolumeInUnitsStep);
+                if (result.ReductionFill != null) _journal?.RecordReductionFill(c.Id, result.ReductionFill);
+            }
+            try { if (r.IsSuccessful) result.Price = History.FindByPositionId(position.Id).OrderBy(h => h.ClosingTime).LastOrDefault()?.ClosingPrice; }
+            catch (Exception) { } // execution witness is already checkpointed; never invent a price
+            return result;
         }
 
         private void OnMargin(MarginCmd c)

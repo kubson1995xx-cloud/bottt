@@ -280,7 +280,7 @@ namespace Apex.Core.Engine
             try
             {
                 var st = JsonSerializer.Deserialize<EngineState>(json!, StateJson);
-                if (st == null || st.AccountNumber != account || st.SchemaVersion is < 1 or > 4 || !Enum.IsDefined(typeof(EngineMode), st.Mode)
+                if (st == null || st.AccountNumber != account || st.SchemaVersion is < 1 or > 5 || !Enum.IsDefined(typeof(EngineMode), st.Mode)
                     || st.Risk == null || st.Ledger == null || st.Plans == null || st.Suspended == null || st.RecentTrades == null
                     || st.DisabledStrategies == null || st.DisabledClasses == null
                     || st.Plans.Any(p => p == null) || st.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId)))
@@ -336,6 +336,7 @@ namespace Apex.Core.Engine
                     ValidateExecutionDocument(certificateDocument.RootElement);
                     ValidateExecutionState(st);
                 }
+                MigrateAndValidatePartials(st, json!);
                 ScopedStatus = st.ScopeConflict.Length != 0 ? ScopedRecoveryStatus.Conflict
                     : st.Baseline == null ? ScopedRecoveryStatus.Unestablished : ScopedRecoveryStatus.AwaitingEvidence;
                 ScopedMessage = st.ScopeConflict.Length != 0 ? st.ScopeConflict : "restart: fresh owner-authorized scoped receipt required";
@@ -812,9 +813,9 @@ namespace Apex.Core.Engine
                         return;
                     case ManagementActionKind.PartialClose:
                         {
-                            var r = _broker.ClosePosition(pos.Id, a.CloseUnits);
-                            if (r.Status == OrderStatus.Filled) _log.Info($"#{pos.Id} {pos.Symbol}: {a}");
-                            else { RegisterBrokerError(r); AddError($"#{pos.Id} częściowe zamknięcie nieudane: {r.Message}"); }
+                            RequestPartialClose(pos, a.CloseUnits, utc);
+                            // Candidate commits replace plan objects; do not use the old instance.
+                            if (_plans.TryGetValue(pos.Id, out var currentPlan)) plan = currentPlan;
                             break;
                         }
                     case ManagementActionKind.ModifyStop:

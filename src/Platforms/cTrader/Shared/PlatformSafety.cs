@@ -41,6 +41,34 @@ namespace Apex.Platforms.CTrader
             double aligned = Math.Floor(v / step + 1e-9) * step;
             return Math.Abs(aligned - v) < step * 1e-8 && current - v >= min;
         }
+        internal static bool SignalMatches(string? comment, string? signal)
+        {
+            var parts = comment?.Split('|');
+            return parts != null && parts.Length >= 3 && parts[0] == "APEX" && Apex.Core.Model.StrategyIdExtensions.TryParseCode(parts[1], out _)
+                && !string.IsNullOrEmpty(signal) && parts[2] == signal;
+        }
+        // Same exact operand/quantum rule as Core; Bridge links protocol/model, not Engine.
+        private static decimal ExactUnits(double units, double step)
+        {
+            if (!double.IsFinite(units) || units < 0 || !Positive(step)) throw new InvalidOperationException("invalid quantum");
+            decimal q = (decimal)step, u = (decimal)units;
+            if (q <= 0 || (double)q != step || (double)u != units || Math.BitIncrement(units) - units >= step || u % q != 0)
+                throw new InvalidOperationException("unrepresentable quantum");
+            return u;
+        }
+        internal static Apex.Core.Model.ReductionFillEvidence? ReductionWitness(bool successful, string action, long position,
+            string signal, string label, string symbol, double before, double units, double after, double step)
+        {
+            if (!successful || string.IsNullOrWhiteSpace(action) || string.IsNullOrWhiteSpace(signal)) return null;
+            try
+            {
+                decimal b = ExactUnits(before, step), c = ExactUnits(units, step),
+                    a = ExactUnits(after, step);
+                return c > 0 && a > 0 && b == c + a ? new Apex.Core.Model.ReductionFillEvidence { ActionId = action, PositionId = position,
+                    SignalId = signal, Label = label, Symbol = symbol, BeforeUnits = before, ClosedUnits = units, RemainingUnits = after } : null;
+            }
+            catch (Exception) { return null; }
+        }
         internal static double MinimumPips(double distance, bool percentage, double price, double pip) => percentage ? price * distance / 100.0 / pip : distance;
         internal static double PipValue(double pipSize, double quoteToAccount) => Positive(pipSize) && Positive(quoteToAccount) ? pipSize * quoteToAccount : double.NaN;
     }

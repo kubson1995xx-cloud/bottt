@@ -13,5 +13,6 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
     <ProjectReference Include="../../../Apex.Core/Apex.Core.csproj" />
     <Compile Include="../Shared/*.cs" LinkBase="Production" />
+    <ProjectReference Include="../ApexTradingAI/ApexTradingAI/ApexTradingAI.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

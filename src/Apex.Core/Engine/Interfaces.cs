@@ -22,6 +22,14 @@ namespace Apex.Core.Engine
         double EstimateMargin(string symbol, TradeDirection direction, double units);
     }
 
+    /// <summary>Stable Core action ID must be the journal command ID. Lookup is read-only;
+    /// missing/uncertain never authorizes another mutation.</summary>
+    public interface IPartialCloseGateway
+    {
+        OrderOutcome ClosePartial(string actionId, long positionId, string signalId, double observedUnits, double units);
+        OrderOutcome? LookupPartial(string actionId);
+    }
+
     /// <summary>Optional capability. Complete means the entire AVAILABLE history collection
     /// and matching open-position snapshot were captured on the platform thread. Generation changes
     /// after reconnect; failure/incomplete snapshots must never authorize new risk.</summary>

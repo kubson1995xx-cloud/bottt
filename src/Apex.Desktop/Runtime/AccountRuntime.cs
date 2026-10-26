@@ -496,7 +496,7 @@ namespace Apex.Desktop.Runtime
                 }
                 var state = JsonSerializer.Deserialize<EngineState>(json, ConfigStore.Json);
                 using var parsed = JsonDocument.Parse(json);
-                if (state == null || state.AccountNumber != account || state.SchemaVersion is < 1 or > 4
+                if (state == null || state.AccountNumber != account || state.SchemaVersion is < 1 or > 5
                     || !Enum.IsDefined(state.Mode) || state.Risk == null || state.Ledger == null || state.Plans == null
                     || state.Suspended == null || state.RecentTrades == null || state.DisabledStrategies == null || state.DisabledClasses == null
                     || state.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId) || string.IsNullOrWhiteSpace(e.Symbol) || !Enum.IsDefined(e.State))

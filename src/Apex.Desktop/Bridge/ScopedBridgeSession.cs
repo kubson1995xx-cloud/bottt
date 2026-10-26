@@ -41,6 +41,8 @@ public sealed partial class BridgeSession
     internal event Action<BridgeSession>? BrokerChanged;
     internal Guid BaselineId { get { lock (_lock) return _baselineId; } }
     internal string[] RecoverOperations { get; set; } = Array.Empty<string>();
+    internal ResultMsg? LookupRecovered(string actionId)
+    { lock (_lock) return _acceptedScope?.Recovered.SingleOrDefault(r => r.Id == actionId); }
     public IReadOnlyList<PendingOrderDto> PendingOrders { get { lock (_lock) return _pendingOrders.ToArray(); } }
     internal void ConfigureScope(Guid id) { lock (_lock) { _baselineId = id; _acceptedScope = null; } }
     private void ReceiveBroker(BrokerStateMsg state)

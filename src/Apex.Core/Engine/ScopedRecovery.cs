@@ -67,7 +67,7 @@ public sealed partial class TradingEngine
         if (_stateReadFault || !_persistenceHealthy) return false;
         try
         {
-            ValidateFinancialState(next); ValidateScopeState(next); ValidateExecutionState(next);
+            ValidateFinancialState(next); ValidateScopeState(next); ValidateExecutionState(next); ValidatePartialState(next);
             next.DurableRevision = checked(_state.DurableRevision + 1); next.SavedUtc = utc;
             _store.Set(StoreKey(next.AccountNumber), JsonSerializer.Serialize(next, StateJson)); _store.Flush();
             if (next.ClosedRecords.Count != _state.ClosedRecords.Count) _projectionReconciled = false;
@@ -415,6 +415,7 @@ public sealed partial class TradingEngine
                 next.OpenAdmissions[i] = a with { Stage = AdmissionStage.Terminal };
                 next.Plans.RemoveAll(x => x.PositionId == f.PositionId); next.PendingCloses.Remove(f.PositionId);
             }
+            ReconcilePartials(next, receipt, authority, utc, expires);
             if (!CommitScope(next, utc)) return false;
             EvaluateHealth(); if (!ExportClosed(utc)) return false;
             ScopedDeficits = deficits.ToArray();

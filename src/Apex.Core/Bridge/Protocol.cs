@@ -335,6 +335,7 @@ namespace Apex.Core.Bridge
         public double? Price { get; set; }
         /// <summary>Optional immutable original actual opening fill; absent means unknown, not zero.</summary>
         public OpeningFillEvidence? OpeningFill { get; set; }
+        public ReductionFillEvidence? ReductionFill { get; set; }
         public string? Error { get; set; }
         public string? Message { get; set; }
         public BrokerStateMsg? BrokerState { get; set; }
@@ -355,6 +356,7 @@ namespace Apex.Core.Bridge
             PositionId = result.PositionId,
             FillPrice = result.Price,
             OpeningFill = result.OpeningFill,
+            ReductionFill = result.ReductionFill,
             Error = BridgeProtocol.ParseError(result.Error),
             Message = result.Message ?? result.Error ?? "stan niepewny",
         };
@@ -366,6 +368,7 @@ namespace Apex.Core.Bridge
             PositionId = outcome.PositionId,
             Price = outcome.FillPrice,
             OpeningFill = outcome.OpeningFill,
+            ReductionFill = outcome.ReductionFill,
             Error = outcome.Error.ToString(),
             Message = outcome.Message,
         };
@@ -437,6 +440,8 @@ namespace Apex.Core.Bridge
         public string Id { get; set; } = "";
         public long PositionId { get; set; }
         public double? Units { get; set; }
+        public string? SignalId { get; set; }
+        public double? ObservedUnits { get; set; }
     }
 
     public sealed class MarginCmd

@@ -319,7 +319,7 @@ namespace cAlgo.Robots
 
     // ======================================================================== adaptery cTrader
 
-    internal sealed class CTraderAdapter : IBrokerGateway, IBrokerHistory, IMarketData, ITrustedSimulationGateway, IDisposable
+    internal sealed class CTraderAdapter : IBrokerGateway, IBrokerHistory, IMarketData, ITrustedSimulationGateway, IPartialCloseGateway, IDisposable
     {
         private readonly Robot _r;
         private readonly BarStore _store;
@@ -505,14 +505,46 @@ namespace cAlgo.Robots
 
         public OrderOutcome ModifyStopLoss(long positionId, double stopLoss)
         {
-            if (!SafeAccount) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "konto REAL lub zmiana konta");
-            var position = _r.Positions.FirstOrDefault(x => x.Id == positionId && PlatformSafety.OwnLabel(x.Label, _label));
-            if (position == null) return OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak własnej pozycji");
-            if (!PlatformSafety.Positive(stopLoss) ||
-                (position.TradeType == TradeType.Buy && (stopLoss >= position.Symbol.Bid || (position.StopLoss.HasValue && stopLoss < position.StopLoss.Value))) ||
-                (position.TradeType == TradeType.Sell && (stopLoss <= position.Symbol.Ask || (position.StopLoss.HasValue && stopLoss > position.StopLoss.Value))))
-                return OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "nieprawidłowy lub zwiększający ryzyko SL");
-            return Map(position.ModifyStopLossPrice(stopLoss), position.StopLoss);
+            string id = "modify-" + Guid.NewGuid().ToString("N");
+            var command = new ModifyCmd { PositionId = positionId, Sl = stopLoss };
+            return ProtocolResult.ToOutcome(_journal.Run(id, BridgeProtocol.Serialize(command), null, () =>
+            {
+                OrderOutcome outcome;
+                if (!SafeAccount || !IsConnected) outcome = OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "konto REAL lub zmiana/rozłączenie konta");
+                else
+                {
+                    var position = _r.Positions.FirstOrDefault(x => x.Id == positionId && PlatformSafety.OwnLabel(x.Label, _label));
+                    if (position == null) outcome = OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak własnej pozycji");
+                    else if (!PlatformSafety.Positive(stopLoss) ||
+                        (position.TradeType == TradeType.Buy && (stopLoss >= position.Symbol.Bid || (position.StopLoss.HasValue && stopLoss < position.StopLoss.Value))) ||
+                        (position.TradeType == TradeType.Sell && (stopLoss <= position.Symbol.Ask || (position.StopLoss.HasValue && stopLoss > position.StopLoss.Value))))
+                        outcome = OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "nieprawidłowy lub zwiększający ryzyko SL");
+                    else outcome = Map(position.ModifyStopLossPrice(stopLoss), position.StopLoss);
+                }
+                return ProtocolResult.FromOutcome(id, outcome);
+            }));
+        }
+
+        public OrderOutcome? LookupPartial(string actionId) => _journal.Lookup(actionId) is ResultMsg result ? ProtocolResult.ToOutcome(result) : null;
+        public OrderOutcome ClosePartial(string actionId, long positionId, string signalId, double observedUnits, double units)
+        {
+            if (!SafeAccount || !IsConnected) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "wymagane DEMO");
+            var cmd = new CloseCmd { PositionId = positionId, SignalId = signalId, ObservedUnits = observedUnits, Units = units };
+            return ProtocolResult.ToOutcome(_journal.Run(actionId, BridgeProtocol.Serialize(cmd), null, () =>
+            {
+                var p = _r.Positions.FirstOrDefault(x => x.Id == positionId && PlatformSafety.OwnLabel(x.Label, _label));
+                if (p == null || GetQuote(p.SymbolName) is not { } quote || !quote.IsValid || !PlatformSafety.Fresh(quote.TimeUtc, _r.Server.TimeInUtc, 30)
+                    || p.VolumeInUnits != observedUnits || !CTraderData.Protected(p)
+                    || !PlatformSafety.SignalMatches(p.Comment, signalId)
+                    || units >= observedUnits || !PlatformSafety.PartialClose(units, observedUnits, p.Symbol.VolumeInUnitsMin, p.Symbol.VolumeInUnitsStep))
+                    return ProtocolResult.FromOutcome(actionId, OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "partial identity/volume mismatch"));
+                var r = _r.ClosePosition(p, units);
+                var result = ProtocolResult.FromOutcome(actionId, Map(r, null));
+                result.ReductionFill = PlatformSafety.ReductionWitness(r.IsSuccessful, actionId, positionId, signalId, _label, p.SymbolName,
+                    observedUnits, units, _r.Positions.FirstOrDefault(x => x.Id == positionId)?.VolumeInUnits ?? 0, p.Symbol.VolumeInUnitsStep);
+                if (result.ReductionFill != null) _journal.RecordReductionFill(actionId, result.ReductionFill);
+                return result;
+            }));
         }
 
         public OrderOutcome ClosePosition(long positionId, double? units)
@@ -520,6 +552,7 @@ namespace cAlgo.Robots
             if (!SafeAccount) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "konto REAL lub zmiana konta");
             var position = _r.Positions.FirstOrDefault(x => x.Id == positionId && PlatformSafety.OwnLabel(x.Label, _label));
             if (position == null) return OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak własnej pozycji");
+            if (units.HasValue && !_sdkBacktest) return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "partial requires durable action protocol");
             if (!PlatformSafety.PartialClose(units, position.VolumeInUnits, position.Symbol.VolumeInUnitsMin, position.Symbol.VolumeInUnitsStep))
                 return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "nieprawidłowy wolumen zamknięcia");
             var result = units.HasValue && units.Value < position.VolumeInUnits ? _r.ClosePosition(position, units.Value) : _r.ClosePosition(position);

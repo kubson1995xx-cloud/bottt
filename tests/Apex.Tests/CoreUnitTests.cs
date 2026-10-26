@@ -462,14 +462,15 @@ namespace Apex.Tests
         }
 
         [Fact]
-        public void Partial_RespectsMinimumVolumeAndHappensOnce()
+        public void Partial_EvaluationNeverClaimsExecution()
         {
             var (plan, pos) = Long(new ExitPlan { PartialAtR = 1, PartialFraction = 0.5 });
             var a = PositionManagerRules.Evaluate(In(plan, pos, 5110, 5120, 5050));
             var p = Assert.Single(a, x => x.Kind == ManagementActionKind.PartialClose);
             Assert.Equal(0.5, p.CloseUnits, 9);
+            Assert.False(plan.PartialDone);
             var again = PositionManagerRules.Evaluate(In(plan, pos, 5130, 5140, 5100, bar: 2));
-            Assert.DoesNotContain(again, x => x.Kind == ManagementActionKind.PartialClose);
+            Assert.Contains(again, x => x.Kind == ManagementActionKind.PartialClose);
         }
 
         [Fact]

@@ -11,6 +11,27 @@ namespace Apex.Platform.Tests
         private static ResultMsg Filled(string id) => new() { Id = id, Status = "filled", PositionId = 42, Price = 1.2 };
 
         [Fact]
+        public void Task2B_LegacyTwentyThousandTerminalsCompactWithoutLosingReplay()
+        {
+            var entries = new System.Collections.Generic.Dictionary<string, CommandJournal.Entry>();
+            for (int i = 0; i < 20000; i++) entries.Add("old-" + i, new() { Fingerprint = "open " + i, Signal = "signal-" + i, Result = Filled("old-" + i) });
+            string saved = System.Text.Json.JsonSerializer.Serialize(entries, BridgeProtocol.Json);
+            var journal = new CommandJournal(saved, s => saved = s);
+            int executions = 0;
+            Assert.Equal("filled", journal.Run("new", "close", null, () => { executions++; return Filled("new"); }).Status);
+            Assert.True(journal.CachedCount < 1000);
+            Assert.Equal(20001, journal.Count);
+            var restored = new CommandJournal(saved, _ => { });
+            Assert.True(restored.Healthy);
+            Assert.Equal(42, restored.Lookup("old-0")!.PositionId);
+            Assert.Equal("filled", restored.Run("old-0", "open 0", "signal-0", () => { executions++; return Filled("old-0"); }).Status);
+            Assert.Equal("filled", restored.Run("fresh-id", "open 0", "signal-0", () => { executions++; return Filled("fresh-id"); }).Status);
+            Assert.Equal("InvalidRequest", restored.Run("old-0", "different", null, () => Filled("old-0")).Error);
+            Assert.Equal("InvalidRequest", restored.Run("fresh-conflict", "different", "signal-0", () => Filled("fresh-conflict")).Error);
+            Assert.Equal(1, executions);
+        }
+
+        [Fact]
         public void RepeatedCommandExecutesOnlyOnceAndReturnsOriginalResult()
         {
             int calls = 0;
