@@ -44,7 +44,7 @@ public static class CTraderOpeningEvidence
             // Decimal arithmetic never uses a relative epsilon capable of hiding a legitimate
             // volume quantum. Unsupported representation/overflow is unknown, not rounded proof.
             decimal quantum = (decimal)volumeStep;
-            if (quantum <= 0 || !Representable(request.VolumeUnits, volumeStep) || !Representable(units, volumeStep)
+            if (quantum <= 0 || (double)quantum != volumeStep || !Representable(request.VolumeUnits, volumeStep) || !Representable(units, volumeStep)
                 || !Representable(remaining, volumeStep) || (decimal)request.VolumeUnits % quantum != 0
                 || (decimal)units % quantum != 0 || (decimal)remaining % quantum != 0) return null;
             return new OpeningFillEvidence(new OpeningRequestEvidence

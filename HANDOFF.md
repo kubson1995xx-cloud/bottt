@@ -1,5 +1,10 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Autonomia Phase B — prerequisite volume quantum
+
+- Poprawiono load-bearing Minor z przeglądu opening witness: sam `volumeStep` musi round-tripować double→decimal→double, nie tylko jednostki. `Math.BitIncrement(0.1)` daje UNKNOWN zamiast zaokrąglonego dowodu.
+- Behavioral RED (`quantum-red.trx`) → GREEN w pełnych **100/100 testach platformy** (`task1-scope-core/final-platform.trx`). Zero brokera/transakcji/push. To prerequisite, nie zakończony scoped bootstrap; manifest/proof Core w osobnej fazie.
+
 ## Autonomia Task1 — scoped extension, checkpoint opening evidence (NIE ukończone)
 
 - **PARTIAL / oversized checkpoint; finding1 OTWARTY, Task1 NIE zaakceptowany.** Nie odblokowano żadnego nowego ryzyka: prawdziwy cTrader pozostaje CoverageUnknown/STOP. Wdrożono wyłącznie spójny pierwszy etap dowodu opening fill; bootstrap, stały manifest/admissions Core, C+O=V0, broker-event generations, pending orders, internal permit, strukturalne oddzielenie symulacji i polski setup/status są nadal do wykonania. Nie traktować tego commita jako gotowego autonomicznego bota.

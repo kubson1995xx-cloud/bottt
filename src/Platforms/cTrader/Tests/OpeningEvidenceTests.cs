@@ -197,6 +197,12 @@ public sealed class OpeningEvidenceTests
     }
 
     [Fact]
+    public void NonRoundtrippingQuantumCannotBeRoundedIntoOpeningProof()
+    {
+        Assert.Null(Capture(Position(0.5, Opening()), Math.BitIncrement(0.1)));
+    }
+
+    [Fact]
     public void SdkOpeningGraphProvesOriginalActualFillBeforeFastPartialNotRequestOrRemaining()
     {
         var evidence = Capture(Position(0.5, Opening()));
