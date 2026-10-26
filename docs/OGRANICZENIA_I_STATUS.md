@@ -6,6 +6,7 @@ Kod jest zintegrowany i testowany; aktualne liczby podaje [WYNIKI_TESTOW.md](WYN
 
 - Brak AI Lab, uczenia i automatycznych aktualizacji w produkcie. Archiwalny kod/testy pozostają osobno. Centrum decyzji jest pasywną wizualizacją reguł.
 - Restart/reconnect bez nowych wejść do ręcznego START. Stare flagi/frazy nie odblokują REAL.
+- MAIN Desktop + ApexBridge wymaga ważnego trwałego certyfikatu testu DEMO (stan v4) i świeżego scoped sync przed START strategii. Certyfikat jest związany z kontem, dokładną etykietą/ID, ścieżką i wersją. Nie wznawia przerwanego testu; nie certyfikuje całej historii brokera. Native nadal tylko odczyt/redukcja. Lokalna próba syntetyczna nie zastępuje zgody i odbioru u brokera; [procedura](PROCEDURA_DEMO_PEPPERSTONE.md).
 - Wymagane SL i TP. Strategia bez stałego celu dostaje ochronny **TP 3R**; reguły wejścia zachowane, ale zmieniony limit wyjścia wymaga ponownych badań wyników. Stare własne pozycje bez poprawnego TP są likwidowane, bo interfejs nie ma ModifyTP.
 - Dokładna etykieta chroni pozycje obce; nie nadawaj ręcznej pozycji etykiety APEX.
 - Niepewny/corrupt zapis nie jest kasowany ani przywracany ze starego backupu. Operator uzgadnia stan z brokerem; nie usuwaj rejestru w celu ominięcia limitów.

@@ -4,9 +4,25 @@
 
 Główna ścieżka: **ApexBridge + APEX Desktop**, dedykowane i wyłączne konto DEMO **hedged**.
 `coverage:"unknown"` pozostaje niezmienione. `ScopedReady` oznacza uzgodnienie wyłącznie trwałego
-zakresu aplikacji, nie kompletność brokera i nie zgodę START. **Strategie są zablokowane do Task2 PASS**.
+zakresu aplikacji, nie kompletność brokera i nie zgodę START. **Strategie wymagają trwałego PASS testu DEMO w stanie v4 oraz osobnego START po świeżym sync**.
 Native `ApexTradingAI` jest obecnie jawnie tylko odczyt/redukcja, bez setupu/permitu/test-open.
 Natywny backtest korzysta z osobnej zaufanej kompozycji tylko dla rzeczywistego SDK `IsBacktesting`.
+
+### Trwały certyfikat (Task2A)
+
+`EngineState` v4 ma nullable `ExecutionTest`: record/protocol/test/scope version, pełna `RecoveryIdentity`,
+BaselineId, OperationId, dokładna pozycja, obserwowane SL/TP, żądanie/obserwacja zacieśnienia SL,
+żądanie/potwierdzenie pełnego close, czas końcowy, identyfikatory closing deals i net.
+PASS powstaje wyłącznie wewnątrz istniejącego `CmdExecutionTest`/`ProcessExecutionTest`, po terminalnym
+trwałym rozliczeniu tej samej admission. API nie przyjmuje certyfikatu/booleana PASS. `executionTest`
+nadal wymaga `args.confirmDemoTrade:true`; setup/parowanie/restart/START nie uruchamiają testu.
+Migracja v1–v3 nie wyprowadza PASS z dawnych logów. Przerwany test nie wznawia się po restarcie.
+
+Odczyt statusu: `scope.certificate.{valid,canStart,status,message,identity,baselineId,protocolVersion,testVersion}`.
+`scope.strategyStartBlocked` wynika z gotowości Core, nie jest stałą blokadą Task2. PASS nie zastępuje
+freshness/epoch/permit/disk/risk fences; Core wymaga go też bezpośrednio przy nowym ryzyku strategii.
+Restart/reconnect pozostaje STOP; świeży sync + ten sam certyfikat dopuszczają ponowne jawne START.
+Pełne close i Emergency nie wymagają PASS. Prosta procedura: [PROCEDURA_DEMO_PEPPERSTONE.md](PROCEDURA_DEMO_PEPPERSTONE.md).
 
 1. `hello` negocjuje równocześnie `historyCapability:"closing-deals-v1"` i
    `scopedCapability:"scoped-recovery-v1"`. Wymaga jawnych `account.isLive` i `account.hedging`,

@@ -10,17 +10,26 @@
 4. Nie uruchamiaj równolegle wersji natywnej, starego APEX ani drugiej instancji mostu. Zapewnij połączenie internetowe i wyłącz usypianie Windows na czas testu.
 5. Zanotuj commit z `apex-build.json`, czas UTC i numer konta DEMO. Na VPS ten etap nie jest potwierdzony samym faktem zbudowania ZIP.
 
-## 2. Osobna zgoda na kontrolowaną transakcję
+## 2. Zakres aplikacji — bez transakcji
+
+1. Użyj osobnego konta DEMO **hedging**, bez innych pisarzy (ręcznego handlu, cBotów, Native, innych terminali). Wszystkie pozycje i zlecenia oczekujące muszą być puste przy setupie. Nie zamykaj cudzych pozycji ani nie kasuj starych plików dla wymuszenia gotowości.
+2. W **Połączenia platform → Przygotuj zakres DEMO (read-only)** potwierdź wyłączne konto. To tylko trwała rezerwacja etykiety i ID, nie zgoda na zlecenie.
+3. Skopiuj **dokładną wygenerowaną etykietę**, bez skracania/zmian, do parametru ApexBridge **„Dokładna etykieta pozycji APEX”**. Zatrzymaj i uruchom most ponownie, połącz z APEX.
+4. Poczekaj na świeże **ScopedReady**. **Broker CoverageUnknown pozostaje prawidłowym ograniczeniem**: to uzgodnienie bieżącego zakresu aplikacji, nie całej historii brokera. Brakujące fill/deale, cudze obiekty, awaria zapisu albo konflikt blokują test/START; nie usuwaj dowodów.
+
+## 3. Osobna zgoda na kontrolowaną transakcję
 
 Po potwierdzeniu połączenia użytkownik zatwierdza **konkretny test otwarcia i zamknięcia na tym koncie DEMO**. W panelu: **Diagnostyka i dziennik → Test wykonania (DEMO)**. Okno potwierdzenia informuje, że powstanie rzeczywista transakcja DEMO; anulowanie nie powinno wysłać zlecenia.
 
 - Test używa minimalnego wolumenu tylko wtedy, gdy przejdzie kontrole konta, danych, kosztów i ryzyka. Może poprawnie odmówić, np. przy zamkniętym rynku lub zbyt małym equity.
-- Obserwuj pozycję w cTrader: zgodny symbol, etykieta `APEX`, minimalny wolumen, **SL i TP widoczne u brokera**.
+- Obserwuj pozycję w cTrader: zgodny symbol, **dokładna wygenerowana etykieta zakresu**, minimalny wolumen, **SL i TP widoczne u brokera**.
 - Test następnie próbuje przesunąć SL i zamknąć pozycję. Oczekuj jawnego potwierdzenia kolejnych kroków w panelu.
 - W cTrader → **History** sprawdź identyfikator pozycji, otwarcie i zamknięcie. Zapisz identyfikator i komunikat końcowy; bez nich nie oznaczaj integracji jako zaliczonej.
+- Samo zniknięcie pozycji ani dawny napis „TEST ZALICZONY” nie oznacza PASS. Czekaj na **Certyfikat testu DEMO: PASS** po trwałym rozliczeniu wszystkich closing deals tej samej pozycji. Panel pokazuje konto/brokera/walutę, dokładną etykietę/ID zakresu, ścieżkę i wersje.
+- Niepewny open/close, brak potwierdzenia SL/TP/modify, naturalny SL/TP/manual close przed poleceniem close, spóźnione dowody i przerwany test nie certyfikują. Późniejszy replay może naprawić księgowanie, ale nie wskrzesi zakończonego testu. Test nie wznawia się po restarcie/reconnect i nie uruchamia strategii.
 - Przy błędzie, utracie połączenia lub niepewnej odpowiedzi **nie klikaj ponownie w ciemno**. Najpierw sprawdź faktyczne pozycje i historię. Jeśli pozycja została, zamknij ją w cTrader lub użyj Emergency Stop, pamiętając, że APEX potrzebuje działającego mostu do wysłania zamknięcia.
 
-## 3. Testy odporności — również tylko DEMO
+## 4. Testy odporności — również tylko DEMO
 
 - **Restart APEX:** przy istniejącej własnej pozycji DEMO odtworzenie planu i uzgodnienie bez ponownego zlecenia tego sygnału; nowe wejścia wymagają START.
 - **Rozłączenie mostu:** brak nowych operacji na nieaktualnym połączeniu; po powrocie uzgodnienie z brokerem, bez duplikatów.
@@ -29,9 +38,11 @@ Po potwierdzeniu połączenia użytkownik zatwierdza **konkretny test otwarcia i
 - **Drugi most:** drugie połączenie tego samego konta zostaje odrzucone.
 - **Ryzyko:** porównaj wartości domyślne 0,5% / 1,5% / 5% / x5 / 3 pozycje; nie podnoś ich w celu wymuszenia testu.
 
-## 4. Automatyczna praca
+## 5. Automatyczna praca
 
-Dopiero po odbiorze bezpieczeństwa i testu wykonania naciśnij **START** i zatwierdź automatyczny handel DEMO. Strategie mają prawo czekać bez zleceń — domyślny profil jest selektywny. Centrum decyzji pokazuje rzeczywiste przyczyny WAIT/BUY/SELL; nie generuje dodatkowych sygnałów AI.
+Dopiero przy ważnym trwałym PASS i aktualnej gotowości synchronizacji/ryzyka naciśnij **START** i **osobno zatwierdź** automatyczny handel DEMO. Po restarcie/reconnect zawsze STOP: pasujący certyfikat pozostaje, lecz potrzebne są świeże uzgodnienie i nowe jawne START. Zmiana konta, waluty, brokera, platformy, etykiety, BaselineId, ścieżki lub wersji unieważnia certyfikat. Nie ma przycisku/API „ustaw PASS”. Native nadal tylko odczyt/redukcja; nie jest alternatywną drogą wejścia.
+
+Strategie mają prawo czekać bez zleceń — domyślny profil jest selektywny. Centrum decyzji pokazuje rzeczywiste przyczyny WAIT/BUY/SELL; nie generuje dodatkowych sygnałów AI. Emergency i pełne zamknięcie własnej pozycji nie wymagają certyfikatu, ale nadal potrzebują bezpiecznej tożsamości DEMO i działającego mostu.
 
 W Windows muszą działać APEX, cTrader i most. Po wyłączeniu pozostają tylko SL/TP u brokera; trailing i decyzje strategii nie działają. STOP wstrzymuje także zwykłe zarządzanie, natomiast „Wstrzymaj nowe” pozostawia je aktywne.
 
@@ -45,6 +56,7 @@ W Windows muszą działać APEX, cTrader i most. Po wyłączeniu pozostają tylk
 - SL oraz TP widoczne w cTrader:
 - Zmiana SL potwierdzona:
 - Zamknięcie i wpis w History potwierdzone:
+- Trwały PASS, dokładna etykieta/BaselineId, ścieżka i wersje z panelu:
 - Restart / duplikaty / Emergency Stop sprawdzone:
 - Błędy i czynności wymagające powtórzenia:
 
