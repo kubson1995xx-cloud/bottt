@@ -23,6 +23,9 @@ namespace Apex.Core.Management
         /// <summary>R – początkowa odległość SL w jednostkach ceny.</summary>
         public double InitialRisk { get; set; }
         public double InitialVolume { get; set; }
+        /// <summary>Dla planu odtworzonego InitialVolume to tylko pozostały wolumen w chwili
+        /// przejęcia. Pełny wolumen cyklu potwierdza oddzielnie zaufana kompletna historia.</summary>
+        public double? CoveredLifetimeVolume { get; set; }
         public double RiskAmount { get; set; }
         public DateTime EntryTimeUtc { get; set; }
         public double EntryAtr { get; set; }

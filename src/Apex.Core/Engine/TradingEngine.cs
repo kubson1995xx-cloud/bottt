@@ -90,6 +90,7 @@ namespace Apex.Core.Engine
         private AccountSnapshot? _lastAccount;
         private DateTime _lastPruneUtc;
         private string _historyGeneration = "";
+        private bool _projectionReconciled;
         public bool HistoryReady { get; private set; }
         public string HistoryMessage { get; private set; } = "oczekiwanie na historię";
 
@@ -251,6 +252,7 @@ namespace Apex.Core.Engine
             foreach (var s in _state.Suspended) _suspended.Add(s);
             _initialized = true;
             Reconcile(utc, "start");
+            if (!_stateReadFault) ExportClosed(utc);
             SynchronizeHistory(utc);
             _risk.Update(acc, utc);
             _dirty = true;
@@ -285,6 +287,7 @@ namespace Apex.Core.Engine
                     || st.ClosingDeals.GroupBy(DealKey).Any(g => g.Count() != 1)
                     || st.ClosedRecords.Any(x => x == null) || st.ClosedOutbox.Any(x => x == null))
                     throw new JsonException("Uszkodzony rejestr odzyskiwania.");
+                ValidateFinancialState(st);
                 if (st.SchemaVersion == 2)
                 {
                     using var document = JsonDocument.Parse(json!);
@@ -295,7 +298,7 @@ namespace Apex.Core.Engine
                         || st.TradesTotal != st.AccountedPositions.Count || st.ClosedRecords.Count != st.TradesTotal
                         || !st.AccountedPositions.SetEquals(st.ClosedRecords.Select(x => x.PositionId))
                         || st.ClosedOutbox.Any(x => !st.AccountedPositions.Contains(x.PositionId))
-                        || Math.Abs(st.RealizedTotal - st.ClosingDeals.Sum(x => x.NetProfit)) > 1e-7)
+                        || Math.Abs(st.RealizedTotal - FiniteSum(st.ClosingDeals.Select(x => x.NetProfit))) > 1e-7)
                         throw new JsonException("Niespójny autorytatywny stan księgowy.");
                 }
                 else if (st.TradesTotal != 0 || st.RealizedTotal != 0 || st.RecentTrades.Count != 0
@@ -1351,7 +1354,7 @@ namespace Apex.Core.Engine
                 ExitTimeUtc = info.ExitTimeUtc,
                 EntryPrice = info.EntryPrice,
                 ExitPrice = info.ExitPrice,
-                Volume = plan?.InitialVolume ?? info.Volume,
+                Volume = plan?.Reconstructed == false ? plan.InitialVolume : info.Volume,
                 InitialRiskMoney = plan?.Reconstructed == false ? plan.RiskAmount : 0,
                 GrossProfit = info.GrossProfit,
                 Commission = info.Commission,

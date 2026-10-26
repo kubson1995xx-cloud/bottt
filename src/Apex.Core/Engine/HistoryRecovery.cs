@@ -15,6 +15,36 @@ namespace Apex.Core.Engine
             && d.ExitPrice > 0 && double.IsFinite(d.ExitPrice) && d.ExitTimeUtc >= d.EntryTimeUtc
             && double.IsFinite(d.NetProfit) && double.IsFinite(d.GrossProfit) && double.IsFinite(d.Commission) && double.IsFinite(d.Swap);
 
+        private static double FiniteSum(IEnumerable<double> values)
+        {
+            double total = 0;
+            foreach (double value in values)
+            {
+                total += value;
+                if (!double.IsFinite(value) || !double.IsFinite(total)) throw new InvalidOperationException("nieskończona suma finansowa/wolumen");
+            }
+            return total;
+        }
+
+        private static void ValidateFinancialState(EngineState state)
+        {
+            if (!double.IsFinite(state.RealizedTotal)
+                || new[] { state.Risk.DayStartEquity, state.Risk.PeakEquity, state.Risk.InitialEquity }.Any(x => !double.IsFinite(x))
+                || state.Plans.Any(p => new[] { p.InitialVolume, p.RiskAmount, p.InitialRisk, p.EntryPrice, p.InitialStop }.Any(x => !double.IsFinite(x))
+                    || p.InitialVolume < 0 || p.RiskAmount < 0 || (p.CoveredLifetimeVolume.HasValue && (!double.IsFinite(p.CoveredLifetimeVolume.Value) || p.CoveredLifetimeVolume.Value <= 0)))
+                || state.ClosedRecords.Concat(state.ClosedOutbox).Concat(state.RecentTrades).Any(r => r == null || !r.HasFiniteEconomics()))
+                throw new InvalidOperationException("nieprawidłowe kwoty/wolumen w stanie finansowym");
+            FiniteSum(state.ClosingDeals.Select(x => x.NetProfit));
+            FiniteSum(state.ClosingDeals.Select(x => x.GrossProfit));
+            FiniteSum(state.ClosingDeals.Select(x => x.Commission));
+            FiniteSum(state.ClosingDeals.Select(x => x.Swap));
+            foreach (var group in state.ClosingDeals.GroupBy(x => x.PositionId)) FiniteSum(group.Select(x => x.Volume));
+            FiniteSum(state.ClosedRecords.Select(x => x.NetProfit));
+            FiniteSum(state.ClosedRecords.Select(x => x.GrossProfit));
+            FiniteSum(state.ClosedRecords.Select(x => x.Commission));
+            FiniteSum(state.ClosedRecords.Select(x => x.Swap));
+        }
+
         private void BlockHistory(string reason)
         {
             HistoryReady = false;
@@ -62,6 +92,8 @@ namespace Apex.Core.Engine
             try
             {
                 var snapshot = history.GetHistory();
+                if (snapshot.Synchronizing && snapshot.AccountNumber == _state.AccountNumber && snapshot.Generation == _historyGeneration)
+                { HistoryReady = false; HistoryMessage = "uzgadnianie bieżącej rewizji pozycji"; return; }
                 if (!snapshot.Complete || snapshot.Positions == null || snapshot.AccountNumber != _state.AccountNumber || string.IsNullOrWhiteSpace(snapshot.Generation))
                 { BlockHistory("niepełna migawka historii"); return; }
                 if (_historyGeneration.Length > 0 && snapshot.Generation != _historyGeneration)
@@ -87,9 +119,10 @@ namespace Apex.Core.Engine
                 // Snapshot all mutable engine state into a candidate. Do not publish counters,
                 // dedupe keys or plan removal until the single authoritative state write + flush.
                 var next = JsonSerializer.Deserialize<EngineState>(JsonSerializer.Serialize(_state, StateJson), StateJson)!;
-                next.Plans = _plans.Values.ToList();
+                next.Plans = JsonSerializer.Deserialize<List<Apex.Core.Management.TradePlan>>(JsonSerializer.Serialize(_plans.Values, StateJson), StateJson)!;
                 next.PendingCloses = _pendingCloses.ToDictionary(x => x.Key, x => x.Value);
                 next.Ledger = _ledger.Entries.ToList(); next.Risk = _risk.State;
+                ValidateFinancialState(next);
                 var known = next.ClosingDeals.ToDictionary(DealKey);
                 bool changed = false;
                 foreach (var row in rows)
@@ -110,30 +143,50 @@ namespace Apex.Core.Engine
                     known.Add(key, row); next.ClosingDeals.Add(row); next.RealizedTotal += row.NetProfit; changed = true;
                 }
                 var open = positions.ToDictionary(x => x.Id);
+                // Reconstructed remaining volume is not measured original volume/risk. Only a
+                // trusted complete source can establish closed-so-far + remaining for this lifecycle.
+                if (requiredCoverage)
+                    foreach (var reconstructed in next.Plans.Where(x => x.Reconstructed))
+                        if (open.TryGetValue(reconstructed.PositionId, out var remaining))
+                        {
+                            var priorDeals = next.ClosingDeals.Where(x => x.PositionId == reconstructed.PositionId).ToList();
+                            if (remaining.Label != _cfg.Label || remaining.Symbol != reconstructed.Symbol || remaining.Direction != reconstructed.Direction
+                                || priorDeals.Any(x => x.Symbol != remaining.Symbol || x.Direction != remaining.Direction))
+                                throw new InvalidOperationException("niespójny cykl odtworzonej pozycji");
+                            double lifetime = FiniteSum(priorDeals.Select(x => x.Volume).Append(remaining.VolumeUnits));
+                            if (reconstructed.CoveredLifetimeVolume is double priorVolume
+                                && Math.Abs(lifetime - priorVolume) > Math.Max(1e-8, priorVolume * 1e-8))
+                                throw new InvalidOperationException("niespójny pełny wolumen odtworzonej pozycji");
+                            if (!reconstructed.CoveredLifetimeVolume.HasValue)
+                            { reconstructed.CoveredLifetimeVolume = lifetime; changed = true; }
+                        }
                 foreach (var group in next.ClosingDeals.GroupBy(x => x.PositionId))
                 {
                     if (next.AccountedPositions.Contains(group.Key) || open.ContainsKey(group.Key)) continue;
                     var deals = group.OrderBy(x => x.ExitTimeUtc).ThenBy(x => x.ClosingDealId).ToList();
-                    double volume = deals.Sum(x => x.Volume);
-                    if (_plans.TryGetValue(group.Key, out var plan)
-                        && Math.Abs(volume - plan.InitialVolume) > Math.Max(1e-8, plan.InitialVolume * 1e-8)) continue;
+                    double volume = FiniteSum(deals.Select(x => x.Volume));
+                    var plan = next.Plans.FirstOrDefault(x => x.PositionId == group.Key);
+                    double? expected = plan == null ? null : plan.Reconstructed ? plan.CoveredLifetimeVolume : plan.InitialVolume;
+                    if (plan?.Reconstructed == true && !requiredCoverage) continue;
+                    if (expected.HasValue && Math.Abs(volume - expected.Value) > Math.Max(1e-8, expected.Value * 1e-8)) continue;
                     if (!requiredCoverage && !_plans.ContainsKey(group.Key)) continue;
                     var first = deals[0]; var last = deals[deals.Count - 1];
                     var aggregate = new ClosedPositionInfo
                     {
                         PositionId = group.Key, Symbol = first.Symbol, Label = first.Label, Comment = first.Comment,
                         Direction = first.Direction, Volume = volume,
-                        EntryPrice = deals.Sum(x => x.EntryPrice * x.Volume) / volume,
-                        ExitPrice = deals.Sum(x => x.ExitPrice * x.Volume) / volume,
+                        EntryPrice = FiniteSum(deals.Select(x => x.EntryPrice * x.Volume)) / volume,
+                        ExitPrice = FiniteSum(deals.Select(x => x.ExitPrice * x.Volume)) / volume,
                         EntryTimeUtc = deals.Min(x => x.EntryTimeUtc), ExitTimeUtc = deals.Max(x => x.ExitTimeUtc),
-                        GrossProfit = deals.Sum(x => x.GrossProfit), Commission = deals.Sum(x => x.Commission),
-                        Swap = deals.Sum(x => x.Swap), NetProfit = deals.Sum(x => x.NetProfit), PlatformReason = last.PlatformReason,
+                        GrossProfit = FiniteSum(deals.Select(x => x.GrossProfit)), Commission = FiniteSum(deals.Select(x => x.Commission)),
+                        Swap = FiniteSum(deals.Select(x => x.Swap)), NetProfit = FiniteSum(deals.Select(x => x.NetProfit)), PlatformReason = last.PlatformReason,
                     };
                     var record = BuildClosedRecord(aggregate);
                     next.AccountedPositions.Add(group.Key); next.ClosedRecords.Add(record); next.ClosedOutbox.Add(record);
                     next.RecentTrades.Add(record); next.TradesTotal++;
                     next.Plans.RemoveAll(x => x.PositionId == group.Key); next.PendingCloses.Remove(group.Key); changed = true;
                 }
+                ValidateFinancialState(next); // before tolerance-based consistency or authoritative publication
                 if (changed)
                 {
                     next.SavedUtc = utc;
@@ -149,6 +202,8 @@ namespace Apex.Core.Engine
                         }
                     }
                     _state = next;
+                    foreach (var plan in next.Plans)
+                        if (_plans.TryGetValue(plan.PositionId, out var livePlan)) livePlan.CoveredLifetimeVolume = plan.CoveredLifetimeVolume;
                     foreach (var id in _plans.Keys.Where(next.AccountedPositions.Contains).ToList())
                     { _plans.Remove(id); _pendingCloses.Remove(id); _closeReasons.Remove(id); }
                     _dirty = true;
@@ -174,9 +229,14 @@ namespace Apex.Core.Engine
 
         private bool ExportClosed(DateTime utc)
         {
-            if (_state.ClosedOutbox.Count == 0) return true;
             try
             {
+                if (!_projectionReconciled && _journal is IRecoveryJournal recovery)
+                {
+                    recovery.Reconcile(_state.ClosedRecords);
+                    _projectionReconciled = true;
+                }
+                if (_state.ClosedOutbox.Count == 0) return true;
                 foreach (var record in _state.ClosedOutbox) _journal.TradeClosed(record);
                 // If clearing the outbox fails, the durable old outbox safely retries a keyed sink.
                 _state.ClosedOutbox.Clear(); _dirty = true;

@@ -1,5 +1,12 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Autonomia Task1 — fix round1, księgowanie po review (lokalnie)
+
+- Findings 2/6/7/8: CSV porównuje opublikowany wiersz bez ponownego wyliczania zaokrąglonego R; restart uzgadnia projekcję z pełną authority także przy pustym outbox. Preflight konfliktów przed dopisaniem braków; podejrzane CSV/nagłówki pozostają nietknięte. Testy obejmują utratę/rollback, crash podczas odbudowy i ułamkowe risk1.004/net0.504.
+- Odtworzony pozostały wolumen nie jest oryginalnym: oddzielny `CoveredLifetimeVolume` ustala wyłącznie zaufany kompletny zakres, a późniejsze zamknięcia muszą się zgadzać. Unknown coverage nadal nie importuje arbitralnych sum ani R. Skończoność kwot i sum sprawdzana jawnie przed porównaniami tolerancji/publikacją.
+- Każdy znaleziony defekt ma behavioral RED→GREEN; dokładne logi/TRX w `/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task1-fix1/`. Pełny łączny kandydat po poprawkach hosta: Core/Desktop 358/358, platform 79/79, panel 11/11, npm check PASS; solution + oba prawdziwe SDK `.algo` 0 ostrzeżeń/błędów. Te bramki dotyczą łącznego kandydata; osobny commit hosta domyka findings 3/4/5.
+- Finding 1 **OTWARTY**: realny cTrader nadal CoverageUnknown/STOP; Task1 NIE zaakceptowany. Brak połączeń brokerskich, transakcji, agentów potomnych i push. Specyfikacja zmieniona przez rodzica pozostaje poza commitami. Raport `.superpowers/sdd/2026-10-26-apex-autonomy/task-1-fix1-report.md`.
+
 ## Autonomia Task1 — faza Core odzyskiwania (lokalna, nie wydanie)
 
 - Faza transportu/SDK: `1e5b670`. Końcowe lokalne bramki Task1: **Core/Desktop 305/305**, **cTrader 79/79**, **panel 11/11**, npm check PASS; **pełne DEMO solution i oba prawdziwe `.algo` 0 ostrzeżeń / 0 błędów**. Dowody `/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task1/final-{core,platform}.{log,trx}`, `final-build.log`, `final-npm-{test,check}.log`. Archiwum bez zmian i nie uruchamiane ponownie.

@@ -68,6 +68,8 @@ namespace Apex.Desktop.Services
         private readonly object _lock = new();
         private readonly List<TradeRecord> _recent = new();
         private readonly Dictionary<long, TradeRecord> _closed = new();
+        // Compare the actual persisted row, not a lossy monetary parse that recomputes R.
+        private readonly Dictionary<long, string> _closedRows = new();
         public bool HasFault { get; private set; }
         public bool IsHealthy => !HasFault;
         public IReadOnlyList<TradeRecord> ClosedRecords { get { lock (_lock) return _closed.Values.ToList(); } }
@@ -88,11 +90,15 @@ namespace Apex.Desktop.Services
 
         private void LoadRecent(string path)
         {
-            foreach (var line in File.ReadLines(path).Skip(1))
+            using var rows = File.ReadLines(path).GetEnumerator();
+            if (!rows.MoveNext() || rows.Current != TradeRecord.CsvHeader) { HasFault = true; return; }
+            while (rows.MoveNext())
             {
+                string line = rows.Current;
                 var r = Parse(line);
                 if (r == null || _closed.ContainsKey(r.PositionId)) { HasFault = true; continue; }
                 _closed.Add(r.PositionId, r);
+                _closedRows.Add(r.PositionId, line);
                 _recent.Add(r);
                 if (_recent.Count > 500) _recent.RemoveAt(0);
             }
@@ -105,7 +111,7 @@ namespace Apex.Desktop.Services
             var ci = System.Globalization.CultureInfo.InvariantCulture;
             try
             {
-                return new TradeRecord
+                var record = new TradeRecord
                 {
                     PositionId = long.Parse(p[0], ci),
                     SignalId = p[1],
@@ -132,6 +138,7 @@ namespace Apex.Desktop.Services
                     ExitReason = p.Length > 23 ? p[23] : "",
                     Parameters = p.Length > 24 ? p[24] : "",
                 };
+                return record.HasFiniteEconomics() ? record : null;
             }
             catch (Exception ex) when (ex is FormatException || ex is OverflowException) { return null; }
         }
@@ -148,14 +155,28 @@ namespace Apex.Desktop.Services
         public void TradeOpened(TradePlan plan, double volume, string details) =>
             Event($"OTWARCIE #{plan.PositionId} {plan.Symbol} {plan.Direction} wol. {volume} {plan.Strategy} wejście {plan.EntryPrice} SL {plan.InitialStop} ryzyko {plan.RiskAmount:F2} | {plan.EntryReason} | {details}");
 
-        public void TradeClosed(TradeRecord record)
+        public void Reconcile(IReadOnlyList<TradeRecord> authority)
         {
             lock (_lock)
             {
                 if (HasFault) throw new IOException("Dziennik wymaga uzgodnienia – oryginalne dane zachowane.");
-                if (_closed.TryGetValue(record.PositionId, out var prior))
+                var expected = authority.ToDictionary(x => x.PositionId, x => x.ToCsv());
+                foreach (var prior in _closedRows)
+                    if (!expected.TryGetValue(prior.Key, out var row) || row != prior.Value)
+                        throw new IOException("Konflikt projekcji zamkniętej pozycji: " + prior.Key);
+                foreach (var record in authority) TradeClosed(record);
+            }
+        }
+
+        public void TradeClosed(TradeRecord record)
+        {
+            lock (_lock)
+            {
+                if (!record.HasFiniteEconomics()) throw new IOException("Nieprawidłowa ekonomia projekcji.");
+                if (HasFault) throw new IOException("Dziennik wymaga uzgodnienia – oryginalne dane zachowane.");
+                if (_closedRows.TryGetValue(record.PositionId, out var prior))
                 {
-                    if (prior.ToCsv() != record.ToCsv()) throw new IOException("Konflikt projekcji zamkniętej pozycji: " + record.PositionId);
+                    if (prior != record.ToCsv()) throw new IOException("Konflikt projekcji zamkniętej pozycji: " + record.PositionId);
                     return;
                 }
                 // Atomic publication avoids a torn CSV tail and a separate dedupe-index crash gap.
@@ -163,6 +184,7 @@ namespace Apex.Desktop.Services
                 string path = Path.Combine(_dir, "transakcje.csv");
                 AtomicFile.Write(path, File.ReadAllText(path) + record.ToCsv() + Environment.NewLine);
                 _closed.Add(record.PositionId, record);
+                _closedRows.Add(record.PositionId, record.ToCsv());
                 _recent.Add(record);
                 if (_recent.Count > 500) _recent.RemoveAt(0);
             }

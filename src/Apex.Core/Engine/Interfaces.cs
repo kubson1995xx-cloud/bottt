@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Apex.Core.Indicators;
 using Apex.Core.Management;
 using Apex.Core.Model;
@@ -34,6 +35,9 @@ namespace Apex.Core.Engine
         public long AccountNumber { get; init; }
         public string Generation { get; init; } = "";
         public bool Complete { get; init; }
+        /// <summary>Same-generation resynchronization after an own-position mutation, bounded
+        /// by the last accepted snapshot's original freshness. Blocks new risk without STOP latch.</summary>
+        public bool Synchronizing { get; init; }
         public bool RequiredCoverage { get; init; }
         public string Scope { get; init; } = "available-history-v1";
         public IReadOnlyList<PositionInfo>? Positions { get; init; }
@@ -46,6 +50,17 @@ namespace Apex.Core.Engine
     {
         bool IsHealthy => true;
         IReadOnlyList<TradeRecord> ClosedRecords { get; }
+        /// <summary>Preflight every existing row before filling missing authority rows. A suspect
+        /// projection must remain untouched, even if a missing row occurs before a conflict.</summary>
+        void Reconcile(IReadOnlyList<TradeRecord> authority)
+        {
+            if (!IsHealthy) throw new InvalidOperationException("journal recovery blocked");
+            var expected = authority.ToDictionary(x => x.PositionId);
+            foreach (var prior in ClosedRecords)
+                if (!expected.TryGetValue(prior.PositionId, out var record) || prior.ToCsv() != record.ToCsv())
+                    throw new InvalidOperationException("conflicting closed projection");
+            foreach (var record in authority) TradeClosed(record);
+        }
     }
 
     /// <summary>Dane rynkowe: specyfikacje, ceny, godziny handlu.</summary>

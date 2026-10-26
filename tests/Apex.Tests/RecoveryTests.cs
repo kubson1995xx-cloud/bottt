@@ -257,7 +257,7 @@ public sealed class RecoveryTests
         var broker = new HistoryBroker { Now = Now };
         broker.Positions.Add(Open()); var store = new MemoryStore(); var engine = Engine(broker, store, new NullJournal());
         broker.History.Add(HistoryIntegrationTests.Deal(deal: 1).ToInfo());
-        broker.Positions.Clear(); broker.Positions.Add(new PositionInfo { Id = 42, Label = "APEX", Symbol = "US500", VolumeUnits = 1, EntryPrice = 4000, StopLoss = 3990, TakeProfit = 4020 });
+        broker.Positions.Clear(); broker.Positions.Add(new PositionInfo { Id = 42, Label = "APEX", Symbol = "US500", Direction = TradeDirection.Long, VolumeUnits = 1, EntryPrice = 4000, EntryTimeUtc = Now.AddHours(-2), StopLoss = 3990, TakeProfit = 4020 });
         engine.OnTimer(Now.AddSeconds(2));
         Assert.Equal(7.5, engine.GetStatus(Now).RealizedTotal); Assert.Empty(engine.RecentTrades); Assert.Single(engine.Plans);
         engine.SaveState(Now, true); var restarted = Engine(broker, store, new NullJournal());

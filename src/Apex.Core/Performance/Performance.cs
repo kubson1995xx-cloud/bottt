@@ -37,6 +37,11 @@ namespace Apex.Core.Performance
         public string Parameters { get; set; } = "";
         public int BarsHeld { get; set; }
 
+        // Unknown R is intentional; monetary amounts, prices and volumes never use that sentinel.
+        public bool HasFiniteEconomics() => new[] { EntryPrice, ExitPrice, Volume, InitialRiskMoney,
+            GrossProfit, Commission, Swap, NetProfit, Score }.All(double.IsFinite)
+            && Volume >= 0 && InitialRiskMoney >= 0;
+
         public static string CsvHeader =>
             "position_id;signal_id;symbol;asset_class;strategy;variant;timeframe;direction;entry_time_utc;exit_time_utc;entry_price;exit_price;" +
             "volume;initial_risk;gross_profit;commission;swap;net_profit;r_multiple;bars_held;score;regime;entry_reason;exit_reason;parameters";
