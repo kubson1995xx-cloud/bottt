@@ -112,6 +112,54 @@ public class DataCliTests : IDisposable
         Assert.Equal(47,loader.Load("EURUSD").H1.Count);
         Assert.Single(Assert.Single(loader.Evidence).SessionGaps);
     }
+    [Fact] public void JanuaryHolidayTrailingDeclarationLoadsWithoutInventedCandlesAndReportsEffectiveEnd()
+    {
+        var origin = new DateTime(2023,12,28,0,0,0,DateTimeKind.Utc);
+        var close = origin.AddHours(46); // Friday Dec29 22:00, not the Jan1 logical cutoff
+        Csv(string.Concat(Enumerable.Range(0,46).Select(i => $"{origin.AddHours(i):yyyy-MM-dd HH:mm},1,1.1,0.9,1,1\n")) +
+            "2024-01-02 00:00,9,9.1,8.9,9,1\n"); // future price must never become executable
+        string manifest = Manifest("MID", new object[] { new { from=close, to=new DateTime(2024,1,2,0,0,0,DateTimeKind.Utc), reason="deterministic New Year closure fixture, not a market-calendar claim" } });
+        var cutoff = new DateTime(2024,1,1,0,0,0,DateTimeKind.Utc);
+        var loader = new DataLoader(dir,manifest,origin,origin.AddDays(1),cutoff,TimeSpan.FromHours(2));
+        Assert.Equal(46, loader.Load("EURUSD").H1.Count);
+        Assert.Equal(close, Assert.Single(loader.Evidence).EndExclusive);
+        Assert.Single(Assert.Single(loader.Evidence).SessionGaps);
+        Assert.Equal(0, Program.Main(new[] { "smoke", "--data",dir,"--manifest",manifest,"--out",Path.Combine(dir,"holiday"),
+            "--warmup-from","2023-12-28","--from","2023-12-29","--to","2024-01-01" }));
+        using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir,"holiday","run.json")));
+        Assert.Equal(cutoff, report.RootElement.GetProperty("config").GetProperty("to").GetDateTime());
+        Assert.Equal(close, report.RootElement.GetProperty("result").GetProperty("effectiveEndUtc").GetDateTime());
+    }
+    [Fact] public void JanuaryHolidayWithoutTrailingDeclarationStillFails()
+    {
+        var origin = new DateTime(2023,12,28,0,0,0,DateTimeKind.Utc);
+        Csv(string.Concat(Enumerable.Range(0,46).Select(i => $"{origin.AddHours(i):yyyy-MM-dd HH:mm},1,1.1,0.9,1,1\n")) + "2024-01-02 00:00,9,9.1,8.9,9,1\n");
+        var loader = new DataLoader(dir,Manifest("MID"),origin,origin.AddDays(1),new DateTime(2024,1,1,0,0,0,DateTimeKind.Utc),TimeSpan.FromHours(2));
+        Assert.Throws<InvalidDataException>(() => loader.Load("EURUSD"));
+    }
+    [Theory] [InlineData(true)] [InlineData(false)]
+    public void LeadingClippedHolidayRequiresExactDeclaration(bool declared)
+    {
+        var first = new DateTime(2024,1,2,0,0,0,DateTimeKind.Utc);
+        Csv("2023-12-29 21:00,1,1.1,0.9,1,1\n" + string.Concat(Enumerable.Range(0,48).Select(i => $"{first.AddHours(i):yyyy-MM-dd HH:mm},1,1.1,0.9,1,1\n")));
+        var gaps = declared ? new object[] { new { from=new DateTime(2023,12,29,22,0,0,DateTimeKind.Utc),to=first,reason="deterministic closure fixture" } } : null;
+        var loader = new DataLoader(dir,Manifest("MID",gaps),first.AddDays(-1),first.AddDays(1),first.AddDays(2),TimeSpan.FromHours(2));
+        if (!declared) { Assert.Throws<InvalidDataException>(() => loader.Load("EURUSD")); return; }
+        Assert.Equal(48, loader.Load("EURUSD").H1.Count);
+        Assert.Equal(first, Assert.Single(loader.Evidence).First);
+        Assert.Single(Assert.Single(loader.Evidence).SessionGaps);
+    }
+    [Fact] public void OverbroadEdgeDeclarationCannotCoverCandlesOrUndeclaredMissingHours()
+    {
+        var origin = new DateTime(2023,12,28,0,0,0,DateTimeKind.Utc);
+        Csv(string.Concat(Enumerable.Range(0,46).Select(i => $"{origin.AddHours(i):yyyy-MM-dd HH:mm},1,1.1,0.9,1,1\n")) + "2024-01-02 00:00,1,1.1,0.9,1,1\n");
+        foreach (int hour in new[] {45,47})
+        {
+            string manifest = Manifest("MID", new object[] { new { from=origin.AddHours(hour),to=new DateTime(2024,1,3,0,0,0,DateTimeKind.Utc),reason="invalid declaration" } });
+            var loader = new DataLoader(dir,manifest,origin,origin.AddDays(1),new DateTime(2024,1,1,0,0,0,DateTimeKind.Utc),TimeSpan.FromHours(2));
+            Assert.Throws<InvalidDataException>(() => loader.Load("EURUSD"));
+        }
+    }
     [Fact] public void FxCoverageIsCheckedEvenWhenProfileCannotTrade()
     {
         var d=new InstrumentDef { Symbol="TEST", QuoteCcy="EUR", PipSize=1 };

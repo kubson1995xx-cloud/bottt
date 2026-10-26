@@ -53,6 +53,8 @@ namespace Apex.Backtester.Data
         public string Conversion { get; init; } = "";
         public DateTime First { get; init; }
         public DateTime EndExclusive { get; init; }
+        public DateTime RequestedFrom { get; init; }
+        public DateTime RequestedTo { get; init; }
         public int Bars { get; init; }
         public int WarmupBars { get; init; }
         public List<SessionGap> SessionGaps { get; init; } = new();
@@ -88,22 +90,37 @@ namespace Apex.Backtester.Data
             string hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             if (!hash.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException($"Hash mismatch: {name}");
             using var reader = new StringReader(System.Text.Encoding.UTF8.GetString(bytes).TrimStart('\ufeff'));
-            var raw = BarCsv.Load(reader, name, symbol, tf, _warmup, _to);
-            if (raw.Count == 0 || raw.Times[0] > _warmup || raw.LastCloseTime < _to)
-                throw new InvalidDataException($"{name}: insufficient range; require [{_warmup:o},{_to:o}) including warmup");
+            // Inspect full timestamps to anchor declarations on both sides of a clipped calendar edge.
+            // Out-of-range prices are never returned to the simulator.
+            var all = BarCsv.Load(reader, name, symbol, tf);
+            var raw = BarSeries.FromBars(symbol, tf, Enumerable.Range(0, all.Count)
+                .Where(i => all.Times[i] >= _warmup && all.Times[i] < _to).Select(i => all[i]).ToList());
+            if (raw.Count == 0)
+                throw new InvalidDataException($"{name}: no candles in [{_warmup:o},{_to:o}) including warmup");
             var gaps = new List<SessionGap>();
-            for (int i = 1; i < raw.Count; i++)
+            void RequireGap(DateTime start, DateTime end)
             {
-                var start = raw.Times[i - 1] + tf.Duration();
-                if (raw.Times[i] == start) continue;
-                var declared = entry.SessionGaps.SingleOrDefault(g => g.From == start && g.To == raw.Times[i]);
-                if (declared == null) throw new InvalidDataException($"{name}: missing intervals [{start:o},{raw.Times[i]:o}); not a declared session gap");
-                gaps.Add(declared);
+                if (start >= end) return;
+                var matches = entry.SessionGaps.Where(g =>
+                    (g.From < _warmup ? _warmup : g.From) == start && (g.To > _to ? _to : g.To) == end).ToList();
+                if (matches.Count != 1) throw new InvalidDataException($"{name}: missing intervals [{start:o},{end:o}); require one exact declared session gap");
+                var gap = matches[0];
+                int next = Array.BinarySearch(all.Times, gap.From);
+                if (next >= 0) throw new InvalidDataException($"{name}: session declaration overlaps a candle");
+                next = ~next;
+                if (gap.From.Ticks % tf.Duration().Ticks != 0 || gap.To.Ticks % tf.Duration().Ticks != 0 ||
+                    (next > 0 && all.Times[next - 1] + tf.Duration() != gap.From) ||
+                    (next < all.Count && all.Times[next] != gap.To))
+                    throw new InvalidDataException($"{name}: session declaration must match actual adjacent candle endpoints");
+                gaps.Add(gap);
             }
+            RequireGap(_warmup, raw.Times[0]);
+            for (int i = 1; i < raw.Count; i++) RequireGap(raw.Times[i - 1] + tf.Duration(), raw.Times[i]);
+            RequireGap(raw.LastCloseTime, _to);
             Evidence.RemoveAll(e => e.File == name);
             Evidence.Add(new DataEvidence { File = name, Sha256 = hash, QuoteBasis = entry.QuoteBasis,
                 Conversion = entry.QuoteBasis == "MID" ? "none" : "modeled MID = source " + (entry.QuoteBasis == "BID" ? "+" : "-") + " base catalog spread/2 (rollover x3); not observed MID",
-                First = raw.Times[0], EndExclusive = raw.LastCloseTime, Bars = raw.Count,
+                First = raw.Times[0], EndExclusive = raw.LastCloseTime, RequestedFrom = _warmup, RequestedTo = _to, Bars = raw.Count,
                 WarmupBars = raw.Times.Count(t => t < _from), SessionGaps = gaps });
             var d = Catalog.Get(symbol);
             var normalized = new List<Bar>(raw.Count);

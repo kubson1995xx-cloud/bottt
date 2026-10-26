@@ -32,6 +32,9 @@ namespace Apex.Backtester.Sim
         public double MaxEquityDrawdownPct { get; set; }
         public List<string> Events { get; } = new();
         public int Cycles { get; set; }
+        public DateTime EffectiveStartUtc { get; set; }
+        public DateTime LastExecutableOpenUtc { get; set; }
+        public DateTime EffectiveEndUtc { get; set; }
         public HashSet<long> BoundaryPositionIds { get; } = new();
     }
 
@@ -84,6 +87,8 @@ namespace Apex.Backtester.Sim
                 foreach (var t in s.H1.Times)
                     if (t >= spec.From && t < spec.To) times.Add(t);
             if (times.Count == 0) throw new InvalidOperationException("No evaluation bars in requested range");
+            result.EffectiveStartUtc = times.Min;
+            result.LastExecutableOpenUtc = times.Max;
 
             world.SetTime(times.Min);
             engine.Initialize(times.Min);
@@ -111,6 +116,7 @@ namespace Apex.Backtester.Sim
             }
             // Complete the final evaluation candle, but never process prices after the exclusive cutoff.
             var end = prev.AddHours(1) < spec.To ? prev.AddHours(1) : spec.To;
+            result.EffectiveEndUtc = end;
             world.ProcessIntrabar(prev, end);
             world.SetTime(end);
             world.ApplyFinancing(end);

@@ -68,6 +68,7 @@ namespace Apex.Backtester
                     var r = BacktestRunner.Run(new RunSpec { Symbols = symbols.Select(loader.Load).ToList(), Profile = profile,
                         ConfigFactory = ResearchPipeline.IsolatedConfig, From = from, To = to, StartEquity = 1000000, Fx = loader.Fx, Cost = cost });
                     result = new { cycles = r.Cycles, trades = r.Trades.Count, r.StartEquity, r.EndEquity, r.MaxEquityDrawdownPct,
+                        r.EffectiveStartUtc, r.LastExecutableOpenUtc, r.EffectiveEndUtc,
                         gross = r.Trades.Sum(t => t.GrossProfit), commission = r.Trades.Sum(t => t.Commission), swap = r.Trades.Sum(t => t.Swap),
                         net = r.Trades.Sum(t => t.NetProfit), boundaryLiquidations = r.BoundaryPositionIds.Count, events = r.Events,
                         warmup = "features only before from; no orders/account/risk state carried from warmup; insufficient indicators may yield zero signals" };

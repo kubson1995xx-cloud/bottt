@@ -42,6 +42,29 @@ public class RunnerIsolationTests
         Assert.NotEmpty(r.BoundaryPositionIds);
         Assert.Equal(Origin.AddDays(301), r.Trades.Last().ExitTimeUtc);
     }
+    [Fact] public void ClosedSessionCutoffLiquidatesAtLastCloseUsingOnlyFxKnownThen()
+    {
+        var end = Origin.AddDays(301);
+        BacktestResult ClosedRun(double futureFx)
+        {
+            var bars = History(false).Where(b => b.OpenTime < end || b.OpenTime >= Origin.AddDays(310)).ToList();
+            var data = new SymbolData(Catalog.Get("GER40"),BarSeries.FromBars("GER40",Tf.H1,bars),null);
+            var fx = new FxRates(TimeSpan.FromHours(2));
+            fx.Add("EURUSD",BarSeries.FromBars("EURUSD",Tf.H1,bars.Select(b => new Bar(b.OpenTime,
+                b.OpenTime < end ? 1.25 : futureFx,b.OpenTime < end ? 1.25 : futureFx,
+                b.OpenTime < end ? 1.25 : futureFx,b.OpenTime < end ? 1.25 : futureFx)).ToList()));
+            return BacktestRunner.Run(new RunSpec { Symbols=new() {data},From=Origin.AddDays(300),To=Origin.AddDays(307),Fx=fx,
+                Profile=new StrategyProfile { Entries=new() {new ProfileEntry {AssetClass=AssetClass.Index,Strategy=StrategyId.IndexDipBuy}} },
+                ConfigFactory=ResearchPipeline.IsolatedConfig,StartEquity=1000000 });
+        }
+        var first=ClosedRun(2); var hostile=ClosedRun(99);
+        var boundary=Assert.Single(first.Trades, t => first.BoundaryPositionIds.Contains(t.PositionId));
+        Assert.Equal(end,boundary.ExitTimeUtc);
+        Assert.Equal(first.EndEquity,hostile.EndEquity,8);
+        var report=System.Text.Json.JsonSerializer.SerializeToElement(first,DataManifest.JsonOptions);
+        Assert.Equal(end,report.GetProperty("effectiveEndUtc").GetDateTime());
+        Assert.Equal(end.AddHours(-1),report.GetProperty("lastExecutableOpenUtc").GetDateTime());
+    }
     [Fact] public void ActualRunnerUsesTrustedEngineAndLaterFoldCannotMutateEarlierResult()
     {
         var first = Run(History(false),300,307);
