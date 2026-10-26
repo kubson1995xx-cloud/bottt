@@ -45,7 +45,7 @@ public sealed partial class HistoryIntegrationTests
         s.Handle(BridgeProtocol.Serialize(first)); Assert.False(s.History.Complete);
         s.Handle(BridgeProtocol.Serialize(last)); Assert.True(s.History.Complete); Assert.Equal(2, s.History.Closed.Count);
         string old = s.HistoryRequestId; await s.RequestHistoryAsync("APEX");
-        s.Handle(BridgeProtocol.Serialize(last)); Assert.False(s.History.Complete);
+        s.Handle(BridgeProtocol.Serialize(last)); Assert.True(s.History.Complete); // old request ignored; accepted snapshot remains fresh
         var nextFirst = Page(s, 0); var nextLast = Page(s, 1); nextLast.CapturedAt = nextFirst.CapturedAt;
         s.Handle(BridgeProtocol.Serialize(nextFirst)); s.Handle(BridgeProtocol.Serialize(nextLast));
         Assert.True(s.History.Complete); Assert.NotEqual(old, s.HistoryRequestId);

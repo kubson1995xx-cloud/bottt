@@ -59,7 +59,25 @@ namespace Apex.Desktop.Bridge
         private string _historyLabel = "";
         private long _positionsRevision;
         private long _historyRevision;
-        public BrokerHistorySnapshot History { get { lock (_lock) return IsAlive && DateTime.UtcNow - _historyReceived < TimeSpan.FromSeconds(30) ? _history : new(); } }
+        private long _acceptedRevision;
+        private DateTime _historyCaptured;
+        public BrokerHistorySnapshot History
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    if (!IsAlive || _historyFailed || !_history.Complete || DateTime.UtcNow - _historyReceived >= TimeSpan.FromSeconds(30)
+                        || DateTime.UtcNow - _historyCaptured >= TimeSpan.FromSeconds(30)) return new();
+                    if (_acceptedRevision != _positionsRevision)
+                        return new() { AccountNumber = _history.AccountNumber, Generation = Id, Synchronizing = true };
+                    return _history;
+                }
+            }
+        }
+        private IEnumerable<(long, string, string, double, double, long, double?, double?, string, string)> OwnState(IEnumerable<PositionDto> positions) =>
+            positions.Where(x => x.Label == _historyLabel).OrderBy(x => x.Id)
+                .Select(x => (x.Id, x.Symbol, x.Side, x.Units, x.Entry, x.EntryTime, x.Sl, x.Tp, x.Label, x.Comment));
         public bool HistoryCapable { get; private set; }
         public Task RequestHistoryAsync(string label)
         {
@@ -67,8 +85,9 @@ namespace Apex.Desktop.Bridge
             {
                 HistoryRequestId = Guid.NewGuid().ToString("N");
                 _historyLabel = label;
-                _history = new(); _historyRows.Clear(); _historyPages.Clear(); _historyFirst = null; _historyFailed = false;
+                _historyRows.Clear(); _historyPages.Clear(); _historyFirst = null; _historyFailed = false;
                 _historyStarted = DateTime.UtcNow;
+                _historyRevision = _positionsRevision; // fence before capture/page 0, not on its receipt
             }
             return SendAsync(new HistoryRequest { RequestId = HistoryRequestId, Label = label });
         }
@@ -93,20 +112,20 @@ namespace Apex.Desktop.Bridge
                     || m.Deals == null || m.Deals.Count > 500 || m.CapturedAt <= 0
                     || Math.Abs((DateTime.UtcNow - BridgeProtocol.FromUnixMs(m.CapturedAt)).TotalSeconds) > 30)
                 { Fail(); return; }
-                if (_historyFirst == null) { _historyFirst = m; _historyRevision = _positionsRevision; }
+                if (_historyFirst == null) _historyFirst = m;
                 var first = _historyFirst;
                 if (m.Total != first.Total || m.Pages != first.Pages || m.Scope != first.Scope || m.Coverage != first.Coverage || m.CapturedAt != first.CapturedAt)
                 { Fail(); return; }
                 _historyPages.Add(m.Page, json); _historyRows.AddRange(m.Deals);
                 if (_historyRows.Count > m.Total) { Fail(); return; }
                 if (m.Page != m.Pages - 1) return;
-                if (_historyRevision != _positionsRevision || _historyRows.Count != m.Total || m.Account == null || m.Positions == null || _account == null
+                if (_historyRows.Count != m.Total || m.Account == null || m.Positions == null || _account == null
                     || m.Account.Number != _account.Number || m.Account.Broker != _account.Broker || m.Account.Currency != _account.Currency
                     || m.Account.IsLive != _account.IsLive || m.Account.Hedging != _account.Hedging
                     || m.Positions.Select(x => x.Id).Distinct().Count() != m.Positions.Count)
                 { Fail(); return; }
-                _positions = m.Positions; _positionsReceivedUtc = DateTime.UtcNow;
-                _account = CloneAccount(m.Account); _accountReceivedUtc = DateTime.UtcNow;
+                if (_historyRevision != _positionsRevision || !OwnState(m.Positions).SequenceEqual(OwnState(_positions)))
+                { _historyStarted = DateTime.MinValue; return; } // expected race: retry, never republish frozen live state
                 _history = new BrokerHistorySnapshot
                 {
                     AccountNumber = m.Account.Number, Generation = Id, Complete = true, Scope = m.Scope,
@@ -117,6 +136,8 @@ namespace Apex.Desktop.Bridge
                     Closed = _historyRows.Select(x => x.ToInfo()).ToArray(),
                 };
                 _historyReceived = DateTime.UtcNow;
+                _historyCaptured = BridgeProtocol.FromUnixMs(m.CapturedAt);
+                _acceptedRevision = _positionsRevision;
                 completed = _history;
             }
             HistoryCompleted?.Invoke(this, completed);
@@ -292,9 +313,8 @@ namespace Apex.Desktop.Bridge
                         if (m.Items == null) return;
                         lock (_lock)
                         {
-                            if (!_positions.Where(x => x.Label == _historyLabel).Select(x => (x.Id, x.Units)).OrderBy(x => x.Id)
-                                .SequenceEqual(m.Items.Where(x => x.Label == _historyLabel).Select(x => (x.Id, x.Units)).OrderBy(x => x.Id)))
-                            { _positionsRevision++; _history = new(); _historyStarted = DateTime.MinValue; }
+                            if (!OwnState(_positions).SequenceEqual(OwnState(m.Items)))
+                            { _positionsRevision++; _historyStarted = DateTime.MinValue; }
                             _positions = m.Items; _positionsReceivedUtc = DateTime.UtcNow;
                         }
                         break;
@@ -302,7 +322,7 @@ namespace Apex.Desktop.Bridge
                 case "closed":
                     {
                         var m = BridgeProtocol.Deserialize<ClosedMsg>(json);
-                        lock (_lock) { _positionsRevision++; _history = new(); _historyStarted = DateTime.MinValue; }
+                        lock (_lock) { _positionsRevision++; _historyStarted = DateTime.MinValue; }
                         if (m?.Position != null) PositionClosed?.Invoke(this, m.Position);
                         break;
                     }
@@ -369,9 +389,18 @@ namespace Apex.Desktop.Bridge
         public (bool sent, string? response) Request<T>(T msg, string id, TimeSpan timeout) =>
             RequestAsync(msg, id, timeout).GetAwaiter().GetResult();
 
-        private async Task<(bool sent, string? response)> RequestAsync<T>(T msg, string id, TimeSpan timeout)
+        // Wyłącznie redukcja: ponowna autoryzacja konkretnego ID po oczekiwaniu na transport.
+        public (bool sent, string? response) RequestOwnedFullClose(long positionId, string label, Func<bool> authorized, TimeSpan timeout)
         {
-            if (!HasFreshSnapshots || Account?.IsLive != false) return (false, null);
+            string id = NextId();
+            bool Own() { if (positionId <= 0 || !authorized()) return false;
+                lock (_lock) return _positions.Any(p => p.Id == positionId && string.Equals(p.Label, label, StringComparison.Ordinal)); }
+            return RequestAsync(new CloseCmd { Id = id, PositionId = positionId, Units = null }, id, timeout, Own).GetAwaiter().GetResult();
+        }
+
+        private async Task<(bool sent, string? response)> RequestAsync<T>(T msg, string id, TimeSpan timeout, Func<bool>? authorized = null)
+        {
+            if (!HasFreshSnapshots || Account?.IsLive != false || authorized?.Invoke() == false) return (false, null);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             deadline.CancelAfter(timeout);
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -382,7 +411,7 @@ namespace Apex.Desktop.Bridge
                 await _sendLock.WaitAsync(deadline.Token).ConfigureAwait(false);
                 acquired = true;
                 deadline.Token.ThrowIfCancellationRequested();
-                if (!HasFreshSnapshots || Account?.IsLive != false) return (false, null);
+                if (!HasFreshSnapshots || Account?.IsLive != false || authorized?.Invoke() == false) return (false, null);
                 started = true;
                 await _transport.SendAsync(BridgeProtocol.Serialize(msg), deadline.Token).WaitAsync(deadline.Token).ConfigureAwait(false);
                 _sendLock.Release();

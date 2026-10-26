@@ -250,12 +250,17 @@ namespace Apex.Desktop.Runtime
             {
                 _emergencyLatched = true;
                 string? error = null;
-                try { _store.Set("desktop-control", "{\"EmergencyStopped\":true}"); }
+                try
+                {
+                    if (_storageFault || _store.HasFault) throw new IOException("Oryginalny stan wymaga uzgodnienia; bez nadpisywania danych.");
+                    _store.Set("desktop-control", "{\"EmergencyStopped\":true}");
+                }
                 catch (Exception ex) { _storageFault = true; error = ex.Message; }
                 var result = e?.CmdEmergencyStop(DateTime.UtcNow, "przycisk AWARYJNY STOP w panelu")
-                    ?? "AWARYJNE ZATRZYMANIE zapisane – oczekiwanie na silnik.";
-                return error == null ? result : "Błąd trwałego zapisu Emergency Stop: " + error;
+                    ?? CloseWithoutEngine();
+                return error == null ? result : "Błąd trwałego zapisu Emergency Stop: " + error + ". " + result;
             }
+            if (action == "closeAll" && e == null) return CloseWithoutEngine();
             if (action == "stop" && e == null) return "Bot zatrzymany – silnik nie jest gotowy.";
             if (e == null) return "Silnik konta nie jest jeszcze gotowy (czekam na dane z mostu).";
             e.SetGuard(EvaluateGuard());
@@ -345,6 +350,23 @@ namespace Apex.Desktop.Runtime
                 default:
                     return "Nieznane polecenie.";
             }
+        }
+
+        private string CloseWithoutEngine()
+        {
+            var session = _adapter.Session;
+            bool Authorized() => !_stop && session != null && ReferenceEquals(_adapter.Session, session)
+                && _identity != null && session.Account is { IsLive: false } a && MatchesIdentity(a)
+                && session.HasFreshSnapshots && EvaluateGuard().Allowed;
+            if (!Authorized()) return "Pełne zamknięcie zablokowane: brak świeżej, stałej tożsamości DEMO.";
+            int sent = 0;
+            foreach (var p in session!.Positions.Where(p => p.Id > 0 && string.Equals(p.Label, _config.Config.Label, StringComparison.Ordinal)))
+            {
+                var result = session.RequestOwnedFullClose(p.Id, _config.Config.Label, Authorized, _adapter.OrderTimeout);
+                if (result.sent) sent++;
+            }
+            // Nie odtwarzamy stanu z uszkodzonych danych, nie certyfikujemy historii ani trwałego intentu.
+            return $"Awaryjna redukcja bez silnika: wysłano {sent} pełnych zamknięć; wyniki wymagają uzgodnienia historii.";
         }
 
         private static bool TryNum(JsonElement args, string name, out double v)

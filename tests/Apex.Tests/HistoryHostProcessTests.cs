@@ -65,6 +65,10 @@ public sealed partial class HistoryIntegrationTests
                     var request = await Receive("historyRequest");
                     await Send(new SymbolsMsg()); await Send(new PositionsMsg { Items = new() { own, foreign } });
                     await Snapshot(request.GetProperty("requestId").GetString()!, final: false);
+                    // Initial request predates the first live positions frame: its capture is fenced.
+                    // Respond to the actual retry, rather than relying on frozen history to publish live state.
+                    request = await Receive("historyRequest");
+                    await Snapshot(request.GetProperty("requestId").GetString()!, final: false);
                     var status = await WaitStatus(a => a.GetProperty("engine").GetProperty("realizedTotal").GetDouble() == 7.5, 15);
                     Assert.Equal(0, status.GetProperty("engine").GetProperty("tradesTotal").GetInt32());
                     Assert.False(status.GetProperty("engine").GetProperty("historyReady").GetBoolean());

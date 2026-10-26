@@ -1,5 +1,12 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Autonomia Task1 — fix round1, host po review (lokalnie)
+
+- Findings 3/4/5: publiczne closeAll/Emergency mają awaryjną ścieżkę bez silnika przy startup corrupt/readfault. Wysyła wyłącznie pełne close konkretnego własnego ID, po świeżej/stabilnej tożsamości DEMO i ponownej autoryzacji po oczekiwaniu na transport; REAL/stale/switch/foreign blokowane. Nie nadpisuje także uszkodzonego `desktop-control`; pamięciowy Emergency nie jest gwarancją trwałego intentu przy awarii dysku.
+- Rutynowy refresh składa nowe strony oddzielnie, nie resetuje świeżej zaakceptowanej historii ani nie wydłuża jej ważności. Zmiana własnej pozycji chwilowo blokuje nowe ryzyko bez utraty Running; disconnect/protocol error/wygaśnięcie nadal wymagają START. Rewizja jest pobrana przed page0 i obejmuje ownset, tożsamość, wolumen, SL/TP; frozen history nie publikuje starych pozycji/konta ani ich nowych timestampów. Autoryzacja receipt-time kolejki przez reconnect zachowana.
+- Commit księgowania: `556e86bc4667a54ed24e2efd45f2a3752b861534`. Końcowe bramki łącznych bajtów obu commitów: **358/358 Core/Desktop**, **79/79 cTrader**, **11/11 panel**, npm check PASS, pełne DEMO solution i oba SDK `.algo` **0 ostrzeżeń/błędów**. `task1-fix1/final-{core,platform}.{log,trx}`, `final-build.log`, `final-npm-{test,check}.log`, parsowane `verified-test-summary.json`. Wykonano też realny host-process smoke z lokalnym WebSocket, bez brokera.
+- Status: **findings 2–8 naprawione w lokalnych regresjach, niezależny rereview rodzica oczekiwany; finding 1 OTWARTY, Task1 NIE zaakceptowany**. Realny cTrader nadal CoverageUnknown/STOP. Brak handlu/push/agentów potomnych; domyślne limity i REAL block bez zmian. Spec rodzica nietknięty. Raport `.superpowers/sdd/2026-10-26-apex-autonomy/task-1-fix1-report.md` i append oryginalnego raportu.
+
 ## Autonomia Task1 — fix round1, księgowanie po review (lokalnie)
 
 - Findings 2/6/7/8: CSV porównuje opublikowany wiersz bez ponownego wyliczania zaokrąglonego R; restart uzgadnia projekcję z pełną authority także przy pustym outbox. Preflight konfliktów przed dopisaniem braków; podejrzane CSV/nagłówki pozostają nietknięte. Testy obejmują utratę/rollback, crash podczas odbudowy i ułamkowe risk1.004/net0.504.
