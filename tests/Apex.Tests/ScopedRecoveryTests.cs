@@ -55,6 +55,14 @@ public sealed class ScopedRecoveryTests
         f.Tick = TimeSpan.FromSeconds(30); f.Engine.OnTimer(Now.AddSeconds(30)); Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now.AddSeconds(30)));
     }
 
+    [Fact]
+    public void ProposedScopeGuidesReadOnlyRePairInsteadOfClaimingRuntimeIsMissing()
+    {
+        var f = new Fixture(); Assert.True(f.Engine.ReserveBaseline(f.Proposal, Now));
+        Assert.Contains("Proposed", f.Engine.ScopedMessage); Assert.Contains(f.Proposal.Identity.Label, f.Engine.ScopedMessage);
+        Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));
+    }
+
     static readonly DateTime Now = RecoveryTests.Now;
     static readonly JsonSerializerOptions Json = new() { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
     sealed class Broker : FakeBroker

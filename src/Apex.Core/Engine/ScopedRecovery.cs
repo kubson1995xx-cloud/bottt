@@ -24,7 +24,7 @@ public sealed partial class TradingEngine
     internal long LastScopedObservationSequence => _state.OpenAdmissions.Select(x => x.LastObservationSequence).DefaultIfEmpty(-1).Max();
     public ScopedRecoveryStatus ScopedStatus { get; private set; }
     public IReadOnlyList<string> ScopedDeficits { get; private set; } = Array.Empty<string>();
-    public string ScopedMessage { get; private set; } = "Unestablished: runtime producer not integrated";
+    public string ScopedMessage { get; private set; } = "Unestablished: brak ustanowionego zakresu aplikacji; wymagany read-only setup";
     internal void InvalidateScopedRuntime(string reason)
     {
         _scopedPermit = null; _lastScopedReceipt = null; HistoryReady = false;
@@ -98,7 +98,13 @@ public sealed partial class TradingEngine
             || _plans.Count != 0 || _ledger.Entries.Count != 0 || _pendingCloses.Count != 0 || _state.ClosingDeals.Count != 0
             || _state.OpenAdmissions.Count != 0 || _state.ClosedRecords.Count != 0 || _state.ClosedOutbox.Count != 0) return false;
         var next = ScopeCandidate(); next.Baseline = proposal; next.Label = proposal.Identity.Label;
-        return CommitScope(next, utc) && ScopedProjectionHealthy;
+        bool reserved = CommitScope(next, utc) && ScopedProjectionHealthy;
+        if (reserved)
+        {
+            ScopedStatus = ScopedRecoveryStatus.AwaitingEvidence;
+            ScopedMessage = $"Proposed: zarezerwowano {proposal.Identity.Label}. Skopiuj dokładną etykietę do cBota i połącz ponownie; wymagany świeży zerowy inventory, bez automatycznej transakcji.";
+        }
+        return reserved;
     }
 
     private bool ReceiptValid(ScopedReceipt r, ScopedReceiptAuthority a, DateTime utc, bool current)
