@@ -153,7 +153,11 @@ namespace Apex.Desktop.Services
             lock (_lock)
             {
                 if (HasFault) throw new IOException("Dziennik wymaga uzgodnienia – oryginalne dane zachowane.");
-                if (_closed.ContainsKey(record.PositionId)) return;
+                if (_closed.TryGetValue(record.PositionId, out var prior))
+                {
+                    if (prior.ToCsv() != record.ToCsv()) throw new IOException("Konflikt projekcji zamkniętej pozycji: " + record.PositionId);
+                    return;
+                }
                 // Atomic publication avoids a torn CSV tail and a separate dedupe-index crash gap.
                 // This is append semantics, not retention/compaction: every accepted row is retained.
                 string path = Path.Combine(_dir, "transakcje.csv");

@@ -27,6 +27,19 @@ namespace Apex.Core.Engine
         public void OnPositionClosed(ClosedPositionInfo info)
         {
             if (!string.Equals(info.Label, _cfg.Label, StringComparison.Ordinal)) return;
+            // Preserve the existing offline backtester callback contract. Its simulator emits a
+            // terminal aggregate, has no durable history capability and never uses a real broker.
+            // Production bridge/native compositions implement IBrokerHistory and cannot enter here.
+            if (_cfg.IsBacktest && _broker is not IBrokerHistory)
+            {
+                if (!_state.AccountedPositions.Add(info.PositionId)) return;
+                var record = BuildClosedRecord(info); _journal.TradeClosed(record);
+                _state.RecentTrades.Add(record); _state.ClosedRecords.Add(record);
+                _state.RealizedTotal += info.NetProfit; _state.TradesTotal++;
+                _plans.Remove(info.PositionId); _pendingCloses.Remove(info.PositionId); _closeReasons.Remove(info.PositionId);
+                EvaluateHealth();
+                return;
+            }
             SynchronizeHistory(info.ExitTimeUtc);
         }
 
@@ -93,7 +106,7 @@ namespace Apex.Core.Engine
                     if (next.AccountedPositions.Contains(row.PositionId))
                         throw new InvalidOperationException("nowy deal dla uprzednio rozliczonej pozycji " + row.PositionId);
                     // Unknown broker coverage cannot import arbitrary pre-install history.
-                    if (!requiredCoverage && !_plans.ContainsKey(row.PositionId)) continue;
+                    if (!requiredCoverage && (!_plans.TryGetValue(row.PositionId, out var tracked) || tracked.Reconstructed)) continue;
                     known.Add(key, row); next.ClosingDeals.Add(row); next.RealizedTotal += row.NetProfit; changed = true;
                 }
                 var open = positions.ToDictionary(x => x.Id);
@@ -139,6 +152,7 @@ namespace Apex.Core.Engine
                     foreach (var id in _plans.Keys.Where(next.AccountedPositions.Contains).ToList())
                     { _plans.Remove(id); _pendingCloses.Remove(id); _closeReasons.Remove(id); }
                     _dirty = true;
+                    EvaluateHealth();
                 }
                 return ExportClosed(utc);
             }
@@ -150,6 +164,13 @@ namespace Apex.Core.Engine
             && a.Comment == b.Comment && a.Direction == b.Direction && a.Volume == b.Volume && a.EntryPrice == b.EntryPrice
             && a.ExitPrice == b.ExitPrice && a.EntryTimeUtc == b.EntryTimeUtc && a.ExitTimeUtc == b.ExitTimeUtc
             && a.GrossProfit == b.GrossProfit && a.Commission == b.Commission && a.Swap == b.Swap && a.NetProfit == b.NetProfit;
+
+        private void EvaluateHealth()
+        {
+            if (!_cfg.UseHealthMonitor) return;
+            foreach (var message in _health.Evaluate(_state.RecentTrades, _suspended))
+            { _log.Warn(message); _journal.Event(message); }
+        }
 
         private bool ExportClosed(DateTime utc)
         {

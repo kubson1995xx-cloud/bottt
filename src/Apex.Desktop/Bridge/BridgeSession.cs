@@ -57,6 +57,8 @@ namespace Apex.Desktop.Bridge
         private DateTime _historyStarted;
         private DateTime _historyReceived;
         private string _historyLabel = "";
+        private long _positionsRevision;
+        private long _historyRevision;
         public BrokerHistorySnapshot History { get { lock (_lock) return IsAlive && DateTime.UtcNow - _historyReceived < TimeSpan.FromSeconds(30) ? _history : new(); } }
         public bool HistoryCapable { get; private set; }
         public Task RequestHistoryAsync(string label)
@@ -91,14 +93,14 @@ namespace Apex.Desktop.Bridge
                     || m.Deals == null || m.Deals.Count > 500 || m.CapturedAt <= 0
                     || Math.Abs((DateTime.UtcNow - BridgeProtocol.FromUnixMs(m.CapturedAt)).TotalSeconds) > 30)
                 { Fail(); return; }
-                _historyFirst ??= m;
+                if (_historyFirst == null) { _historyFirst = m; _historyRevision = _positionsRevision; }
                 var first = _historyFirst;
                 if (m.Total != first.Total || m.Pages != first.Pages || m.Scope != first.Scope || m.Coverage != first.Coverage || m.CapturedAt != first.CapturedAt)
                 { Fail(); return; }
                 _historyPages.Add(m.Page, json); _historyRows.AddRange(m.Deals);
                 if (_historyRows.Count > m.Total) { Fail(); return; }
                 if (m.Page != m.Pages - 1) return;
-                if (_historyRows.Count != m.Total || m.Account == null || m.Positions == null || _account == null
+                if (_historyRevision != _positionsRevision || _historyRows.Count != m.Total || m.Account == null || m.Positions == null || _account == null
                     || m.Account.Number != _account.Number || m.Account.Broker != _account.Broker || m.Account.Currency != _account.Currency
                     || m.Account.IsLive != _account.IsLive || m.Account.Hedging != _account.Hedging
                     || m.Positions.Select(x => x.Id).Distinct().Count() != m.Positions.Count)
@@ -292,7 +294,7 @@ namespace Apex.Desktop.Bridge
                         {
                             if (!_positions.Where(x => x.Label == _historyLabel).Select(x => (x.Id, x.Units)).OrderBy(x => x.Id)
                                 .SequenceEqual(m.Items.Where(x => x.Label == _historyLabel).Select(x => (x.Id, x.Units)).OrderBy(x => x.Id)))
-                            { _history = new(); _historyStarted = DateTime.MinValue; }
+                            { _positionsRevision++; _history = new(); _historyStarted = DateTime.MinValue; }
                             _positions = m.Items; _positionsReceivedUtc = DateTime.UtcNow;
                         }
                         break;
@@ -300,7 +302,7 @@ namespace Apex.Desktop.Bridge
                 case "closed":
                     {
                         var m = BridgeProtocol.Deserialize<ClosedMsg>(json);
-                        lock (_lock) { _history = new(); _historyStarted = DateTime.MinValue; }
+                        lock (_lock) { _positionsRevision++; _history = new(); _historyStarted = DateTime.MinValue; }
                         if (m?.Position != null) PositionClosed?.Invoke(this, m.Position);
                         break;
                     }

@@ -7,7 +7,7 @@ using Apex.Desktop.Bridge;
 using Xunit;
 
 namespace Apex.Tests;
-public sealed class HistoryIntegrationTests
+public sealed partial class HistoryIntegrationTests
 {
     internal sealed class Transport : IBridgeTransport
     {
@@ -75,5 +75,15 @@ public sealed class HistoryIntegrationTests
         var s = Session("cTrader"); await s.RequestHistoryAsync("APEX");
         var page = Page(s, 0, 1, 1); s.Handle(BridgeProtocol.Serialize(page));
         Assert.True(s.History.Complete); Assert.False(s.History.RequiredCoverage);
+    }
+    [Fact]
+    public async Task PositionUpdateBetweenFrozenPagesCannotCertifyStaleSnapshot()
+    {
+        var s = Session(); await s.RequestHistoryAsync("APEX");
+        var first = Page(s, 0); var last = Page(s, 1); last.CapturedAt = first.CapturedAt;
+        s.Handle(BridgeProtocol.Serialize(first));
+        s.Handle(BridgeProtocol.Serialize(new PositionsMsg { Items = new() { new PositionDto { Id = 42, Units = 1, Label = "APEX" } } }));
+        s.Handle(BridgeProtocol.Serialize(last));
+        Assert.False(s.History.Complete); Assert.Equal(42, Assert.Single(s.Positions).Id);
     }
 }

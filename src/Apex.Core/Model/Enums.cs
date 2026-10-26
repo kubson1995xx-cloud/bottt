@@ -60,6 +60,7 @@ namespace Apex.Core.Model
     /// <summary>Identyfikatory strategii. Wartości tekstowe trafiają do komentarza zlecenia, więc są krótkie i stałe.</summary>
     public enum StrategyId
     {
+        Unknown = 0,
         TrendPullback = 1,
         DonchianBreakout = 2,
         MeanReversion = 3,

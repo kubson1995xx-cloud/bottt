@@ -36,4 +36,16 @@ public sealed class HistoryTests
         CTraderHistory.Capture(new[] { Deal(1), Deal(1, net: 999) }, "APEX"));
     [Fact]
     public void EmptyAvailableHistoryHasNoFabricatedPositionFallback() => Assert.Empty(CTraderHistory.Capture(Array.Empty<HistoricalTrade>(), "APEX"));
+    [Fact]
+    public void NativeEnvelopeRejectsTornTamperedAndWrongIdentityButReadsLegacy()
+    {
+        const string payload = "{\"SchemaVersion\":2,\"AccountNumber\":42}";
+        string encoded = RecoveryEnvelope.Encode("broker|42|USD|APEX", payload);
+        Assert.Equal(payload, RecoveryEnvelope.Decode("broker|42|USD|APEX", encoded));
+        Assert.ThrowsAny<Exception>(() => RecoveryEnvelope.Decode("other|42|USD|APEX", encoded));
+        Assert.ThrowsAny<Exception>(() => RecoveryEnvelope.Decode("broker|42|USD|APEX", encoded.Replace("AccountNumber", "AccountNumbex")));
+        Assert.ThrowsAny<Exception>(() => RecoveryEnvelope.Decode("broker|42|USD|APEX", encoded.Substring(0, encoded.Length - 4)));
+        const string legacy = "{\"SchemaVersion\":1,\"AccountNumber\":42}";
+        Assert.Equal(legacy, RecoveryEnvelope.Decode("broker|42|USD|APEX", legacy));
+    }
 }

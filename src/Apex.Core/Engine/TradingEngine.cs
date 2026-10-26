@@ -265,6 +265,8 @@ namespace Apex.Core.Engine
             catch (Exception ex) { BlockInvalidState(account, ex.Message); return; }
             if (json == null)
             {
+                if (_journal is IRecoveryJournal existing && existing.ClosedRecords.Count > 0)
+                { BlockInvalidState(account, "brak stanu księgowego przy istniejącym dzienniku – nieznany overlap legacy"); return; }
                 _state = new EngineState { AccountNumber = account };
                 return;
             }
@@ -286,8 +288,13 @@ namespace Apex.Core.Engine
                 if (st.SchemaVersion == 2)
                 {
                     using var document = JsonDocument.Parse(json!);
-                    if (!document.RootElement.TryGetProperty("ClosingDeals", out _) || !document.RootElement.TryGetProperty("AccountedPositions", out _)
+                    string[] required = { "SchemaVersion", "AccountNumber", "Broker", "Currency", "Label", "Mode", "Risk", "Ledger", "Plans", "PendingCloses",
+                        "ClosingDeals", "AccountedPositions", "ClosedRecords", "ClosedOutbox", "TradesTotal", "RealizedTotal" };
+                    if (required.Any(name => !document.RootElement.TryGetProperty(name, out _))
+                        || string.IsNullOrWhiteSpace(st.Broker) || string.IsNullOrWhiteSpace(st.Currency) || st.Label != _cfg.Label
                         || st.TradesTotal != st.AccountedPositions.Count || st.ClosedRecords.Count != st.TradesTotal
+                        || !st.AccountedPositions.SetEquals(st.ClosedRecords.Select(x => x.PositionId))
+                        || st.ClosedOutbox.Any(x => !st.AccountedPositions.Contains(x.PositionId))
                         || Math.Abs(st.RealizedTotal - st.ClosingDeals.Sum(x => x.NetProfit)) > 1e-7)
                         throw new JsonException("Niespójny autorytatywny stan księgowy.");
                 }
@@ -1328,13 +1335,15 @@ namespace Apex.Core.Engine
 
 
             var cls = _universeBySymbol.TryGetValue(info.Symbol, out var u) ? u.AssetClass : AssetClass.Unknown;
+            StrategyId recordedStrategy = plan?.Reconstructed == false ? plan.Strategy
+                : ExecutionLedger.TryParseComment(info.Comment, out var parsedStrategy, out _) ? parsedStrategy : StrategyId.Unknown;
             var rec = new TradeRecord
             {
                 PositionId = info.PositionId,
                 SignalId = plan?.SignalId ?? "",
                 Symbol = info.Symbol,
                 AssetClass = cls,
-                Strategy = plan?.Strategy ?? StrategyId.TrendPullback,
+                Strategy = recordedStrategy,
                 Variant = plan?.Variant ?? "",
                 TimeFrame = plan?.SignalTf ?? Tf.H1,
                 Direction = info.Direction,
@@ -1374,6 +1383,7 @@ namespace Apex.Core.Engine
         public string CmdStart()
         {
             if (!GuardAllowed) return "Nie można uruchomić: " + GuardMessage;
+            if (_initialized) SynchronizeHistory(_broker.GetAccount().TimeUtc);
             if (!_initialized || !HistoryReady || !_persistenceHealthy || !CanOperate(out _)) return "Nie można uruchomić: brak bezpiecznego konta/połączenia, historii lub trwałego zapisu. " + HistoryMessage;
             if (_state.Mode == EngineMode.EmergencyStopped) return "Najpierw zresetuj awaryjne zatrzymanie.";
             if (_risk.State.MaxDrawdownHit) return "Najpierw zresetuj blokadę maksymalnego obsunięcia.";
@@ -1490,6 +1500,7 @@ namespace Apex.Core.Engine
         {
             if (GuardIsLive) return "Test wykonania jest dostępny WYŁĄCZNIE na koncie DEMO.";
             if (!GuardAllowed) return "Test niedostępny: " + GuardMessage;
+            if (_initialized) SynchronizeHistory(utc);
             if (!_initialized || !HistoryReady || !_persistenceHealthy || !CanOperate(out var acc)) return "Test niedostępny: brak bezpiecznego konta/połączenia, historii lub zapisu.";
             _risk.Update(acc, utc);
             _dirty = true;

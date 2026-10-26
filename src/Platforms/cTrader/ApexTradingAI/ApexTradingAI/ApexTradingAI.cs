@@ -133,7 +133,7 @@ namespace cAlgo.Robots
             };
             var book = new StrategyBook(DefaultProfile.Load(), Account.IsLive);
             _adapter = new CTraderAdapter(this, _store, cfg.Label);
-            IKeyValueStore kv = IsBacktesting ? new MemoryStore() : new LocalStorageStore(this);
+            IKeyValueStore kv = IsBacktesting ? new MemoryStore() : new LocalStorageStore(this, cfg.Label);
             _engine = new TradingEngine(cfg, book, _adapter, _adapter, _store, kv, new PrintLog(this), new PrintJournal(this, cfg.Label), NewsFilter ? _news : null);
             _engine.SetGuard(_guard);
 
@@ -577,9 +577,16 @@ namespace cAlgo.Robots
     internal sealed class LocalStorageStore : IKeyValueStore
     {
         private readonly Robot _r;
-        public LocalStorageStore(Robot r) => _r = r;
-        public string? Get(string key) { var v = _r.LocalStorage.GetString(key, LocalStorageScope.Type); return string.IsNullOrEmpty(v) ? null : v; }
-        public void Set(string key, string value) => _r.LocalStorage.SetString(key, value, LocalStorageScope.Type);
+        private readonly string _label;
+        public LocalStorageStore(Robot r, string label) { _r = r; _label = label; }
+        private string Identity(string key) => System.Text.Json.JsonSerializer.Serialize(new[]
+            { _r.Account.BrokerName ?? "", _r.Account.Number.ToString(CultureInfo.InvariantCulture), _r.Account.Asset?.Name ?? "", _label, key });
+        public string? Get(string key)
+        {
+            var v = _r.LocalStorage.GetString(key, LocalStorageScope.Type);
+            return string.IsNullOrEmpty(v) ? null : RecoveryEnvelope.Decode(Identity(key), v);
+        }
+        public void Set(string key, string value) => _r.LocalStorage.SetString(key, RecoveryEnvelope.Encode(Identity(key), value), LocalStorageScope.Type);
         public void Flush() => _r.LocalStorage.Flush(LocalStorageScope.Type);
     }
 
@@ -599,20 +606,32 @@ namespace cAlgo.Robots
         private readonly IKeyValueStore _store;
         private readonly string _key;
         private List<TradeRecord> _records;
+        public bool IsHealthy { get; private set; } = true;
         public IReadOnlyList<TradeRecord> ClosedRecords => _records;
         public PrintJournal(Robot r, string label)
         {
-            _r = r; _store = r.IsBacktesting ? new MemoryStore() : new LocalStorageStore(r);
+            _r = r; _store = r.IsBacktesting ? new MemoryStore() : new LocalStorageStore(r, label);
             _key = PlatformSafety.StorageKey("Closed", r.Account.BrokerName ?? "", r.Account.Number, label);
-            string? json = _store.Get(_key);
-            _records = json == null ? new() : System.Text.Json.JsonSerializer.Deserialize<List<TradeRecord>>(json, BridgeProtocol.Json) ?? throw new InvalidOperationException("invalid closed journal");
-            if (_records.Any(x => x == null) || _records.Select(x => x.PositionId).Distinct().Count() != _records.Count)
-                throw new InvalidOperationException("conflicting closed journal");
+            _records = new();
+            try
+            {
+                string? json = _store.Get(_key);
+                _records = json == null ? new() : System.Text.Json.JsonSerializer.Deserialize<List<TradeRecord>>(json, BridgeProtocol.Json) ?? throw new InvalidOperationException("invalid closed journal");
+                if (_records.Any(x => x == null) || _records.Select(x => x.PositionId).Distinct().Count() != _records.Count)
+                    throw new InvalidOperationException("conflicting closed journal");
+            }
+            catch (Exception ex) { IsHealthy = false; _r.Print("APEX: journal recovery blocked: " + ex.Message); }
         }
         public void TradeOpened(TradePlan plan, double volume, string details) => _r.Print($"APEX OTWARCIE #{plan.PositionId} {plan.Symbol} {plan.Direction} {volume} {plan.Strategy} SL {plan.InitialStop} | {plan.EntryReason}");
         public void TradeClosed(TradeRecord record)
         {
-            if (_records.Any(x => x.PositionId == record.PositionId)) return;
+            if (!IsHealthy) throw new InvalidOperationException("journal recovery blocked");
+            var prior = _records.FirstOrDefault(x => x.PositionId == record.PositionId);
+            if (prior != null)
+            {
+                if (prior.ToCsv() != record.ToCsv()) throw new InvalidOperationException("conflicting closed projection");
+                return;
+            }
             var next = _records.Concat(new[] { record }).ToList();
             _store.Set(_key, System.Text.Json.JsonSerializer.Serialize(next, BridgeProtocol.Json)); _store.Flush();
             _records = next; _r.Print("APEX ZAMKNIĘCIE " + record.ToCsv());

@@ -4,6 +4,63 @@ Jeden format dla wszystkich platform. Każdy komunikat to obiekt JSON z polem `t
 Implementacje wzorcowe: `src/Platforms/cTrader/ApexBridge` (C#), `src/Platforms/MT5/ApexBridge.mq5` (MQL5), symulator `tools/Apex.PlatformSimulator`.
 Definicje typów: `src/Apex.Core/Bridge/Protocol.cs`.
 
+## Wymagana zdolność odzyskiwania `closing-deals-v1` (Task1)
+
+Wersja bazowego transportu pozostaje `protocol:1`, lecz nowe ryzyko wymaga opcjonalnej zdolności
+`hello.historyCapability:"closing-deals-v1"`. Stary most (w tym niezmieniony MT5) może dostarczyć
+stan/pozycje i przyjmować pełne zamknięcie, ale **nie certyfikuje synchronizacji i nie otwiera nowego ryzyka**.
+`closed` jest odtąd tylko wskazówką do ponownego pobrania historii, nigdy samodzielnym dowodem wyniku.
+
+1. Po `welcome` host wysyła `{"type":"historyRequest","requestId":"<losowy token>","label":"APEX"}`.
+   Token jest nowy dla każdego pobrania i sesji. Most cTrader obsługuje żądanie wyłącznie na wątku platformy.
+2. Most zamraża dostępną kolekcję History i pozycje/konto, sortuje raw deale po `(exitTime,closingDealId,id)`
+   i wysyła `historyPage`: `requestId,page,pages,total,scope,coverage,capturedAt,deals,account,positions`.
+   `page` od 0, `scope:"available-history-v1"`; `capturedAt` jednakowy UNIX ms dla całej migawki.
+   `account` i **wszystkie pozycje**, również obce, są obowiązkowe w ostatniej stronie.
+   Implementacje wysyłają po 250 dealów; host odrzuca >500/stronę, >100000/całość i >1000 stron.
+   Pusta kolekcja to jedna strona `total:0,deals:[]`, nie brak odpowiedzi.
+3. Każdy element `deals` ma pola `ClosedDto` oraz **closingDealId**. To surowy deal zamykający, nie suma
+   pozycji. Kanoniczny klucz SDK: dodatni `HistoricalTrade.ClosingDealId:Int32` jawnie poszerzony do Int64,
+   z `positionId`, dokładną etykietą i pełną tożsamością konta w stanie właściciela. Nie zamieniamy go
+   niejawnie z `ClosingDeal.Id:Int64`. Częściowe zamknięcia są osobnymi dealami; `net` zawiera już
+   signed commission/swap. Nie doliczać ich ponownie.
+4. Host publikuje snapshot dopiero po pełnej sekwencji stron i zgodnym count/tożsamości. Brak strony,
+   sprzeczny duplikat, obcy/stary token, error, przekroczenie limitów lub >30 s od capture nie certyfikuje
+   kompletności. Identyczny duplikat strony jest no-op. Kolejne aktualizacje wolumenu własnej pozycji
+   lub hint `closed` unieważniają readiness i wymagają świeżej migawki. Pobranie odnawiane co 10 s;
+   brak świeżego kompletnego pobrania przez 30 s blokuje nowe ryzyko.
+
+### Ważne: kompletność transmisji nie jest kompletnością brokera
+
+SDK Automate **1.0.21** udostępnia `History.Count`, indexer, `FindByPositionId(int)` i
+`FindByClosingDealId(int)`, ale **nie dokumentuje** load-more/paginacji serwera ani flagi zakresu
+pełnej historii brokera. Zatem oba prawdziwe cBoty raportują `coverage:"unknown"` / `RequiredCoverage=false`.
+W obecnej wersji oznacza to **STOP i blokadę START oraz technicznego test-open w cTrader**, dopóki
+osobna, zweryfikowana procedura zakresu/baseline nie zostanie wdrożona. Nie istnieje przełącznik
+operatora ani pole JSON, które po stronie ścieżki cTrader podnosi to do potwierdzonego coverage.
+Tylko lokalny źródłowy zbiór symulatora (`platform:"Symulator"`) i zaufany natywny runtime backtest
+mogą mieć pełne pokrycie swoich syntetycznych danych. To nie odbiór Pepperstone.
+
+Bez pełnego coverage nie importujemy przypadkowej historii sprzed instalacji ani wyników pozycji
+odtworzonej z bieżącego SL. Dostępne deale można trwale rozliczać dla zachowanego oryginalnego
+planu wejścia; finalizacja wymaga nieobecności pozycji i sumy closed volume równej zapisanej initial
+volume. Gdy tego nie da się udowodnić, plan/intencja pozostają oczekujące, nie powstaje wymyślone R.
+Pełny close konkretnego dokładnie własnego ID w uwierzytelnionym DEMO pozostaje dostępny także przy
+CoverageUnknown lub awarii dysku; nie dotyczy to partial/modify/open.
+
+### Trwała akceptacja i migracja
+
+Autorytatywny `EngineState` v2 przechowuje raw deale, sfinalizowane pozycje, liczniki, plany/intencje
+oraz outbox w pojedynczym zapisie. CSV jest atomową, kluczowaną projekcją; błąd eksportu zostawia
+durable outbox do ponowienia. Dokładnie-jeden wynik dotyczy lokalnego księgowania, nie gwarancji
+wykonania sieciowego brokera. Klucze nie wygasają wraz z oknem UI 300/500 wpisów.
+V1 bez wyników może przejść do v2 z zachowaniem emergency/reservations/plans. V1 z wynikami albo
+CSV bez pasującego stanu ma nieznany overlap i wymaga ręcznego uzgodnienia; nie dodajemy obu zbiorów,
+nie usuwamy oryginalnego dowodu. Natywny LocalStorage używa pojedynczej koperty identity/generation/
+SHA-256; uszkodzona, obca albo niejednoznaczna koperta blokuje, nie odtwarza się z dowolnej starej kopii.
+Restart/reconnect nigdy nie uruchamia strategii; zapisane full-close intents ponawiają się z backoff
+15…300 s do autorytatywnego rozliczenia. Bez połączenia lub trwałego zapisu nie ma gwarancji likwidacji.
+
 ## Transport
 
 | Transport | Adres | Ramkowanie |

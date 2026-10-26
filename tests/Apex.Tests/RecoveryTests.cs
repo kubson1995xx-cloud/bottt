@@ -17,11 +17,11 @@ namespace Apex.Tests;
 public sealed class RecoveryTests
 {
     internal static readonly DateTime Now = new(2026, 10, 26, 10, 0, 0, DateTimeKind.Utc);
-    internal static ClosedPositionInfo Closed(long id = 42, string label = "APEX") => new()
+    internal static ClosedPositionInfo Closed(long id = 42, string label = "APEX", double net = 15) => new()
     {
         PositionId = id, ClosingDealId = id + 100000, Label = label, Symbol = "US500", Direction = TradeDirection.Long,
         Volume = 2, EntryPrice = 4000, ExitPrice = 4010, EntryTimeUtc = Now.AddHours(-2), ExitTimeUtc = Now,
-        GrossProfit = 20, Commission = -3, Swap = -2, NetProfit = 15,
+        GrossProfit = net + 5, Commission = -3, Swap = -2, NetProfit = net,
     };
     internal static PositionInfo Open(long id = 42, string label = "APEX") => new()
     {
@@ -99,6 +99,7 @@ public sealed class RecoveryTests
         Assert.Equal(15, record.NetProfit); Assert.Equal(-3, record.Commission); Assert.Equal(-2, record.Swap);
         Assert.Equal(0, record.InitialRiskMoney); // reconstructed plan is not an entry-risk measurement
         Assert.True(double.IsNaN(record.RMultiple));
+        Assert.Equal((StrategyId)0, record.Strategy); // no measured entry metadata: never invent TrendPullback
         Assert.Empty(restarted.Plans);
     }
 
@@ -289,5 +290,125 @@ public sealed class RecoveryTests
         var engine = Engine(broker, store, new NullJournal());
         Assert.Equal(EngineMode.EmergencyStopped, engine.Mode); Assert.Single(engine.Plans);
         Assert.Equal(1234, engine.GetStatus(Now).RealizedTotal); Assert.Equal(legacy, store.Get("APEX APEX 123456"));
+    }
+    [Fact]
+    public void UnknownCoverageCannotFinalizeReconstructedPositionEvenWhenVolumesMatch()
+    {
+        var broker = new HistoryBroker { Now = Now }; broker.Positions.Add(Open());
+        var engine = Engine(broker, new MemoryStore(), new NullJournal()); broker.Positions.Clear();
+        Assert.True(engine.ReplayHistory(new BrokerHistorySnapshot
+        {
+            AccountNumber = broker.AccountNumber, Generation = "available", Complete = true, RequiredCoverage = false,
+            Positions = Array.Empty<PositionInfo>(), Closed = new[] { Closed() },
+        }, Now));
+        Assert.Empty(engine.RecentTrades); Assert.Single(engine.Plans); Assert.Equal(0, engine.GetStatus(Now).RealizedTotal);
+    }
+    [Fact]
+    public void TechnicalTestCannotOpenAfterCoverageChangesBeforeNextTimer()
+    {
+        var broker = new HistoryBroker(); var rig = new EngineRig(broker: broker); rig.Engine.CmdStop();
+        broker.Complete = false;
+        rig.Engine.CmdExecutionTest(rig.Now, "US500");
+        Assert.Empty(broker.Orders);
+    }
+    [Fact]
+    public void ConflictingCsvProjectionIsNotSilentlyAcceptedAsDuplicate()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "apex-projection-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var journal = new FileJournal(dir); journal.TradeClosed(new TradeRecord { PositionId = 42, NetProfit = 1 });
+            Assert.Throws<IOException>(() => journal.TradeClosed(new TradeRecord { PositionId = 42, NetProfit = 99 }));
+            Assert.Equal(2, File.ReadAllLines(Path.Combine(dir, "transakcje.csv")).Length);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+    [Fact]
+    public void ExistingCsvWithoutAccountingStateBlocksUnknownLegacyOverlap()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "apex-overlap-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var journal = new FileJournal(dir); journal.TradeClosed(new TradeRecord { PositionId = 42, NetProfit = 1 });
+            var broker = new HistoryBroker { Now = Now }; var engine = Engine(broker, new MemoryStore(), journal);
+            engine.CmdStart(); Assert.NotEqual(EngineMode.Running, engine.Mode);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+    [Fact]
+    public void CorruptJournalBlocksRiskButNotOwnedFullClose()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "apex-bad-csv-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "transakcje.csv"), TradeRecord.CsvHeader + "\nbroken row\n");
+            var journal = new FileJournal(dir); Assert.True(journal.HasFault);
+            var broker = new HistoryBroker { Now = Now }; broker.Positions.Add(Open()); broker.Positions.Add(Open(43, "APEX-other"));
+            var engine = Engine(broker, new FileStore(Path.Combine(dir, "state")), journal);
+            engine.CmdStart(); Assert.NotEqual(EngineMode.Running, engine.Mode);
+            engine.CmdCloseAllOwn(Now); Assert.Equal(new long[] {42}, broker.Closes);
+            Assert.Single(broker.Positions);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+    [Fact]
+    public void ExistingOfflineBacktestTerminalCallbackStillAccounts()
+    {
+        var broker = new LegacyBroker();
+        var engine = new TradingEngine(new EngineConfig { IsBacktest = true }, new StrategyBook(Scenarios.DipOnlyProfile()),
+            broker, broker, new BarStore(), new MemoryStore(), new NullLog(), new NullJournal());
+        engine.Initialize(Now); engine.OnPositionClosed(Closed()); engine.OnPositionClosed(Closed());
+        Assert.Single(engine.RecentTrades); Assert.Equal(15, engine.GetStatus(Now).RealizedTotal);
+    }
+    [Theory]
+    [InlineData("PendingCloses")]
+    [InlineData("ClosedOutbox")]
+    [InlineData("Broker")]
+    [InlineData("Ledger")]
+    public void MissingV2RecoveryFieldsCannotSilentlyDefaultAndEraseEvidence(string field)
+    {
+        var broker = new HistoryBroker { Now = Now }; var store = new MemoryStore();
+        var engine = Engine(broker, store, new NullJournal()); engine.SaveState(Now, true);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(store.Get("APEX APEX 123456")!)!.AsObject();
+        node.Remove(field); string broken = node.ToJsonString(); store.Set("APEX APEX 123456", broken);
+        var restarted = Engine(broker, store, new NullJournal()); restarted.CmdStart();
+        Assert.NotEqual(EngineMode.Running, restarted.Mode); Assert.Equal(broken, store.Get("APEX APEX 123456"));
+    }
+    [Fact]
+    public void DedupeKeysSurviveBothRecentDisplayWindowsAndRestart()
+    {
+        const int count = 501;
+        string dir = Path.Combine(Path.GetTempPath(), "apex-long-replay-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var broker = new HistoryBroker { Now = Now }; for (int i = 1; i <= count; i++) broker.History.Add(Closed(i));
+            Engine(broker, new FileStore(Path.Combine(dir, "state")), new FileJournal(Path.Combine(dir, "journal")));
+            var journal = new FileJournal(Path.Combine(dir, "journal"));
+            var restarted = Engine(broker, new FileStore(Path.Combine(dir, "state")), journal);
+            restarted.OnPositionClosed(Closed(1)); restarted.SaveState(Now, true);
+            Assert.Equal(300, restarted.RecentTrades.Count); Assert.Equal(500, journal.AllRecent().Count);
+            Assert.Equal(count, restarted.GetStatus(Now).TradesTotal); Assert.Equal(count * 15, restarted.GetStatus(Now).RealizedTotal);
+            Assert.Equal(count + 1, File.ReadAllLines(Path.Combine(dir, "journal", "transakcje.csv")).Length);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+    [Fact]
+    public void UnknownRiskDoesNotIncreaseRStatisticalEvidence()
+    {
+        var known = new[] { new TradeRecord { InitialRiskMoney = 10, NetProfit = 10 }, new TradeRecord { InitialRiskMoney = 10, NetProfit = 30 } };
+        var a = PerformanceAnalyzer.Compute("known", known, 10000);
+        var b = PerformanceAnalyzer.Compute("with recovered", known.Concat(new[] { new TradeRecord { NetProfit = 999 } }).ToArray(), 10000);
+        Assert.Equal(a.ExpectancyR, b.ExpectancyR); Assert.Equal(a.StdErrR, b.StdErrR); Assert.Equal(a.Sqn, b.Sqn);
+    }
+    [Fact]
+    public void DurableFinalizationStillEvaluatesExistingHealthMonitor()
+    {
+        var broker = new HistoryBroker { Now = Now };
+        for (int i = 1; i <= 30; i++) broker.Positions.Add(Open(i));
+        var engine = Engine(broker, new MemoryStore(), new NullJournal());
+        foreach (var plan in engine.Plans.Values) { plan.Reconstructed = false; plan.RiskAmount = 10; }
+        broker.Positions.Clear(); for (int i = 1; i <= 30; i++) broker.History.Add(Closed(i, net: -10));
+        engine.OnTimer(Now.AddSeconds(2));
+        Assert.Single(engine.GetStatus(Now).Suspended);
     }
 }
