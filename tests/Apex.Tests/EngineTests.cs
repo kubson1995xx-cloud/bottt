@@ -128,7 +128,7 @@ namespace Apex.Tests
         }
 
         [Fact]
-        public void Disconnected_SendsNothing_AndResumesAfterReconnect()
+        public void Disconnected_SendsNothing_AndRequiresExplicitStartAfterReconnect()
         {
             var rig = new EngineRig();
             rig.Broker.Connected = false;
@@ -137,6 +137,9 @@ namespace Apex.Tests
 
             rig.Broker.Connected = true;
             rig.Tick();
+            Assert.Empty(rig.Broker.Orders);
+            Assert.Equal(EngineMode.Stopped, rig.Engine.Mode);
+            rig.Engine.CmdStart(); rig.Tick();
             Assert.Single(rig.Broker.Orders);
         }
 

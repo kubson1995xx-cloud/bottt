@@ -132,6 +132,8 @@ namespace Apex.Core.Engine
     /// <summary>Migawka stanu dla panelu kontrolnego.</summary>
     public sealed class EngineStatus
     {
+        public bool HistoryReady { get; init; }
+        public string HistoryMessage { get; init; } = "";
         public EngineMode Mode { get; init; }
         public string ModeReason { get; init; } = "";
         public bool IsLive { get; init; }

@@ -11,7 +11,7 @@ using Apex.Core.Strategies;
 namespace Apex.Tests
 {
     /// <summary>Atrapa brokera i rynku z wstrzykiwaniem awarii – do testów silnika bez platformy.</summary>
-    public class FakeBroker : IBrokerGateway, IMarketData
+    public class FakeBroker : IBrokerGateway, IBrokerHistory, IMarketData
     {
         public readonly Dictionary<string, InstrumentSpec> Specs = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, double> Mid = new(StringComparer.OrdinalIgnoreCase);
@@ -33,6 +33,9 @@ namespace Apex.Tests
         public Queue<string> OpenModes = new(); // "fill", "reject", "uncertain-filled", "uncertain-none", "fill-no-sl"
 
         public bool IsConnected => Connected;
+        public readonly List<ClosedPositionInfo> ClosedDeals = new();
+        public virtual BrokerHistorySnapshot GetHistory() => new()
+        { AccountNumber = AccountNumber, Complete = true, RequiredCoverage = true, Generation = "synthetic-fixture", Closed = ClosedDeals.ToList(), Positions = GetPositions() };
 
         public AccountSnapshot GetAccount() => new()
         {
@@ -116,6 +119,13 @@ namespace Apex.Tests
             int i = Positions.FindIndex(p => p.Id == positionId);
             if (i < 0) return OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak");
             Closes.Add(positionId);
+            var p = Positions[i];
+            ClosedDeals.Add(new ClosedPositionInfo
+            {
+                ClosingDealId = ClosedDeals.Count + 1, PositionId = p.Id, Symbol = p.Symbol, Label = p.Label, Comment = p.Comment,
+                Direction = p.Direction, Volume = p.VolumeUnits, EntryPrice = p.EntryPrice, ExitPrice = p.EntryPrice,
+                EntryTimeUtc = p.EntryTimeUtc, ExitTimeUtc = Now,
+            });
             Positions.RemoveAt(i);
             return OrderOutcome.Filled(positionId, 0);
         }

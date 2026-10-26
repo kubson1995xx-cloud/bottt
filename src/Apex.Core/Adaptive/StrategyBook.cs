@@ -216,7 +216,7 @@ namespace Apex.Core.Adaptive
             foreach (var g in trades.GroupBy(t => Key(t.Strategy, t.AssetClass)))
             {
                 if (suspended.Contains(g.Key)) continue;
-                var recent = g.OrderBy(t => t.ExitTimeUtc).TakeLast(Window).Select(t => t.RMultiple).ToList();
+                var recent = g.Where(t => double.IsFinite(t.RMultiple)).OrderBy(t => t.ExitTimeUtc).TakeLast(Window).Select(t => t.RMultiple).ToList();
                 if (recent.Count < MinTrades) continue;
                 double mean = recent.Average();
                 double sd = Math.Sqrt(recent.Sum(r => (r - mean) * (r - mean)) / (recent.Count - 1));

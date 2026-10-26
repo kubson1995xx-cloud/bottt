@@ -42,10 +42,11 @@ public sealed class RecoveryTests
         string dir = Path.Combine(Path.GetTempPath(), "apex-recovery-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var broker = new FakeBroker { Now = Now };
+            var broker = new HistoryBroker { Now = Now };
             var store = new FileStore(Path.Combine(dir, "state"));
             var journal = new FileJournal(Path.Combine(dir, "journal"));
             var engine = Engine(broker, store, journal);
+            broker.History.Add(Closed());
             engine.OnPositionClosed(Closed()); engine.OnPositionClosed(Closed()); engine.SaveState(Now, true);
             var restarted = Engine(broker, new FileStore(Path.Combine(dir, "state")), new FileJournal(Path.Combine(dir, "journal")));
             restarted.OnPositionClosed(Closed()); restarted.SaveState(Now, true);
@@ -74,8 +75,8 @@ public sealed class RecoveryTests
         public bool RejectClose;
         public string Generation = "connection-1";
         public readonly List<ClosedPositionInfo> History = new();
-        public BrokerHistorySnapshot GetHistory() => HistoryFails ? throw new IOException("history offline") : new()
-        { AccountNumber = AccountNumber, Generation = Generation, Complete = Complete, RequiredCoverage = true, Closed = History.ToList() };
+        public override BrokerHistorySnapshot GetHistory() => HistoryFails ? throw new IOException("history offline") : new()
+        { AccountNumber = AccountNumber, Generation = Generation, Complete = Complete, RequiredCoverage = true, Closed = History.ToList(), Positions = GetPositions() };
         public override OrderOutcome ClosePosition(long id, double? units)
         {
             if (!RejectClose) return base.ClosePosition(id, units);
@@ -97,6 +98,7 @@ public sealed class RecoveryTests
         var record = Assert.Single(restarted.RecentTrades);
         Assert.Equal(15, record.NetProfit); Assert.Equal(-3, record.Commission); Assert.Equal(-2, record.Swap);
         Assert.Equal(0, record.InitialRiskMoney); // reconstructed plan is not an entry-risk measurement
+        Assert.True(double.IsNaN(record.RMultiple));
         Assert.Empty(restarted.Plans);
     }
 
@@ -132,10 +134,24 @@ public sealed class RecoveryTests
     [Fact]
     public void OldGatewayCannotCertifySync()
     {
-        var engine = Engine(new FakeBroker { Now = Now }, new MemoryStore(), new NullJournal());
+        var engine = Engine(new LegacyBroker(), new MemoryStore(), new NullJournal());
         engine.CmdStart(); Assert.Equal(EngineMode.Stopped, engine.Mode);
     }
 
+    internal sealed class LegacyBroker : IBrokerGateway, IMarketData
+    {
+        readonly FakeBroker inner = new() { Now = Now };
+        public bool IsConnected => inner.IsConnected;
+        public AccountSnapshot GetAccount() => inner.GetAccount();
+        public IReadOnlyList<PositionInfo> GetPositions() => inner.GetPositions();
+        public OrderOutcome OpenMarket(OrderRequest r) => inner.OpenMarket(r);
+        public OrderOutcome ModifyStopLoss(long id, double sl) => inner.ModifyStopLoss(id, sl);
+        public OrderOutcome ClosePosition(long id, double? units) => inner.ClosePosition(id, units);
+        public double EstimateMargin(string s, TradeDirection d, double u) => inner.EstimateMargin(s, d, u);
+        public InstrumentSpec? GetSpec(string s) => inner.GetSpec(s);
+        public Quote? GetQuote(string s) => inner.GetQuote(s);
+        public bool IsMarketOpen(string s, DateTime t, out TimeSpan close) => inner.IsMarketOpen(s, t, out close);
+    }
     internal sealed class FaultStore : IKeyValueStore
     {
         readonly IKeyValueStore inner;
@@ -232,5 +248,46 @@ public sealed class RecoveryTests
         var engine = Engine(broker, store, new NullJournal()); engine.CmdStart();
         Assert.NotEqual(EngineMode.Running, engine.Mode);
         Assert.Equal("{broken", store.Get("APEX APEX 123456"));
+    }
+
+    [Fact]
+    public void PartialDealsAggregateOnlyWhenPositionFullyClosed()
+    {
+        var broker = new HistoryBroker { Now = Now };
+        broker.Positions.Add(Open()); var store = new MemoryStore(); var engine = Engine(broker, store, new NullJournal());
+        broker.History.Add(HistoryIntegrationTests.Deal(deal: 1).ToInfo());
+        broker.Positions.Clear(); broker.Positions.Add(new PositionInfo { Id = 42, Label = "APEX", Symbol = "US500", VolumeUnits = 1, EntryPrice = 4000, StopLoss = 3990, TakeProfit = 4020 });
+        engine.OnTimer(Now.AddSeconds(2));
+        Assert.Equal(7.5, engine.GetStatus(Now).RealizedTotal); Assert.Empty(engine.RecentTrades); Assert.Single(engine.Plans);
+        engine.SaveState(Now, true); var restarted = Engine(broker, store, new NullJournal());
+        broker.History.Add(HistoryIntegrationTests.Deal(deal: 2).ToInfo()); broker.Positions.Clear();
+        restarted.OnTimer(Now.AddSeconds(4)); restarted.OnTimer(Now.AddSeconds(6));
+        var final = Assert.Single(restarted.RecentTrades); Assert.Equal(2, final.Volume);
+        Assert.Equal(15, final.NetProfit); Assert.Equal(-3, final.Commission); Assert.Equal(-2, final.Swap);
+        Assert.Equal(15, restarted.GetStatus(Now).RealizedTotal); Assert.Empty(restarted.Plans);
+    }
+
+    [Fact]
+    public void CloseHintCannotFinalizeUsingPartialOrEmptyHistory()
+    {
+        var broker = new HistoryBroker { Now = Now, Complete = false };
+        var engine = Engine(broker, new MemoryStore(), new NullJournal());
+        engine.OnPositionClosed(Closed());
+        Assert.Empty(engine.RecentTrades); Assert.Equal(0, engine.GetStatus(Now).RealizedTotal);
+    }
+
+    [Fact]
+    public void LegacyTotalsOverlapBlocksWithoutDestroyingEmergencyOrPlans()
+    {
+        var broker = new HistoryBroker { Now = Now }; broker.Positions.Add(Open());
+        var store = new MemoryStore(); var initial = Engine(broker, store, new NullJournal()); initial.SaveState(Now, true);
+        string json = store.Get("APEX APEX 123456")!;
+        var node = System.Text.Json.Nodes.JsonNode.Parse(json)!;
+        node["SchemaVersion"] = 1; node["TradesTotal"] = 500; node["RealizedTotal"] = 1234;
+        node["Mode"] = "EmergencyStopped"; string legacy = node.ToJsonString(); store.Set("APEX APEX 123456", legacy);
+        broker.Positions.Clear(); broker.History.Add(Closed());
+        var engine = Engine(broker, store, new NullJournal());
+        Assert.Equal(EngineMode.EmergencyStopped, engine.Mode); Assert.Single(engine.Plans);
+        Assert.Equal(1234, engine.GetStatus(Now).RealizedTotal); Assert.Equal(legacy, store.Get("APEX APEX 123456"));
     }
 }

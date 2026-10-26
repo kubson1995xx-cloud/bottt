@@ -78,7 +78,7 @@ public sealed class ReviewBoundaryTests : IDisposable
         Assert.Contains(t.Sent, x => BridgeProtocol.ReadType(x) == "close");
     }
     [Fact]
-    public async Task ReceivedCloseSurvivesNetworkThreadReconnectAndRetiredEventsAreIgnored()
+    public async Task ReceivedHistorySurvivesNetworkThreadReconnectAndRetiredEventsAreIgnored()
     {
         using var r = Runtime(); var first = Session(new Transport()); r.Attach(first); await r.Command(_ => "ready");
         using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
@@ -86,15 +86,21 @@ public sealed class ReviewBoundaryTests : IDisposable
         Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
         try
         {
-            r.OnClosed(first, new ClosedDto { Id = 77, Label = "APEX", Symbol = "US500", EntryTime = 1, ExitTime = 2, Net = 123 });
+            r.OnHistory(first, Completed(first, 77, 123));
             var second = Session(new Transport()); r.Attach(second);
-            r.OnClosed(first, new ClosedDto { Id = 78, Label = "APEX", Symbol = "US500", EntryTime = 1, ExitTime = 2, Net = 321 });
+            r.OnHistory(first, Completed(first, 78, 321));
         }
         finally { release.Set(); }
         await blocked; await r.Command(_ => "barrier");
         Assert.Single(r.Journal.AllRecent());
         Assert.Equal(77, r.Journal.AllRecent()[0].PositionId);
     }
+    internal static BrokerHistorySnapshot Completed(BridgeSession s, long id, double net) => new()
+    {
+        AccountNumber = 910001, Generation = s.Id, Complete = true, RequiredCoverage = true, Positions = Array.Empty<Apex.Core.Model.PositionInfo>(),
+        Closed = new[] { new ClosedPositionInfo { PositionId = id, ClosingDealId = id, Label = "APEX", Symbol = "US500", Volume = 1,
+            EntryPrice = 4000, ExitPrice = 4010, EntryTimeUtc = RecoveryTests.Now.AddHours(-1), ExitTimeUtc = RecoveryTests.Now, NetProfit = net } },
+    };
     [Fact]
     public void ExecutionTestDisappearanceBeforeCloseIsNotPass()
     {

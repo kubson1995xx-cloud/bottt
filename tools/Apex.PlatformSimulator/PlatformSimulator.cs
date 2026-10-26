@@ -78,6 +78,8 @@ namespace Apex.PlatformSimulator
         private readonly Random _rng;
         private readonly Dictionary<string, SimSymbol> _symbols = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<SimPosition> _positions = new();
+        private readonly List<ClosedDto> _closingDeals = new();
+        private long _nextDeal;
         private readonly object _lock = new();
         private ClientWebSocket? _ws;
         private readonly SemaphoreSlim _send = new(1, 1);
@@ -182,6 +184,7 @@ namespace Apex.PlatformSimulator
             await _ws.ConnectAsync(new Uri(_o.Url), ct).ConfigureAwait(false);
             await SendAsync(new HelloMsg
             {
+                HistoryCapability = HistoryPage.Capability,
                 Platform = _o.Platform,
                 BridgeVersion = "sim-1.0",
                 Key = _o.Key,
@@ -294,6 +297,7 @@ namespace Apex.PlatformSimulator
                 case "open": await OnOpen(BridgeProtocol.Deserialize<OpenCmd>(json)!).ConfigureAwait(false); break;
                 case "modify": await OnModify(BridgeProtocol.Deserialize<ModifyCmd>(json)!).ConfigureAwait(false); break;
                 case "close": await OnClose(BridgeProtocol.Deserialize<CloseCmd>(json)!).ConfigureAwait(false); break;
+                case "historyRequest": await SendHistory(BridgeProtocol.Deserialize<HistoryRequest>(json)!).ConfigureAwait(false); break;
                 case "margin":
                     {
                         var m = BridgeProtocol.Deserialize<MarginCmd>(json)!;
@@ -501,15 +505,18 @@ namespace Apex.PlatformSimulator
                 _balance += gross - comm;
                 p.Commission -= comm;
                 p.Units -= u;
+                var deal = new ClosedDto
+                {
+                    Id = p.Id, ClosingDealId = ++_nextDeal, Symbol = p.Symbol, Label = p.Label, Comment = p.Comment,
+                    Side = BridgeProtocol.SideOf(p.Dir), Units = u, Entry = p.Entry, Exit = px,
+                    EntryTime = BridgeProtocol.ToUnixMs(p.EntryTime), ExitTime = BridgeProtocol.ToUnixMs(DateTime.UtcNow),
+                    Gross = gross, Commission = -comm, Swap = 0, Net = gross - comm, Reason = reason,
+                };
+                _closingDeals.Add(deal);
                 if (p.Units <= 1e-9)
                 {
                     _positions.Remove(p);
-                    closed = new ClosedDto
-                    {
-                        Id = p.Id, Symbol = p.Symbol, Label = p.Label, Comment = p.Comment, Side = BridgeProtocol.SideOf(p.Dir), Units = u, Entry = p.Entry, Exit = px,
-                        EntryTime = BridgeProtocol.ToUnixMs(p.EntryTime), ExitTime = BridgeProtocol.ToUnixMs(DateTime.UtcNow), Gross = gross, Commission = -comm,
-                        Swap = 0, Net = gross - comm, Reason = reason,
-                    };
+                    closed = deal;
                 }
             }
             await SendPositions().ConfigureAwait(false);
@@ -517,6 +524,9 @@ namespace Apex.PlatformSimulator
         }
 
         private Task SendPositions()
+            => SendAsync(new PositionsMsg { Items = PositionSnapshot() });
+
+        private List<PositionDto> PositionSnapshot()
         {
             List<PositionDto> items;
             lock (_lock)
@@ -530,7 +540,24 @@ namespace Apex.PlatformSimulator
                         Commission = -p.Commission, Swap = 0, Price = p.Dir == TradeDirection.Long ? Bid(s) : Ask(s), Margin = p.Units * s.Price * ToUsd(s) / 30,
                     };
                 }).ToList();
-            return SendAsync(new PositionsMsg { Items = items });
+            return items;
+        }
+
+        private async Task SendHistory(HistoryRequest request)
+        {
+            List<ClosedDto> rows; List<PositionDto> positions; AccountDto account;
+            lock (_lock)
+            {
+                rows = _closingDeals.Where(x => x.Label == request.Label).OrderBy(x => x.ExitTime).ThenBy(x => x.ClosingDealId).ToList();
+                positions = PositionSnapshot(); account = AccountDto();
+            }
+            int pages = Math.Max(1, (rows.Count + 249) / 250); long captured = BridgeProtocol.ToUnixMs(DateTime.UtcNow);
+            for (int page = 0; page < pages; page++) await SendAsync(new HistoryPage
+            {
+                RequestId = request.RequestId, Page = page, Pages = pages, Total = rows.Count, CapturedAt = captured, Coverage = "required",
+                Deals = rows.Skip(page * 250).Take(250).ToList(), Account = page == pages - 1 ? account : null,
+                Positions = page == pages - 1 ? positions : null,
+            }).ConfigureAwait(false);
         }
 
         /// <summary>Ręczna pozycja "innego bota" – silnik APEX nie może jej dotykać.</summary>

@@ -146,6 +146,7 @@ namespace cAlgo.Robots
                 {
                     Platform = "cTrader",
                     BridgeVersion = Version,
+                    HistoryCapability = HistoryPage.Capability,
                     Key = PairingKey.Trim(),
                     Account = AccountDto(),
                     Time = BridgeProtocol.ToUnixMs(Server.TimeInUtc),
@@ -270,6 +271,7 @@ namespace cAlgo.Robots
                         break;
                     }
                 case "margin": { var c = BridgeProtocol.Deserialize<MarginCmd>(json); if (c != null) OnMargin(c); break; }
+                case "historyRequest": { var m = BridgeProtocol.Deserialize<HistoryRequest>(json); if (m != null) SendHistory(m); break; }
                 case "ping": Send(new SimpleMsg { Type = "pong" }); break;
             }
         }
@@ -434,20 +436,7 @@ namespace cAlgo.Robots
         {
             var p = args.Position;
             if (!IsOwn(p)) { SendPositions(); return; }
-            // Suma wszystkich transakcji zamykających (także częściowych) tej pozycji.
-            double gross = 0, comm = 0, swap = 0, net = 0, exit = p.CurrentPrice, units = 0;
-            DateTime exitTime = Server.TimeInUtc;
-            try
-            {
-                var deals = History.FindByPositionId(p.Id);
-                foreach (var h in deals.OrderBy(h => h.ClosingTime))
-                {
-                    gross += h.GrossProfit; comm += h.Commissions; swap += h.Swap; net += h.NetProfit; units += h.VolumeInUnits;
-                    exit = h.ClosingPrice; exitTime = h.ClosingTime;
-                }
-                if (deals.Length == 0) { gross = p.GrossProfit; comm = p.Commissions; swap = p.Swap; net = p.NetProfit; units = p.VolumeInUnits; }
-            }
-            catch (Exception) { gross = p.GrossProfit; comm = p.Commissions; swap = p.Swap; net = p.NetProfit; units = p.VolumeInUnits; }
+
             string reason = args.Reason switch
             {
                 PositionCloseReason.StopLoss => "StopLoss",
@@ -461,13 +450,33 @@ namespace cAlgo.Robots
                 Position = new ClosedDto
                 {
                     Id = p.Id, Symbol = p.SymbolName, Label = p.Label ?? "", Comment = p.Comment ?? "", Side = p.TradeType == TradeType.Buy ? "buy" : "sell",
-                    Units = units, Entry = p.EntryPrice, Exit = exit, EntryTime = BridgeProtocol.ToUnixMs(DateTime.SpecifyKind(p.EntryTime, DateTimeKind.Utc)),
-                    ExitTime = BridgeProtocol.ToUnixMs(DateTime.SpecifyKind(exitTime, DateTimeKind.Utc)), Gross = gross, Commission = comm, Swap = swap, Net = net, Reason = reason,
+                    EntryTime = BridgeProtocol.ToUnixMs(DateTime.SpecifyKind(p.EntryTime, DateTimeKind.Utc)),
+                    ExitTime = BridgeProtocol.ToUnixMs(Server.TimeInUtc), Reason = reason,
                 },
             });
         }
 
         // ------------------------------------------------------------------ polecenia handlowe
+
+        private void SendHistory(HistoryRequest request)
+        {
+            // Handle is entered only through BeginInvokeOnMainThread; freeze before paging.
+            if (!_welcomed || !SafeAccount || !Server.IsConnected || request.Label != LabelPrefix) return;
+            try
+            {
+                var rows = CTraderHistory.Capture(History, LabelPrefix);
+                var positions = Positions.Select(ToDto).ToList(); var account = AccountDto();
+                long captured = BridgeProtocol.ToUnixMs(Server.TimeInUtc);
+                int pages = Math.Max(1, (rows.Count + 249) / 250);
+                for (int page = 0; page < pages; page++) Send(new HistoryPage
+                {
+                    RequestId = request.RequestId, Page = page, Pages = pages, Total = rows.Count, CapturedAt = captured,
+                    Coverage = "unknown", Deals = rows.Skip(page * 250).Take(250).ToList(),
+                    Account = page == pages - 1 ? account : null, Positions = page == pages - 1 ? positions : null,
+                });
+            }
+            catch (Exception ex) { Send(new HistoryPage { RequestId = request.RequestId, Error = ex.Message }); }
+        }
 
         private static string StatusOf(TradeResult r)
         {

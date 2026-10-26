@@ -1706,6 +1706,7 @@ namespace Apex.Core.Engine
 
             return new EngineStatus
             {
+                HistoryReady = HistoryReady, HistoryMessage = HistoryMessage,
                 Mode = _state.Mode,
                 ModeReason = _state.ModeReason,
                 IsLive = GuardIsLive,

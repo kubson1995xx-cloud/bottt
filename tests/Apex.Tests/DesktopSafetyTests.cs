@@ -290,7 +290,7 @@ namespace Apex.Tests
         }
 
         [Fact]
-        public async Task ClosedCallbackIsAppliedBeforeLaterReconnectAction()
+        public async Task CompleteHistoryIsAppliedBeforeLaterReconnectAction()
         {
             using var r = Runtime();
             var first = Session(); Symbols(first); r.Attach(first);
@@ -299,7 +299,7 @@ namespace Apex.Tests
             using var release = new ManualResetEventSlim();
             var blocker = r.Command(_ => { entered.Set(); release.Wait(); return "released"; });
             Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
-            r.OnClosed(first, new ClosedDto { Id = 77, Label = "APEX", Symbol = "EURUSD", EntryTime = 1, ExitTime = 2, Net = 123 });
+            r.OnHistory(first, ReviewBoundaryTests.Completed(first, 77, 123));
             var second = Session(); Symbols(second);
             int countAtReconnect = -1;
             var replace = r.Command(_ => { countAtReconnect = r.Journal.AllRecent().Count; r.Attach(second); return "replaced"; });

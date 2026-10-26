@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Apex.Core.Bridge;
 using Apex.Core.Model;
+using Apex.Core.Engine;
 
 namespace Apex.Desktop.Bridge
 {
@@ -47,6 +48,77 @@ namespace Apex.Desktop.Bridge
         private int _state;
         private DateTime _accountReceivedUtc;
         private DateTime _positionsReceivedUtc;
+        public string HistoryRequestId { get; private set; } = "";
+        private BrokerHistorySnapshot _history = new();
+        private readonly List<ClosedDto> _historyRows = new();
+        private readonly Dictionary<int, string> _historyPages = new();
+        private HistoryPage? _historyFirst;
+        private bool _historyFailed;
+        private DateTime _historyStarted;
+        private DateTime _historyReceived;
+        private string _historyLabel = "";
+        public BrokerHistorySnapshot History { get { lock (_lock) return IsAlive && DateTime.UtcNow - _historyReceived < TimeSpan.FromSeconds(30) ? _history : new(); } }
+        public bool HistoryCapable { get; private set; }
+        public Task RequestHistoryAsync(string label)
+        {
+            lock (_lock)
+            {
+                HistoryRequestId = Guid.NewGuid().ToString("N");
+                _historyLabel = label;
+                _history = new(); _historyRows.Clear(); _historyPages.Clear(); _historyFirst = null; _historyFailed = false;
+                _historyStarted = DateTime.UtcNow;
+            }
+            return SendAsync(new HistoryRequest { RequestId = HistoryRequestId, Label = label });
+        }
+        public void EnsureHistory(string label)
+        {
+            lock (_lock)
+            {
+                if (!HistoryCapable || HistoryRequestId.Length == 0 || !IsAlive || DateTime.UtcNow - _historyStarted < TimeSpan.FromSeconds(10)) return;
+                _ = RequestHistoryAsync(label).ContinueWith(_ => { }, TaskScheduler.Default);
+            }
+        }
+        private void ReceiveHistory(HistoryPage m, string json)
+        {
+            BrokerHistorySnapshot completed;
+            lock (_lock)
+            {
+                if (!HistoryCapable || m.RequestId != HistoryRequestId || _historyFailed) return;
+                void Fail() { _historyFailed = true; _history = new(); }
+                if (_historyPages.TryGetValue(m.Page, out var prior)) { if (prior != json) Fail(); return; }
+                if (m.Error != null || m.Scope != "available-history-v1" || m.Total < 0 || m.Total > 100000
+                    || m.Pages < 1 || m.Pages > 1000 || m.Page != _historyPages.Count || m.Page >= m.Pages
+                    || m.Deals == null || m.Deals.Count > 500 || m.CapturedAt <= 0
+                    || Math.Abs((DateTime.UtcNow - BridgeProtocol.FromUnixMs(m.CapturedAt)).TotalSeconds) > 30)
+                { Fail(); return; }
+                _historyFirst ??= m;
+                var first = _historyFirst;
+                if (m.Total != first.Total || m.Pages != first.Pages || m.Scope != first.Scope || m.Coverage != first.Coverage || m.CapturedAt != first.CapturedAt)
+                { Fail(); return; }
+                _historyPages.Add(m.Page, json); _historyRows.AddRange(m.Deals);
+                if (_historyRows.Count > m.Total) { Fail(); return; }
+                if (m.Page != m.Pages - 1) return;
+                if (_historyRows.Count != m.Total || m.Account == null || m.Positions == null || _account == null
+                    || m.Account.Number != _account.Number || m.Account.Broker != _account.Broker || m.Account.Currency != _account.Currency
+                    || m.Account.IsLive != _account.IsLive || m.Account.Hedging != _account.Hedging
+                    || m.Positions.Select(x => x.Id).Distinct().Count() != m.Positions.Count)
+                { Fail(); return; }
+                _positions = m.Positions; _positionsReceivedUtc = DateTime.UtcNow;
+                _account = CloneAccount(m.Account); _accountReceivedUtc = DateTime.UtcNow;
+                _history = new BrokerHistorySnapshot
+                {
+                    AccountNumber = m.Account.Number, Generation = Id, Complete = true, Scope = m.Scope,
+                    Positions = m.Positions.Select(x => x.ToInfo()).ToArray(),
+                    // SDK enumeration does not certify broker completeness. Synthetic local fixtures
+                    // alone have a complete in-memory source; no cTrader claim can enable risk.
+                    RequiredCoverage = Platform == "Symulator" && m.Coverage == "required",
+                    Closed = _historyRows.Select(x => x.ToInfo()).ToArray(),
+                };
+                _historyReceived = DateTime.UtcNow;
+                completed = _history;
+            }
+            HistoryCompleted?.Invoke(this, completed);
+        }
 
         public BridgeSession(IBridgeTransport transport)
         {
@@ -72,6 +144,7 @@ namespace Apex.Desktop.Bridge
         public event Action<BridgeSession, HelloMsg>? HelloReceived;
         public event Action<BridgeSession>? SymbolsUpdated;
         public event Action<BridgeSession, ClosedDto>? PositionClosed;
+        public event Action<BridgeSession, BrokerHistorySnapshot>? HistoryCompleted;
 
         public AccountDto? Account { get { lock (_lock) return _account == null ? null : CloneAccount(_account); } }
         public DateTime AccountReceivedUtc { get { lock (_lock) return _accountReceivedUtc; } }
@@ -143,6 +216,7 @@ namespace Apex.Desktop.Bridge
                 if (!ValidAccount(json, hello.Account)) { RejectIdentity(); return; }
                 Platform = Sanitize(hello.Platform, 20);
                 BridgeVersion = Sanitize(hello.BridgeVersion, 20);
+                HistoryCapable = hello.HistoryCapability == HistoryPage.Capability;
                 lock (_lock) { _account = CloneAccount(hello.Account); _accountReceivedUtc = DateTime.UtcNow; }
                 HelloReceived?.Invoke(this, hello);
                 return;
@@ -151,6 +225,8 @@ namespace Apex.Desktop.Bridge
 
             switch (type)
             {
+                case "historyPage":
+                    { var m = BridgeProtocol.Deserialize<HistoryPage>(json); if (m != null) ReceiveHistory(m, json); break; }
                 case "symbols":
                     {
                         var m = BridgeProtocol.Deserialize<SymbolsMsg>(json);
@@ -212,12 +288,19 @@ namespace Apex.Desktop.Bridge
                         var m = BridgeProtocol.Deserialize<PositionsMsg>(json);
                         if (m == null) return;
                         if (m.Items == null) return;
-                        lock (_lock) { _positions = m.Items; _positionsReceivedUtc = DateTime.UtcNow; }
+                        lock (_lock)
+                        {
+                            if (!_positions.Where(x => x.Label == _historyLabel).Select(x => (x.Id, x.Units)).OrderBy(x => x.Id)
+                                .SequenceEqual(m.Items.Where(x => x.Label == _historyLabel).Select(x => (x.Id, x.Units)).OrderBy(x => x.Id)))
+                            { _history = new(); _historyStarted = DateTime.MinValue; }
+                            _positions = m.Items; _positionsReceivedUtc = DateTime.UtcNow;
+                        }
                         break;
                     }
                 case "closed":
                     {
                         var m = BridgeProtocol.Deserialize<ClosedMsg>(json);
+                        lock (_lock) { _history = new(); _historyStarted = DateTime.MinValue; }
                         if (m?.Position != null) PositionClosed?.Invoke(this, m.Position);
                         break;
                     }

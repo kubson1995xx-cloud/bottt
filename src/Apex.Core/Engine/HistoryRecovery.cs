@@ -27,25 +27,34 @@ namespace Apex.Core.Engine
         public void OnPositionClosed(ClosedPositionInfo info)
         {
             if (!string.Equals(info.Label, _cfg.Label, StringComparison.Ordinal)) return;
-            if (!info.ClosingDealId.HasValue) { SynchronizeHistory(info.ExitTimeUtc); return; }
-            AcceptHistory(new[] { info }, info.ExitTimeUtc, requiredCoverage: false);
+            SynchronizeHistory(info.ExitTimeUtc);
+        }
+
+        /// <summary>Durably accept a completed snapshot captured by the authorized session at
+        /// receipt time. This does not grant readiness/START to a replaced connection.</summary>
+        public bool ReplayHistory(BrokerHistorySnapshot snapshot, DateTime utc)
+        {
+            if (!snapshot.Complete || snapshot.Positions == null || snapshot.AccountNumber != _state.AccountNumber) return false;
+            return AcceptHistory(snapshot.Closed, snapshot.Positions, utc, snapshot.RequiredCoverage);
         }
 
         private void SynchronizeHistory(DateTime utc)
         {
             if (_stateReadFault) { BlockHistory("stan odzyskiwania wymaga ręcznego uzgodnienia"); return; }
+            if (!_cfg.IsBacktest && (_journal is not IRecoveryJournal durable || !durable.IsHealthy))
+            { BlockHistory("dziennik odzyskiwania niedostępny"); return; }
             if (!_broker.IsConnected) { BlockHistory("oczekiwanie na połączenie"); return; }
             if (_cfg.IsBacktest && _broker is not IBrokerHistory) { HistoryReady = true; return; }
             if (_broker is not IBrokerHistory history) { BlockHistory("most nie obsługuje wymaganej historii"); return; }
             try
             {
                 var snapshot = history.GetHistory();
-                if (!snapshot.Complete || snapshot.AccountNumber != _state.AccountNumber || string.IsNullOrWhiteSpace(snapshot.Generation))
+                if (!snapshot.Complete || snapshot.Positions == null || snapshot.AccountNumber != _state.AccountNumber || string.IsNullOrWhiteSpace(snapshot.Generation))
                 { BlockHistory("niepełna migawka historii"); return; }
                 if (_historyGeneration.Length > 0 && snapshot.Generation != _historyGeneration)
                     BlockHistory("nowa generacja połączenia – wymagany START");
                 _historyGeneration = snapshot.Generation;
-                if (!AcceptHistory(snapshot.Closed, utc, snapshot.RequiredCoverage)) return;
+                if (!ReplayHistory(snapshot, utc)) return;
                 if (!snapshot.RequiredCoverage)
                 { BlockHistory("CoverageUnknown: SDK udostępnia kolekcję dostępną, nie dowód kompletności wymaganej historii"); return; }
                 var open = OwnPositions().Select(x => x.Id).ToHashSet();
@@ -57,7 +66,7 @@ namespace Apex.Core.Engine
             catch (Exception ex) { BlockHistory("błąd historii: " + ex.Message); }
         }
 
-        private bool AcceptHistory(IReadOnlyList<ClosedPositionInfo> rows, DateTime utc, bool requiredCoverage)
+        private bool AcceptHistory(IReadOnlyList<ClosedPositionInfo> rows, IReadOnlyList<PositionInfo> positions, DateTime utc, bool requiredCoverage)
         {
             if (_stateReadFault) return false;
             try
@@ -84,10 +93,10 @@ namespace Apex.Core.Engine
                     if (next.AccountedPositions.Contains(row.PositionId))
                         throw new InvalidOperationException("nowy deal dla uprzednio rozliczonej pozycji " + row.PositionId);
                     // Unknown broker coverage cannot import arbitrary pre-install history.
-                    if (!requiredCoverage && !_plans.ContainsKey(row.PositionId) && rows.Count != 1) continue;
+                    if (!requiredCoverage && !_plans.ContainsKey(row.PositionId)) continue;
                     known.Add(key, row); next.ClosingDeals.Add(row); next.RealizedTotal += row.NetProfit; changed = true;
                 }
-                var open = _broker.GetPositions().ToDictionary(x => x.Id);
+                var open = positions.ToDictionary(x => x.Id);
                 foreach (var group in next.ClosingDeals.GroupBy(x => x.PositionId))
                 {
                     if (next.AccountedPositions.Contains(group.Key) || open.ContainsKey(group.Key)) continue;
@@ -95,7 +104,7 @@ namespace Apex.Core.Engine
                     double volume = deals.Sum(x => x.Volume);
                     if (_plans.TryGetValue(group.Key, out var plan)
                         && Math.Abs(volume - plan.InitialVolume) > Math.Max(1e-8, plan.InitialVolume * 1e-8)) continue;
-                    if (!requiredCoverage && !_plans.ContainsKey(group.Key) && rows.Count != 1) continue;
+                    if (!requiredCoverage && !_plans.ContainsKey(group.Key)) continue;
                     var first = deals[0]; var last = deals[deals.Count - 1];
                     var aggregate = new ClosedPositionInfo
                     {

@@ -49,6 +49,7 @@ namespace Apex.Desktop.Runtime
             }
             s.SymbolsUpdated += sess => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r)) r.OnSymbols(sess); };
             s.PositionClosed += (sess, c) => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r) && ReferenceEquals(r.Adapter.Session, sess)) r.OnClosed(sess, c); };
+            s.HistoryCompleted += (sess, snapshot) => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r)) r.OnHistory(sess, snapshot); };
         }
 
         public void Unregister(BridgeSession s)
@@ -113,6 +114,7 @@ namespace Apex.Desktop.Runtime
             }
             if (rejection != null) { Reject(s, rejection); return; }
             s.Send(new WelcomeMsg { Accepted = true, HostVersion = HostVersion, Label = _config.Config.Label });
+            if (s.HistoryCapable) _ = s.RequestHistoryAsync(_config.Config.Label).ContinueWith(_ => { }, System.Threading.Tasks.TaskScheduler.Default);
             _log.Info($"Połączono most {platform} {s.BridgeVersion} ({s.Transport}) – konto {(hello.Account.IsLive ? "LIVE" : "DEMO")} {hello.Account.Number} @ {hello.Account.Broker}.");
         }
 

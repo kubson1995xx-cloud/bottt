@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Apex.Core.Model;
 
+
 namespace Apex.Core.Bridge
 {
     /// <summary>
@@ -106,6 +107,7 @@ namespace Apex.Core.Bridge
         public int Protocol { get; set; } = BridgeProtocol.Version;
         public string Platform { get; set; } = "";
         public string BridgeVersion { get; set; } = "";
+        public string? HistoryCapability { get; set; }
         public string Key { get; set; } = "";
         public AccountDto Account { get; set; } = new();
         public long Time { get; set; }
@@ -233,6 +235,7 @@ namespace Apex.Core.Bridge
 
     public sealed class ClosedDto
     {
+        public long? ClosingDealId { get; set; }
         public long Id { get; set; }
         public string Symbol { get; set; } = "";
         public string Label { get; set; } = "";
@@ -249,6 +252,31 @@ namespace Apex.Core.Bridge
         public double Net { get; set; }
         /// <summary>StopLoss | TakeProfit | Closed | StopOut</summary>
         public string Reason { get; set; } = "Closed";
+
+    }
+
+    public sealed class HistoryRequest
+    {
+        public string Type { get; set; } = "historyRequest";
+        public string RequestId { get; set; } = "";
+        public string Label { get; set; } = "";
+    }
+
+    public sealed class HistoryPage
+    {
+        public const string Capability = "closing-deals-v1";
+        public string Type { get; set; } = "historyPage";
+        public string RequestId { get; set; } = "";
+        public int Page { get; set; }
+        public int Pages { get; set; }
+        public int Total { get; set; }
+        public string Scope { get; set; } = "available-history-v1";
+        public string Coverage { get; set; } = "unknown";
+        public long CapturedAt { get; set; }
+        public string? Error { get; set; }
+        public AccountDto? Account { get; set; }
+        public List<PositionDto>? Positions { get; set; }
+        public List<ClosedDto> Deals { get; set; } = new();
     }
 
     public sealed class ClosedMsg

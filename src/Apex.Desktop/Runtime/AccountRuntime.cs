@@ -106,6 +106,7 @@ namespace Apex.Desktop.Runtime
                 _identity ??= s.Account;
                 _sessionReady = false;
                 _adapter.Attach(s);
+
             }
             Enqueue(() =>
             {
@@ -141,11 +142,23 @@ namespace Apex.Desktop.Runtime
 
         public void OnClosed(ClosedDto c) => Enqueue(() => ApplyClosed(c));
 
+        public void OnHistory(BridgeSession s, BrokerHistorySnapshot snapshot)
+        {
+            lock (_lifecycle)
+            {
+                if (_stop || !ReferenceEquals(_adapter.Session, s)) return;
+                // Authorize now, not after a subsequent network-thread Attach. Immutable completed
+                // history carries its own matching positions; no new session data is substituted.
+                Enqueue(() => _engine?.ReplayHistory(snapshot, DateTime.UtcNow));
+            }
+        }
+
         private void ApplyClosed(ClosedDto c)
         {
             _engine?.OnPositionClosed(new ClosedPositionInfo
             {
                 PositionId = c.Id,
+                ClosingDealId = c.ClosingDealId,
                 Symbol = c.Symbol,
                 Label = c.Label,
                 Comment = c.Comment,
@@ -441,7 +454,7 @@ namespace Apex.Desktop.Runtime
                 if (json == null) return;
                 var state = JsonSerializer.Deserialize<EngineState>(json, ConfigStore.Json);
                 using var parsed = JsonDocument.Parse(json);
-                if (state == null || state.AccountNumber != account || state.SchemaVersion != 1
+                if (state == null || state.AccountNumber != account || (state.SchemaVersion != 1 && state.SchemaVersion != 2)
                     || !Enum.IsDefined(state.Mode) || state.Risk == null || state.Ledger == null || state.Plans == null
                     || state.Suspended == null || state.RecentTrades == null || state.DisabledStrategies == null || state.DisabledClasses == null
                     || state.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId) || string.IsNullOrWhiteSpace(e.Symbol) || !Enum.IsDefined(e.State))
@@ -519,6 +532,7 @@ namespace Apex.Desktop.Runtime
                 try
                 {
                     var now = DateTime.UtcNow;
+                    _adapter.Session?.EnsureHistory(_config.Config.Label);
                     if (_engine != null)
                     {
                         _engine.SetGuard(EvaluateGuard());

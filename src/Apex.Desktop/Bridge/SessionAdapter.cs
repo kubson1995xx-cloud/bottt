@@ -14,7 +14,7 @@ namespace Apex.Desktop.Bridge
     /// po rozłączeniu silnik widzi IsConnected = false (wstrzymuje działania), po powrocie – uzgadnia stan pozycji.
     /// Każde polecenie handlowe bez odpowiedzi po wysłaniu jest raportowane jako NIEPEWNE (silnik najpierw sprawdza pozycje).
     /// </summary>
-    public sealed class SessionAdapter : IBrokerGateway, IMarketData, IFeatureProvider
+    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider
     {
         private BridgeSession? _session;
         private readonly Func<CommissionOverride?> _commission;
@@ -37,6 +37,7 @@ namespace Apex.Desktop.Bridge
         public void Detach(BridgeSession s) => Interlocked.CompareExchange(ref _session, null, s);
 
         public bool IsConnected => Session?.HasFreshSnapshots == true;
+        public BrokerHistorySnapshot GetHistory() => Session?.History ?? new();
 
         public AccountSnapshot GetAccount()
         {
@@ -67,7 +68,8 @@ namespace Apex.Desktop.Bridge
 
         public OrderOutcome OpenMarket(OrderRequest req)
         {
-            if (!_canOpen()) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "Nowe wejścia zablokowane przez stan Desktop.");
+            if (!_canOpen() || !GetHistory().Complete || !GetHistory().RequiredCoverage)
+                return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "Nowe wejścia zablokowane przez stan Desktop/historii.");
             var s = Session;
             if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
             string id = s.NextId();

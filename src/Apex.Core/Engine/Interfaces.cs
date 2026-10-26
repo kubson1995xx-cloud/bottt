@@ -36,6 +36,7 @@ namespace Apex.Core.Engine
         public bool Complete { get; init; }
         public bool RequiredCoverage { get; init; }
         public string Scope { get; init; } = "available-history-v1";
+        public IReadOnlyList<PositionInfo>? Positions { get; init; }
         public IReadOnlyList<ClosedPositionInfo> Closed { get; init; } = Array.Empty<ClosedPositionInfo>();
     }
 
@@ -43,6 +44,7 @@ namespace Apex.Core.Engine
     /// or throw. ClosedRecords includes all accepted keys, not merely the UI's recent window.</summary>
     public interface IRecoveryJournal : ITradeJournal
     {
+        bool IsHealthy => true;
         IReadOnlyList<TradeRecord> ClosedRecords { get; }
     }
 

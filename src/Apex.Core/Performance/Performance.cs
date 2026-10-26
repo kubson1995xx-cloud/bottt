@@ -29,7 +29,7 @@ namespace Apex.Core.Performance
         public double Swap { get; set; }
         public double NetProfit { get; set; }
         /// <summary>Wynik netto w wielokrotnościach ryzyka początkowego.</summary>
-        public double RMultiple => InitialRiskMoney > 0 ? NetProfit / InitialRiskMoney : 0;
+        public double RMultiple => InitialRiskMoney > 0 && double.IsFinite(InitialRiskMoney) ? NetProfit / InitialRiskMoney : double.NaN;
         public string EntryReason { get; set; } = "";
         public string ExitReason { get; set; } = "";
         public string Regime { get; set; } = "";
@@ -50,7 +50,7 @@ namespace Apex.Core.Performance
                 Direction.ToString(), EntryTimeUtc.ToString("yyyy-MM-dd HH:mm:ss", ci), ExitTimeUtc.ToString("yyyy-MM-dd HH:mm:ss", ci),
                 EntryPrice.ToString("G10", ci), ExitPrice.ToString("G10", ci), Volume.ToString("G10", ci), InitialRiskMoney.ToString("F2", ci),
                 GrossProfit.ToString("F2", ci), Commission.ToString("F2", ci), Swap.ToString("F2", ci), NetProfit.ToString("F2", ci),
-                RMultiple.ToString("F3", ci), BarsHeld.ToString(ci), Score.ToString("F1", ci), Csv(Regime), Csv(EntryReason), Csv(ExitReason), Csv(Parameters),
+                double.IsFinite(RMultiple) ? RMultiple.ToString("F3", ci) : "", BarsHeld.ToString(ci), Score.ToString("F1", ci), Csv(Regime), Csv(EntryReason), Csv(ExitReason), Csv(Parameters),
             });
         }
 
@@ -106,9 +106,9 @@ namespace Apex.Core.Performance
             double grossWin = wins.Sum(t => t.NetProfit);
             double grossLoss = -losses.Sum(t => t.NetProfit);
             double net = grossWin - grossLoss;
-            var rs = ordered.Select(t => t.RMultiple).ToList();
-            double meanR = rs.Average();
-            double sdR = n > 1 ? Math.Sqrt(rs.Sum(r => (r - meanR) * (r - meanR)) / (n - 1)) : 0;
+            var rs = ordered.Select(t => t.RMultiple).Where(double.IsFinite).ToList();
+            double meanR = rs.Count > 0 ? rs.Average() : 0;
+            double sdR = rs.Count > 1 ? Math.Sqrt(rs.Sum(r => (r - meanR) * (r - meanR)) / (rs.Count - 1)) : 0;
 
             double equity = startingEquity, peak = startingEquity, maxDd = 0, maxDdPct = 0;
             foreach (var t in ordered)

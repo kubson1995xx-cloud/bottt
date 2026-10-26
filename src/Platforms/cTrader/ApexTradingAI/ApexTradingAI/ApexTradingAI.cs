@@ -134,7 +134,7 @@ namespace cAlgo.Robots
             var book = new StrategyBook(DefaultProfile.Load(), Account.IsLive);
             _adapter = new CTraderAdapter(this, _store, cfg.Label);
             IKeyValueStore kv = IsBacktesting ? new MemoryStore() : new LocalStorageStore(this);
-            _engine = new TradingEngine(cfg, book, _adapter, _adapter, _store, kv, new PrintLog(this), new PrintJournal(this), NewsFilter ? _news : null);
+            _engine = new TradingEngine(cfg, book, _adapter, _adapter, _store, kv, new PrintLog(this), new PrintJournal(this, cfg.Label), NewsFilter ? _news : null);
             _engine.SetGuard(_guard);
 
             BuildUniverse(book);
@@ -278,11 +278,7 @@ namespace cAlgo.Robots
         {
             var p = args.Position;
             if (_engine == null || p.Label != _engine.Config.Label) return;
-            double gross = 0, comm = 0, swap = 0, net = 0, exit = p.CurrentPrice, volume = 0;
-            DateTime exitTime = Server.TimeInUtc;
-            var deals = History.FindByPositionId(p.Id);
-            foreach (var h in deals.OrderBy(h => h.ClosingTime)) { gross += h.GrossProfit; comm += h.Commissions; swap += h.Swap; net += h.NetProfit; volume += h.VolumeInUnits; exit = h.ClosingPrice; exitTime = h.ClosingTime; }
-            if (deals.Length == 0) { gross = p.GrossProfit; comm = p.Commissions; swap = p.Swap; net = p.NetProfit; volume = p.VolumeInUnits; }
+
             _engine.OnPositionClosed(new ClosedPositionInfo
             {
                 PositionId = p.Id,
@@ -290,15 +286,8 @@ namespace cAlgo.Robots
                 Label = p.Label ?? "",
                 Comment = p.Comment ?? "",
                 Direction = p.TradeType == TradeType.Buy ? TradeDirection.Long : TradeDirection.Short,
-                Volume = volume,
-                EntryPrice = p.EntryPrice,
-                ExitPrice = exit,
                 EntryTimeUtc = DateTime.SpecifyKind(p.EntryTime, DateTimeKind.Utc),
-                ExitTimeUtc = DateTime.SpecifyKind(exitTime, DateTimeKind.Utc),
-                GrossProfit = gross,
-                Commission = comm,
-                Swap = swap,
-                NetProfit = net,
+                ExitTimeUtc = Server.TimeInUtc,
                 PlatformReason = args.Reason.ToString(),
             });
         }
@@ -328,7 +317,7 @@ namespace cAlgo.Robots
 
     // ======================================================================== adaptery cTrader
 
-    internal sealed class CTraderAdapter : IBrokerGateway, IMarketData
+    internal sealed class CTraderAdapter : IBrokerGateway, IBrokerHistory, IMarketData
     {
         private readonly Robot _r;
         private readonly BarStore _store;
@@ -371,7 +360,29 @@ namespace cAlgo.Robots
 
         public static SymbolDto ToDto(Symbol s, Robot r) => CTraderData.Describe(s, r);
 
-        public bool IsConnected => SafeAccount && (_r.IsBacktesting || _r.Server.IsConnected);
+        private bool _wasConnected;
+        private string _generation = Guid.NewGuid().ToString("N");
+        public bool IsConnected
+        {
+            get
+            {
+                bool connected = SafeAccount && (_r.IsBacktesting || _r.Server.IsConnected);
+                if (connected && !_wasConnected) _generation = Guid.NewGuid().ToString("N");
+                _wasConnected = connected; return connected;
+            }
+        }
+        public BrokerHistorySnapshot GetHistory()
+        {
+            // Engine callbacks run on cTrader's main thread. Never enumerate History in a
+            // network/task callback. SDK has no documented completeness/paging operation.
+            if (!IsConnected) return new();
+            var rows = CTraderHistory.Capture(_r.History, _label);
+            return new BrokerHistorySnapshot
+            {
+                AccountNumber = _account, Generation = _generation, Complete = true,
+                RequiredCoverage = _r.IsBacktesting, Closed = rows.Select(x => x.ToInfo()).ToArray(), Positions = GetPositions(),
+            };
+        }
 
         public AccountSnapshot GetAccount() => new()
         {
@@ -582,12 +593,30 @@ namespace cAlgo.Robots
     }
 
     /// <summary>Dziennik w logu cTrader (cBot działa bez uprawnień do plików – pełny dziennik CSV prowadzi APEX Desktop).</summary>
-    internal sealed class PrintJournal : ITradeJournal
+    internal sealed class PrintJournal : IRecoveryJournal
     {
         private readonly Robot _r;
-        public PrintJournal(Robot r) => _r = r;
+        private readonly IKeyValueStore _store;
+        private readonly string _key;
+        private List<TradeRecord> _records;
+        public IReadOnlyList<TradeRecord> ClosedRecords => _records;
+        public PrintJournal(Robot r, string label)
+        {
+            _r = r; _store = r.IsBacktesting ? new MemoryStore() : new LocalStorageStore(r);
+            _key = PlatformSafety.StorageKey("Closed", r.Account.BrokerName ?? "", r.Account.Number, label);
+            string? json = _store.Get(_key);
+            _records = json == null ? new() : System.Text.Json.JsonSerializer.Deserialize<List<TradeRecord>>(json, BridgeProtocol.Json) ?? throw new InvalidOperationException("invalid closed journal");
+            if (_records.Any(x => x == null) || _records.Select(x => x.PositionId).Distinct().Count() != _records.Count)
+                throw new InvalidOperationException("conflicting closed journal");
+        }
         public void TradeOpened(TradePlan plan, double volume, string details) => _r.Print($"APEX OTWARCIE #{plan.PositionId} {plan.Symbol} {plan.Direction} {volume} {plan.Strategy} SL {plan.InitialStop} | {plan.EntryReason}");
-        public void TradeClosed(TradeRecord record) => _r.Print("APEX ZAMKNIĘCIE " + record.ToCsv());
+        public void TradeClosed(TradeRecord record)
+        {
+            if (_records.Any(x => x.PositionId == record.PositionId)) return;
+            var next = _records.Concat(new[] { record }).ToList();
+            _store.Set(_key, System.Text.Json.JsonSerializer.Serialize(next, BridgeProtocol.Json)); _store.Flush();
+            _records = next; _r.Print("APEX ZAMKNIĘCIE " + record.ToCsv());
+        }
         public void Signal(string line) => _r.Print("APEX SYGNAŁ " + line);
         public void Event(string line) => _r.Print("APEX ZDARZENIE " + line);
     }

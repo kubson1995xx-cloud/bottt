@@ -33,13 +33,14 @@ public class DemoSafetyTests
         }
     }
 
-    private sealed class Gateway : IBrokerGateway, IMarketData
+    private sealed class Gateway : IBrokerGateway, IBrokerHistory, IMarketData
     {
         public FakeBroker Inner = new();
         public int QuoteOffsetSeconds;
         public bool RejectModify, IgnoreModify, FailClose, DropTp;
         public Action? BeforeOpen, BeforeClose;
         public bool IsConnected => Inner.IsConnected;
+        public BrokerHistorySnapshot GetHistory() => Inner.GetHistory();
         public AccountSnapshot GetAccount() => Inner.GetAccount();
         public IReadOnlyList<PositionInfo> GetPositions() => Inner.GetPositions();
         public OrderOutcome OpenMarket(OrderRequest request)
@@ -203,7 +204,7 @@ public class DemoSafetyTests
         r.Engine.CmdEmergencyStop(r.Now, "test");
         r.G.FailClose = false;
         var restarted = new Rig(r.Store, r.G, start: false);
-        restarted.Tick();
+        restarted.Tick(20); // durable close retry keeps its persisted backoff across restart
         Assert.Equal(EngineMode.EmergencyStopped, restarted.Engine.Mode);
         Assert.Equal(100, Assert.Single(r.G.Inner.Positions).Id);
     }

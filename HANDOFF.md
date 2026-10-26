@@ -2,6 +2,10 @@
 
 ## Autonomia Task1 — faza Core odzyskiwania (lokalna, nie wydanie)
 
+- Commit fazy Core: `0b96170`. Kolejna faza spina `closing-deals-v1`: frozen paged available-history, token sesji/request, pełne count/page validation, snapshot pozycji, raw SDK mapper współdzielony przez oba cBoty i symulator. `closed` jest tylko hintem, nie dowodem ekonomicznym; przyjęta przed reconnect kompletna historia zachowuje autoryzację w kolejce właściciela konta.
+- Aktualny pośredni pełny Core/Desktop: **290/290** (`full-mid3.trx`), po wcześniejszym jawnym **276/290** (`full-mid.trx`). Dostosowane fixtury jawnie implementują historię; reconnect wymaga START, retry zachowuje backoff, testy callbacków używają kompletnej historii zamiast nieautorytatywnego hintu. Mapper SDK RED 2/3 → GREEN 3/3. SDK/solution build pośredni 0 ostrzeżeń/błędów (`build-mid2.log`), po pierwszym błędzie zależności linkowanego Protocol naprawiono mapowanie jako extension w Core, nie zależność Engine w samym protokole.
+- W toku: końcowy host-process history/restart smoke, format walidacji native LocalStorage, końcowe pełne bramki i raport. SDK `CoverageUnknown` nadal celowo blokuje START i test-open na realnym cTrader; to jawna bramka operacyjna, nie pozorny dowód kompletności.
+
 - RED: 13/15 regresji recovery zawiodło (duplikaty, offline close, brak historii, restart intent); GREEN po pierwszej fazie: 15/15. Dowody: `/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task1/recovery-expanded-red.{log,trx}` oraz `recovery-green-1.{log,trx}`.
 - Stan v2 przechowuje raw closing-deal keys, końcowe pozycje, ekonomię i eksport outbox w jednym autorytatywnym zapisie; pełny close zapisuje intent przed próbą i może działać mimo awarii zapisu tylko dla dokładnego własnego ID/DEMO. CSV atomowy i kluczowany; brak cichego gubienia błędów ekonomicznych.
 - Faza NIE jest ukończonym Task1: transport/SDK/symulator i pełne testy są w toku; nowe wymagania coverage nie są jeszcze spięte między warstwami. Nie uruchamiać do handlu.

@@ -68,6 +68,8 @@ namespace Apex.Desktop.Services
         private readonly object _lock = new();
         private readonly List<TradeRecord> _recent = new();
         private readonly Dictionary<long, TradeRecord> _closed = new();
+        public bool HasFault { get; private set; }
+        public bool IsHealthy => !HasFault;
         public IReadOnlyList<TradeRecord> ClosedRecords { get { lock (_lock) return _closed.Values.ToList(); } }
         private readonly LinkedList<string> _events = new();
 
@@ -76,16 +78,20 @@ namespace Apex.Desktop.Services
             _dir = dir;
             Directory.CreateDirectory(dir);
             string trades = Path.Combine(dir, "transakcje.csv");
-            if (!File.Exists(trades)) AtomicFile.Write(trades, TradeRecord.CsvHeader + Environment.NewLine);
-            LoadRecent(trades);
+            try
+            {
+                if (!File.Exists(trades)) AtomicFile.Write(trades, TradeRecord.CsvHeader + Environment.NewLine);
+                LoadRecent(trades);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { HasFault = true; }
         }
 
         private void LoadRecent(string path)
         {
             foreach (var line in File.ReadLines(path).Skip(1))
             {
-                var r = Parse(line) ?? throw new IOException("Uszkodzony dziennik transakcji: " + path);
-                if (_closed.ContainsKey(r.PositionId)) throw new IOException("Powtórzony klucz starego dziennika – wymagane uzgodnienie: " + r.PositionId);
+                var r = Parse(line);
+                if (r == null || _closed.ContainsKey(r.PositionId)) { HasFault = true; continue; }
                 _closed.Add(r.PositionId, r);
                 _recent.Add(r);
                 if (_recent.Count > 500) _recent.RemoveAt(0);
@@ -146,6 +152,7 @@ namespace Apex.Desktop.Services
         {
             lock (_lock)
             {
+                if (HasFault) throw new IOException("Dziennik wymaga uzgodnienia – oryginalne dane zachowane.");
                 if (_closed.ContainsKey(record.PositionId)) return;
                 // Atomic publication avoids a torn CSV tail and a separate dedupe-index crash gap.
                 // This is append semantics, not retention/compaction: every accepted row is retained.
