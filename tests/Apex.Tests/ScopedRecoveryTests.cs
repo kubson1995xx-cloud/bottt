@@ -11,6 +11,26 @@ namespace Apex.Tests;
 
 public sealed class ScopedRecoveryTests
 {
+    [Fact]
+    public void RuntimeSynchronizationConsumesCurrentScopeInsteadOfUniversalCoverageAndStartStillNeedsTask2()
+    {
+        var f = new Fixture(); f.Establish();
+        f.Engine.OnTimer(Now);
+        Assert.True(f.Engine.HistoryReady);
+        Assert.Contains("PASS", f.Engine.CmdStart());
+        Assert.Equal(EngineMode.Stopped, f.Engine.Mode);
+        f.Current = false; f.Engine.OnTimer(Now);
+        Assert.False(f.Engine.HistoryReady);
+    }
+
+    [Fact]
+    public void HarmlessDurableSaveDoesNotPermanentlyLoseOriginalCurrentReceipt()
+    {
+        var f = new Fixture(); f.Establish(); f.Engine.SaveState(Now, true);
+        f.Engine.OnTimer(Now); Assert.True(f.Engine.HistoryReady);
+        f.Tick = TimeSpan.FromSeconds(31); f.Engine.OnTimer(Now.AddSeconds(31)); Assert.False(f.Engine.HistoryReady);
+    }
+
     static readonly DateTime Now = RecoveryTests.Now;
     static readonly JsonSerializerOptions Json = new() { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
     sealed class Broker : FakeBroker

@@ -167,6 +167,17 @@ public sealed class OpeningEvidenceTests
     }, "original-command", step);
 
     [Fact]
+    public void AvailableClosingReferencesExposeOpeningAdditionEvenWithoutCurrentPosition()
+    {
+        var type = typeof(OpeningEvidenceTests).Assembly.GetType("Apex.Platforms.CTrader.CTraderScopeEvidence"); Assert.NotNull(type);
+        var closing = Proxy<Deal>(new() { ["get_Closing"] = new ReadonlyList<Deal>(new[] { Opening(), Opening(0.5, 45) }) });
+        var row = Proxy<HistoricalTrade>(new() { ["get_Label"] = "fresh-scope", ["get_ClosingDeal"] = closing });
+        var method = type!.GetMethod("CaptureOpenings")!;
+        var observations = (System.Collections.Generic.IReadOnlyList<OpeningDealEvidence>)method.Invoke(null, new object[] { Array.Empty<Position>(), new[] { row }, "fresh-scope" })!;
+        Assert.Equal(2, observations.Count); Assert.Contains(observations, x => x.DealId == 45);
+    }
+
+    [Fact]
     public void OpeningEvidenceIsFrozenAcrossCallerGraphAndResultMutations()
     {
         var opening = Opening();

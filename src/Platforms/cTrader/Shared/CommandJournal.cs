@@ -21,6 +21,8 @@ namespace Apex.Platforms.CTrader
         private readonly Action<string> _persist;
         private bool _faulted;
         private string? _executingId;
+        internal int Count => _entries.Count;
+        internal bool Healthy => !_faulted;
         internal CommandJournal(string? saved, Action<string> persist)
         {
             _persist = persist;
@@ -120,6 +122,8 @@ namespace Apex.Platforms.CTrader
             catch (Exception ex) { return Uncertain(id, "niepewne pełne zamknięcie: " + ex.Message); }
         }
 
+        // Read-only positive lookup; absence is NOT a rejection and never authorizes resend.
+        internal ResultMsg? Lookup(string id) => _entries.TryGetValue(id, out var entry) ? Copy(entry.Result, id) : null;
         private void Save() => _persist(JsonSerializer.Serialize(_entries, BridgeProtocol.Json));
         private static ResultMsg Copy(ResultMsg r, string id) => new() { Id = id, Status = r.Status, PositionId = r.PositionId, Price = r.Price, OpeningFill = r.OpeningFill, Error = r.Error, Message = r.Message };
         private static ResultMsg Uncertain(string id, string message) => new() { Id = id, Status = "uncertain", Error = "TechnicalError", Message = message };

@@ -22,6 +22,8 @@ namespace Apex.Desktop.Services
         public CommissionOverride? Commission { get; set; }
         public UniverseSettings? Universe { get; set; }
         public bool AutoStart { get; set; }
+        public RecoveryBaseline? ScopeReservation { get; set; }
+        public string[] ScopeInventory { get; set; } = Array.Empty<string>();
     }
 
     /// <summary>Konfiguracja aplikacji (plik apex.config.json w katalogu danych).</summary>

@@ -84,7 +84,19 @@ namespace Apex.Core.Engine
 
         private void SynchronizeHistory(DateTime utc)
         {
-            if (_state.Baseline != null) { BlockHistory("Scoped producer/permit dispatch requires Phase C integration"); return; }
+            if (_state.Baseline != null)
+            {
+                // A normal state save consumes the revision-bound permit, not the immutable
+                // receipt. Reconcile it against the new durable revision without renewing age.
+                if (_scopedAuthority != null && _lastScopedReceipt != null && GetScopedPermit(_scopedAuthority, utc) == null
+                    && CurrentScopedReceipt(_lastScopedReceipt, _scopedAuthority, utc, _lastScopedDeadline))
+                    ReconcileScoped(_lastScopedReceipt, _scopedAuthority, utc, _lastScopedDeadline);
+                HistoryReady = _scopedAuthority != null && GetScopedPermit(_scopedAuthority, utc) != null;
+                HistoryMessage = HistoryReady ? "ScopedReady – uzgodniono zakres aplikacji; broker CoverageUnknown" : ScopedMessage;
+                if (!_broker.IsConnected || ScopedStatus == ScopedRecoveryStatus.Conflict)
+                    BlockHistory("utrata połączenia/konflikt zakresu – wymagany jawny START. " + ScopedMessage);
+                return;
+            }
             if (_stateReadFault) { BlockHistory("stan odzyskiwania wymaga ręcznego uzgodnienia"); return; }
             if (!_simulation && (_journal is not IRecoveryJournal durable || !durable.IsHealthy))
             { BlockHistory("dziennik odzyskiwania niedostępny"); return; }

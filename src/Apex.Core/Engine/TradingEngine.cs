@@ -1220,7 +1220,7 @@ namespace Apex.Core.Engine
             _dirty = true;
             // Zapis z wyprzedzeniem: rezerwacja sygnału trafia na dysk PRZED wysłaniem zlecenia,
             // więc awaria tuż po wysłaniu nie pozwoli wysłać tego samego sygnału ponownie po restarcie.
-            if (!TrySaveState(utc, force: true)) return false;
+            if (_state.Baseline == null && !TrySaveState(utc, force: true)) return false;
 
             double slPips = Math.Round(r.Spec.PriceToPips(c.StopDistance), 1);
             // Ochronny TP 3R dla strategii wychodzących regułą/trailingiem; reguły wejścia bez zmian.
@@ -1415,6 +1415,7 @@ namespace Apex.Core.Engine
         public string CmdStart()
         {
             if (!GuardAllowed) return "Nie można uruchomić: " + GuardMessage;
+            if (!_trustedSimulation && _state.Baseline != null) return "START strategii zablokowany: wymagany trwały PASS Task2 dla tego konta/zakresu/ścieżki. Test techniczny jest osobnym jawnym poleceniem.";
             if (_initialized) SynchronizeHistory(_broker.GetAccount().TimeUtc);
             if (!_initialized || !HistoryReady || !_persistenceHealthy || !CanOperate(out _)) return "Nie można uruchomić: brak bezpiecznego konta/połączenia, historii lub trwałego zapisu. " + HistoryMessage;
             if (_state.Mode == EngineMode.EmergencyStopped) return "Najpierw zresetuj awaryjne zatrzymanie.";
@@ -1583,7 +1584,9 @@ namespace Apex.Core.Engine
                 t.Log.Add($"{utc:HH:mm:ss} START testu na {sym}: wolumen min. {spec.VolumeMin}, SL {slPips} pips, TP {tpPips} pips");
                 if (!_ledger.TryReserve(sid, sym, utc)) return "Test z tym identyfikatorem już był wykonany – spróbuj za minutę.";
                 _dirty = true;
-                if (!TrySaveState(utc, true)) return "Test zablokowany: zapis rezerwacji nieudany.";
+                // Scoped dispatch atomically commits this ledger reservation WITH the complete
+                // admission before sending. A preliminary save would consume its current permit.
+                if (_state.Baseline == null && !TrySaveState(utc, true)) return "Test zablokowany: zapis rezerwacji nieudany.";
                 var res = SendAdmittedOpen(new OrderRequest
                 {
                     Symbol = sym, Direction = TradeDirection.Long, VolumeUnits = spec.VolumeMin, StopLossPips = slPips, TakeProfitPips = tpPips,

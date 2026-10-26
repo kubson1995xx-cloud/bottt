@@ -16,6 +16,8 @@ public sealed partial class TradingEngine
     private static readonly ConditionalWeakTable<RecoveryBaseline, object> GeneratedProposals = new();
     private ScopedOpenPermit? _scopedPermit;
     private ScopedReceiptAuthority? _scopedAuthority;
+    private ScopedReceipt? _lastScopedReceipt;
+    private TimeSpan _lastScopedDeadline;
     private bool ScopedProjectionHealthy => _projectionReconciled && _journal is IRecoveryJournal { IsHealthy: true };
     internal RecoveryBaseline? ScopedBaseline => _state.Baseline;
     internal IReadOnlyList<OpenAdmission> ScopedAdmissions => _state.OpenAdmissions.AsReadOnly();
@@ -81,7 +83,7 @@ public sealed partial class TradingEngine
             || _state.Baseline != null || _state.LegacyScopeQuarantine || _stateReadFault || !_persistenceHealthy || !ScopedProjectionHealthy
             || _plans.Count != 0 || _ledger.Entries.Count != 0 || _pendingCloses.Count != 0 || _state.ClosingDeals.Count != 0
             || _state.OpenAdmissions.Count != 0 || _state.ClosedRecords.Count != 0 || _state.ClosedOutbox.Count != 0) return false;
-        var next = ScopeCandidate(); next.Baseline = proposal;
+        var next = ScopeCandidate(); next.Baseline = proposal; next.Label = proposal.Identity.Label;
         return CommitScope(next, utc) && ScopedProjectionHealthy;
     }
 
@@ -132,6 +134,7 @@ public sealed partial class TradingEngine
         var frozen = JsonSerializer.Deserialize<ScopedReceipt>(JsonSerializer.Serialize(receipt, StateJson), StateJson)!;
         if (!CurrentScopedReceipt(frozen, authority, utc, expires)) return false;
         _scopedAuthority = authority;
+        _lastScopedReceipt = frozen; _lastScopedDeadline = expires;
         _scopedPermit = new ScopedOpenPermit(this, frozen, _state.DurableRevision, expires);
         ScopedStatus = ScopedRecoveryStatus.Ready;
         ScopedMessage = "ScopedReady: dedicated/exclusive application epoch only; broker CoverageUnknown";
@@ -201,7 +204,16 @@ public sealed partial class TradingEngine
             RecoverOpeningOutcome(op, OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "scope expired or fenced before send: not sent"), utc);
             return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "scope expired or fenced before send");
         }
-        try { result = _broker.OpenMarket(send); }
+        try
+        {
+            result = receipt != null && _broker is IScopedDispatchGateway scopedGateway
+                ? scopedGateway.OpenScoped(send, new ScopedDispatchAuthorization(receipt, r =>
+                    r.ExecutionId == op && RequestEvidence(r, op) == evidence && authority != null
+                    && !_stateReadFault && _persistenceHealthy && _state.ScopeConflict.Length == 0
+                    && _state.OpenAdmissions.Any(a => a.OperationId == op && a.Request == evidence && a.Stage == AdmissionStage.OutcomeUnknown)
+                    && CurrentScopedReceipt(receipt, authority, utc, permit!.Expires)))
+                : _broker.OpenMarket(send);
+        }
         catch (Exception ex) { result = OrderOutcome.Uncertain(BrokerErrorKind.TechnicalError, ex.Message); }
         if (!RecoverOpeningOutcome(op, result, utc))
             return new OrderOutcome { Status = OrderStatus.Uncertain, PositionId = result.PositionId, OpeningFill = result.OpeningFill,
@@ -284,9 +296,10 @@ public sealed partial class TradingEngine
         return false;
     }
 
-    internal bool ReconcileScoped(ScopedReceipt receipt, ScopedReceiptAuthority authority, DateTime utc)
+    internal bool ReconcileScoped(ScopedReceipt receipt, ScopedReceiptAuthority authority, DateTime utc, TimeSpan? originalDeadline = null)
     {
         var expires = ReceiptDeadline(receipt, authority, utc);
+        if (originalDeadline.HasValue && originalDeadline.Value < expires) expires = originalDeadline.Value;
         _scopedPermit = null;
         if (_stateReadFault || _state.Baseline?.Stage != BaselineStage.Established || _state.LegacyScopeQuarantine
             || !ReceiptValid(receipt, authority, utc, false)) return false;

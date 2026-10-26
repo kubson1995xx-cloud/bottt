@@ -114,6 +114,19 @@ internal sealed class ScopedOpenPermit
     { Owner = owner; Receipt = receipt; DurableRevision = revision; Expires = expires; }
 }
 
+// Issued only across the synchronous Core→gateway call after durable reservation.
+internal sealed class ScopedDispatchAuthorization
+{
+    internal readonly ScopedReceipt Receipt;
+    internal readonly Func<OrderRequest, bool> IsCurrent;
+    internal ScopedDispatchAuthorization(ScopedReceipt receipt, Func<OrderRequest, bool> isCurrent)
+    { Receipt = receipt; IsCurrent = isCurrent; }
+}
+internal interface IScopedDispatchGateway
+{
+    OrderOutcome OpenScoped(OrderRequest request, ScopedDispatchAuthorization authorization);
+}
+
 public static class ScopedRecoveryPolicy
 {
     public const string SafetyVersion = "scoped-demo-v1";

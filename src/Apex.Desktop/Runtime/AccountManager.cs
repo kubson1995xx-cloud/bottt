@@ -50,6 +50,8 @@ namespace Apex.Desktop.Runtime
             s.SymbolsUpdated += sess => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r)) r.OnSymbols(sess); };
             s.PositionClosed += (sess, c) => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r) && ReferenceEquals(r.Adapter.Session, sess)) r.OnClosed(sess, c); };
             s.HistoryCompleted += (sess, snapshot) => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r)) r.OnHistory(sess, snapshot); };
+            s.ScopedCompleted += (sess, snapshot) => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r)) r.OnScopedHistory(sess, snapshot); };
+            s.BrokerChanged += sess => { if (sess.AccountKey != null && _runtimes.TryGetValue(sess.AccountKey, out var r)) r.OnBrokerChanged(sess); };
         }
 
         public void Unregister(BridgeSession s)
@@ -87,6 +89,12 @@ namespace Apex.Desktop.Runtime
             if (hello.Account == null || hello.Account.Number <= 0) { Reject(s, "brak danych konta"); return; }
             string platform = string.IsNullOrWhiteSpace(s.Platform) ? "Nieznana" : s.Platform;
             string key = BridgeSession.AccountKeyFor(platform, hello.Account);
+            if (s.ScopedCapable)
+            {
+                if (hello.Platform != platform) { Reject(s, "nieprawidłowa pełna tożsamość platformy"); return; }
+                var identity = System.Text.Json.JsonSerializer.Serialize(new { Platform = platform, hello.Account.Broker, hello.Account.Number, hello.Account.Currency, hello.Account.IsLive, hello.Account.Hedging, Path = "desktop-bridge" });
+                key = "scope-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+            }
             string? rejection = null;
             lock (_lifecycle)
             {
@@ -113,8 +121,10 @@ namespace Apex.Desktop.Runtime
                 }
             }
             if (rejection != null) { Reject(s, rejection); return; }
-            s.Send(new WelcomeMsg { Accepted = true, HostVersion = HostVersion, Label = _config.Config.Label });
-            if (s.HistoryCapable) _ = s.RequestHistoryAsync(_config.Config.Label).ContinueWith(_ => { }, System.Threading.Tasks.TaskScheduler.Default);
+            var owner = _runtimes[key];
+            s.Send(new WelcomeMsg { Accepted = true, HostVersion = HostVersion, Label = owner.ResolvedLabel,
+                BaselineId = s.BaselineId, TransportGeneration = s.Id, ScopedCapability = s.ScopedCapable ? ScopeFrame.Capability : null });
+            if (s.HistoryCapable) _ = s.RequestHistoryAsync(owner.ResolvedLabel).ContinueWith(_ => { }, System.Threading.Tasks.TaskScheduler.Default);
             _log.Info($"Połączono most {platform} {s.BridgeVersion} ({s.Transport}) – konto {(hello.Account.IsLive ? "LIVE" : "DEMO")} {hello.Account.Number} @ {hello.Account.Broker}.");
         }
 

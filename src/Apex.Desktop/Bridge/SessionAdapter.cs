@@ -14,7 +14,7 @@ namespace Apex.Desktop.Bridge
     /// po rozłączeniu silnik widzi IsConnected = false (wstrzymuje działania), po powrocie – uzgadnia stan pozycji.
     /// Każde polecenie handlowe bez odpowiedzi po wysłaniu jest raportowane jako NIEPEWNE (silnik najpierw sprawdza pozycje).
     /// </summary>
-    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider, ITrustedSimulationGateway
+    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider, ITrustedSimulationGateway, IScopedDispatchGateway
     {
         private readonly bool _trustedSimulation;
         bool ITrustedSimulationGateway.TrustedSimulation => _trustedSimulation;
@@ -40,7 +40,7 @@ namespace Apex.Desktop.Bridge
 
         public void Detach(BridgeSession s) => Interlocked.CompareExchange(ref _session, null, s);
 
-        public bool IsConnected => Session?.HasFreshSnapshots == true;
+        public bool IsConnected => Session is { HasFreshSnapshots: true } s && (!s.ScopedCapable || s.BrokerConnected);
         public BrokerHistorySnapshot GetHistory() => Session?.History ?? new();
 
         public AccountSnapshot GetAccount()
@@ -67,7 +67,7 @@ namespace Apex.Desktop.Bridge
 
         public OrderOutcome OpenMarket(OrderRequest req)
         {
-            if (!_canOpen() || !GetHistory().Complete || !GetHistory().RequiredCoverage)
+            if (!_trustedSimulation || !_canOpen() || !GetHistory().Complete || !GetHistory().RequiredCoverage)
                 return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "Nowe wejścia zablokowane przez stan Desktop/historii.");
             var s = Session;
             if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
@@ -86,6 +86,18 @@ namespace Apex.Desktop.Bridge
                 MaxSlipPips = req.MaxSlippagePips,
             }, id, OrderTimeout);
             return MapResult(sent, json, "otwarcie");
+        }
+
+        OrderOutcome IScopedDispatchGateway.OpenScoped(OrderRequest req, ScopedDispatchAuthorization authorization)
+        {
+            var s = Session;
+            bool Authorized() => s != null && ReferenceEquals(s, Session) && _canOpen() && authorization.IsCurrent(req) && s.IsCurrent(authorization.Receipt);
+            var frame = s?.DispatchScope(authorization.Receipt);
+            if (frame == null || !Authorized()) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "nieaktualne uprawnienie zakresu – nie wysłano");
+            var (sent, json) = s!.RequestScopedOpen(new OpenCmd { Id = req.ExecutionId, SignalId = req.SignalId, Symbol = req.Symbol,
+                Side = BridgeProtocol.SideOf(req.Direction), Units = req.VolumeUnits, SlPips = req.StopLossPips, TpPips = req.TakeProfitPips,
+                Label = req.Label, Comment = req.Comment, MaxSlipPips = req.MaxSlippagePips, Scoped = frame }, Authorized, OrderTimeout);
+            return MapResult(sent, json, "otwarcie zakresu");
         }
 
         public OrderOutcome ModifyStopLoss(long positionId, double stopLoss)

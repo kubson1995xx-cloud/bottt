@@ -139,6 +139,7 @@ namespace cAlgo.Robots
 
             BuildUniverse(book);
             _engine.Initialize(Server.TimeInUtc);
+            if (!IsBacktesting) Print("APEX Native: tylko odczyt/redukcja. Nowe ryzyko i TEST DEMO wyłączone: brak natywnego kreatora zakresu/permit. Użyj ApexBridge + APEX Desktop; START wymaga Task2 PASS.");
             if (IsBacktesting) _engine.CmdStart();
             Positions.Closed += OnPositionClosed;
             if (!IsBacktesting)
@@ -294,6 +295,7 @@ namespace cAlgo.Robots
 
         protected override void OnStop()
         {
+            _adapter?.Dispose();
             _engine?.SaveState(Server.TimeInUtc, true);
         }
 
@@ -317,7 +319,7 @@ namespace cAlgo.Robots
 
     // ======================================================================== adaptery cTrader
 
-    internal sealed class CTraderAdapter : IBrokerGateway, IBrokerHistory, IMarketData
+    internal sealed class CTraderAdapter : IBrokerGateway, IBrokerHistory, IMarketData, ITrustedSimulationGateway, IDisposable
     {
         private readonly Robot _r;
         private readonly BarStore _store;
@@ -328,12 +330,22 @@ namespace cAlgo.Robots
         private readonly string _broker;
         private readonly string _currency;
         private readonly CommandJournal _journal;
+        private readonly bool _sdkBacktest;
+        bool ITrustedSimulationGateway.TrustedSimulation => _sdkBacktest;
+        private readonly ScopedPlatformState _brokerFence = new();
+        private void ConnectedEvent() => _brokerFence.BrokerEvent(true);
+        private void DisconnectedEvent() => _brokerFence.BrokerEvent(false);
+        public void Dispose() { _r.Server.Connected -= ConnectedEvent; _r.Server.Disconnected -= DisconnectedEvent; _brokerFence.BrokerEvent(false); }
         private readonly Dictionary<string, Ticks> _ticks = new(StringComparer.OrdinalIgnoreCase);
 
         public CTraderAdapter(Robot r, BarStore store, string label)
         {
             _r = r;
             _store = store;
+            _sdkBacktest = r.IsBacktesting; // actual SDK runtime, not config/CLI authority
+            _brokerFence.BrokerEvent(r.Server.IsConnected || _sdkBacktest);
+            r.Server.Connected += ConnectedEvent;
+            r.Server.Disconnected += DisconnectedEvent;
             _label = label;
             _account = r.Account.Number;
             _broker = r.Account.BrokerName ?? "";
@@ -360,17 +372,7 @@ namespace cAlgo.Robots
 
         public static SymbolDto ToDto(Symbol s, Robot r) => CTraderData.Describe(s, r);
 
-        private bool _wasConnected;
-        private string _generation = Guid.NewGuid().ToString("N");
-        public bool IsConnected
-        {
-            get
-            {
-                bool connected = SafeAccount && (_r.IsBacktesting || _r.Server.IsConnected);
-                if (connected && !_wasConnected) _generation = Guid.NewGuid().ToString("N");
-                _wasConnected = connected; return connected;
-            }
-        }
+        public bool IsConnected => SafeAccount && (_sdkBacktest || _r.Server.IsConnected && _brokerFence.BrokerConnected);
         public BrokerHistorySnapshot GetHistory()
         {
             // Engine callbacks run on cTrader's main thread. Never enumerate History in a
@@ -379,7 +381,7 @@ namespace cAlgo.Robots
             var rows = CTraderHistory.Capture(_r.History, _label);
             return new BrokerHistorySnapshot
             {
-                AccountNumber = _account, Generation = _generation, Complete = true,
+                AccountNumber = _account, Generation = _brokerFence.BrokerEpoch, Complete = true,
                 RequiredCoverage = _r.IsBacktesting, Closed = rows.Select(x => x.ToInfo()).ToArray(), Positions = GetPositions(),
             };
         }
@@ -442,6 +444,7 @@ namespace cAlgo.Robots
 
         public OrderOutcome OpenMarket(OrderRequest q)
         {
+            if (!_sdkBacktest) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "Native tylko odczyt/redukcja: brak natywnego setup/permit. Użyj ApexBridge + APEX Desktop. START wymaga Task2 PASS.");
             if (!SafeAccount || !IsConnected) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "wymagane aktywne konto DEMO");
             if (!PlatformSafety.OwnLabel(q.Label, _label) || string.IsNullOrWhiteSpace(q.Comment)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "nieprawidłowa etykieta/sygnał");
             string id = !string.IsNullOrEmpty(q.ExecutionId) ? q.ExecutionId : string.IsNullOrEmpty(q.SignalId) ? q.Comment : q.SignalId;
@@ -707,10 +710,10 @@ namespace cAlgo.Robots
 
         public void Attach(TradingEngine e)
         {
-            _buttons.AddChild(Btn("START", Color.FromHex("#2A78D6"), () => _bot.RunCommand(x => x.CmdStart())));
+            _buttons.AddChild(Btn("START – ZABLOKOWANY", Color.FromHex("#5A6475"), () => _bot.RunCommand(x => "Native tylko odczyt/redukcja. Użyj ApexBridge + APEX Desktop; strategia wymaga Task2 PASS.")));
             _buttons.AddChild(Btn("PAUZA", Color.FromHex("#5A6475"), () => _bot.RunCommand(x => x.CmdPauseEntries())));
             _buttons.AddChild(Btn("STOP", Color.FromHex("#5A6475"), () => Confirm("stop", "Zatrzymać bota", x => x.CmdStop())));
-            _buttons.AddChild(Btn("TEST DEMO", Color.FromHex("#6250D6"), () => Confirm("test", "Uruchomić test wykonania (DEMO)", x => x.CmdExecutionTest(DateTime.UtcNow, null))));
+            _buttons.AddChild(Btn("TEST – ZABLOKOWANY", Color.FromHex("#5A6475"), () => _bot.RunCommand(x => "Test Native wyłączony do ukończenia setup/permit. Nie wysłano transakcji.")));
             _buttons2.AddChild(Btn("ZAMKNIJ POZYCJE BOTA", Color.FromHex("#8A3A2A"), () => Confirm("close", "Zamknąć wszystkie pozycje bota", x => x.CmdCloseAllOwn(DateTime.UtcNow))));
             _buttons2.AddChild(Btn("AWARYJNY STOP", Color.FromHex("#D03B3B"), () => Confirm("emergency", "AWARYJNE ZATRZYMANIE", x => x.CmdEmergencyStop(DateTime.UtcNow, "przycisk na wykresie"))));
             _buttons2.AddChild(Btn("RESET AWARII", Color.FromHex("#5A6475"), () => Confirm("reset", "Zresetować stan awaryjny", x => x.CmdResetEmergency(DateTime.UtcNow))));

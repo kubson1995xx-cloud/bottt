@@ -33,7 +33,7 @@ namespace Apex.Desktop.Bridge
     /// (konto, symbole, notowania, pozycje, świece) i realizuje zapytania z korelacją identyfikatorów.
     /// Bezpieczna wątkowo: odbiór na wątku sieciowym, odczyt z wątku silnika.
     /// </summary>
-    public sealed class BridgeSession
+    public sealed partial class BridgeSession
     {
         private readonly IBridgeTransport _transport;
         private readonly object _lock = new();
@@ -69,16 +69,17 @@ namespace Apex.Desktop.Bridge
                 {
                     if (!IsAlive || _historyFailed || !_history.Complete || DateTime.UtcNow - _historyReceived >= TimeSpan.FromSeconds(30)
                         || DateTime.UtcNow - _historyCaptured >= TimeSpan.FromSeconds(30)) return new();
-                    if (_acceptedRevision != _positionsRevision)
+                    if (_acceptedRevision != _positionsRevision || _acceptedPendingRevision != _pendingRevision)
                         return new() { AccountNumber = _history.AccountNumber, Generation = Id, Synchronizing = true };
                     return _history;
                 }
             }
         }
         private IEnumerable<(long, string, string, double, double, long, double?, double?, string, string)> OwnState(IEnumerable<PositionDto> positions) =>
-            positions.Where(x => x.Label == _historyLabel).OrderBy(x => x.Id)
+            positions.Where(x => ScopedCapable || x.Label == _historyLabel).OrderBy(x => x.Id)
                 .Select(x => (x.Id, x.Symbol, x.Side, x.Units, x.Entry, x.EntryTime, x.Sl, x.Tp, x.Label, x.Comment));
         public bool HistoryCapable { get; private set; }
+        private long _acceptedPendingRevision;
         public Task RequestHistoryAsync(string label)
         {
             lock (_lock)
@@ -88,8 +89,10 @@ namespace Apex.Desktop.Bridge
                 _historyRows.Clear(); _historyPages.Clear(); _historyFirst = null; _historyFailed = false;
                 _historyStarted = DateTime.UtcNow;
                 _historyRevision = _positionsRevision; // fence before capture/page 0, not on its receipt
+                _requestPendingRevision = _pendingRevision;
+                _requestBrokerEpoch = BrokerEpoch;
             }
-            return SendAsync(new HistoryRequest { RequestId = HistoryRequestId, Label = label });
+            return SendAsync(new HistoryRequest { RequestId = HistoryRequestId, Label = label, BaselineId = _baselineId, RecoverOperations = RecoverOperations.ToList() });
         }
         public void EnsureHistory(string label)
         {
@@ -102,19 +105,22 @@ namespace Apex.Desktop.Bridge
         private void ReceiveHistory(HistoryPage m, string json)
         {
             BrokerHistorySnapshot completed;
+            ScopedSnapshot? scoped = null;
             lock (_lock)
             {
                 if (!HistoryCapable || m.RequestId != HistoryRequestId || _historyFailed) return;
-                void Fail() { _historyFailed = true; _history = new(); }
+                void Fail() { _historyFailed = true; _history = new(); _acceptedScope = null; }
                 if (_historyPages.TryGetValue(m.Page, out var prior)) { if (prior != json) Fail(); return; }
                 if (m.Error != null || m.Scope != "available-history-v1" || m.Total < 0 || m.Total > 100000
                     || m.Pages < 1 || m.Pages > 1000 || m.Page != _historyPages.Count || m.Page >= m.Pages
                     || m.Deals == null || m.Deals.Count > 500 || m.CapturedAt <= 0
-                    || Math.Abs((DateTime.UtcNow - BridgeProtocol.FromUnixMs(m.CapturedAt)).TotalSeconds) > 30)
+                    || BridgeProtocol.FromUnixMs(m.CapturedAt) > DateTime.UtcNow
+                    || DateTime.UtcNow - BridgeProtocol.FromUnixMs(m.CapturedAt) > TimeSpan.FromSeconds(30)
+                    || DateTime.UtcNow - _historyStarted > TimeSpan.FromSeconds(30))
                 { Fail(); return; }
                 if (_historyFirst == null) _historyFirst = m;
                 var first = _historyFirst;
-                if (m.Total != first.Total || m.Pages != first.Pages || m.Scope != first.Scope || m.Coverage != first.Coverage || m.CapturedAt != first.CapturedAt)
+                if (m.Total != first.Total || m.Pages != first.Pages || m.Scope != first.Scope || m.Coverage != first.Coverage || m.CapturedAt != first.CapturedAt || m.Scoped != first.Scoped)
                 { Fail(); return; }
                 _historyPages.Add(m.Page, json); _historyRows.AddRange(m.Deals);
                 if (_historyRows.Count > m.Total) { Fail(); return; }
@@ -122,10 +128,12 @@ namespace Apex.Desktop.Bridge
                 if (_historyRows.Count != m.Total || m.Account == null || m.Positions == null || _account == null
                     || m.Account.Number != _account.Number || m.Account.Broker != _account.Broker || m.Account.Currency != _account.Currency
                     || m.Account.IsLive != _account.IsLive || m.Account.Hedging != _account.Hedging
-                    || m.Positions.Select(x => x.Id).Distinct().Count() != m.Positions.Count)
+                    || m.Positions.Count > 10000 || m.Positions.Select(x => x.Id).Distinct().Count() != m.Positions.Count)
                 { Fail(); return; }
-                if (_historyRevision != _positionsRevision || !OwnState(m.Positions).SequenceEqual(OwnState(_positions)))
+                if (_historyRevision != _positionsRevision || _requestPendingRevision != _pendingRevision || !OwnState(m.Positions).SequenceEqual(OwnState(_positions)))
                 { _historyStarted = DateTime.MinValue; return; } // expected race: retry, never republish frozen live state
+                try { scoped = CompleteScope(m); }
+                catch (InvalidOperationException) { Fail(); return; }
                 _history = new BrokerHistorySnapshot
                 {
                     AccountNumber = m.Account.Number, Generation = Id, Complete = true, Scope = m.Scope,
@@ -138,9 +146,12 @@ namespace Apex.Desktop.Bridge
                 _historyReceived = DateTime.UtcNow;
                 _historyCaptured = BridgeProtocol.FromUnixMs(m.CapturedAt);
                 _acceptedRevision = _positionsRevision;
+                _acceptedPendingRevision = _pendingRevision;
+                _acceptedScope = scoped;
                 completed = _history;
             }
             HistoryCompleted?.Invoke(this, completed);
+            if (scoped != null) ScopedCompleted?.Invoke(this, scoped);
         }
 
         private readonly bool _trustedSyntheticComposition;
@@ -243,6 +254,11 @@ namespace Apex.Desktop.Bridge
                 Platform = Sanitize(hello.Platform, 20);
                 BridgeVersion = Sanitize(hello.BridgeVersion, 20);
                 HistoryCapable = hello.HistoryCapability == HistoryPage.Capability;
+                ScopedCapable = hello.ScopedCapability == ScopeFrame.Capability;
+                PeerLabel = hello.Label;
+                DeploymentInventory = hello.DeploymentInventory?.ToArray();
+                BrokerEpoch = hello.BrokerEpoch;
+                BrokerConnected = hello.BrokerConnected == true && BrokerEpoch.Length > 0;
                 lock (_lock) { _account = CloneAccount(hello.Account); _accountReceivedUtc = DateTime.UtcNow; }
                 HelloReceived?.Invoke(this, hello);
                 return;
@@ -251,6 +267,8 @@ namespace Apex.Desktop.Bridge
 
             switch (type)
             {
+                case "brokerState":
+                    { var m = BridgeProtocol.Deserialize<BrokerStateMsg>(json); if (m != null) ReceiveBroker(m); break; }
                 case "historyPage":
                     { var m = BridgeProtocol.Deserialize<HistoryPage>(json); if (m != null) ReceiveHistory(m, json); break; }
                 case "symbols":
@@ -293,6 +311,7 @@ namespace Apex.Desktop.Bridge
                 case "account":
                     {
                         var m = BridgeProtocol.Deserialize<AccountMsg>(json);
+                        if (m?.BrokerState != null) ReceiveBroker(m.BrokerState);
                         if (!ValidAccount(json, m?.Account)) { RejectIdentity(); return; }
                         lock (_lock)
                         {
@@ -316,6 +335,12 @@ namespace Apex.Desktop.Bridge
                         if (m.Items == null) return;
                         lock (_lock)
                         {
+                            if (m.PendingOrders != null && !_pendingOrders.OrderBy(x => x.Id).SequenceEqual(m.PendingOrders.OrderBy(x => x.Id)))
+                            { _pendingRevision++; _historyStarted = DateTime.MinValue; }
+                            _pendingOrders = m.PendingOrders ?? new();
+                            if (ScopedCapable && _baselineId != Guid.Empty && !ValidScope(m.Scoped))
+                            { _acceptedScope = null; _history = new(); }
+                            _liveScope = m.Scoped;
                             if (!OwnState(_positions).SequenceEqual(OwnState(m.Items)))
                             { _positionsRevision++; _historyStarted = DateTime.MinValue; }
                             _positions = m.Items; _positionsReceivedUtc = DateTime.UtcNow;
@@ -332,6 +357,8 @@ namespace Apex.Desktop.Bridge
                 case "result":
                 case "marginResult":
                     {
+                        var result = BridgeProtocol.Deserialize<ResultMsg>(json);
+                        if (result?.BrokerState != null) ReceiveBroker(result.BrokerState);
                         string? id = null;
                         try
                         {

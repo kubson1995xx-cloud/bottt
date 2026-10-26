@@ -24,7 +24,7 @@ namespace Apex.Desktop.Runtime
     /// Środowisko pracy jednego konta: osobny silnik APEX na własnym wątku, kolejka poleceń z panelu,
     /// migawka stanu dla API, historia kapitału, dziennik i stan trwały. Silnik nie jest współdzielony między kontami.
     /// </summary>
-    public sealed class AccountRuntime : IDisposable
+    public sealed partial class AccountRuntime : IDisposable
     {
         private readonly ConfigStore _config;
         private readonly NewsCalendar _news;
@@ -60,6 +60,9 @@ namespace Apex.Desktop.Runtime
             _config = config;
             _news = news;
             _log = log.For(key);
+            _priorScopeInventory = Directory.Exists(Path.Combine(config.DataDir, "konta"))
+                ? Directory.GetFiles(Path.Combine(config.DataDir, "konta"), "*", SearchOption.AllDirectories) : Array.Empty<string>();
+            _priorAccountConfiguration = config.Config.Accounts.Count != 0;
             var safe = new string(key.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
             _dir = Path.Combine(config.DataDir, "konta", safe);
             Directory.CreateDirectory(_dir);
@@ -106,6 +109,7 @@ namespace Apex.Desktop.Runtime
                 _identity ??= s.Account;
                 _sessionReady = false;
                 _adapter.Attach(s);
+                s.ConfigureScope(Settings.ScopeReservation?.BaselineId ?? Guid.Empty);
 
             }
             Enqueue(() =>
@@ -114,6 +118,7 @@ namespace Apex.Desktop.Runtime
                 if (_engine == null) TryBuildEngine();
                 else { _engine.CmdStop(); _engine.SaveState(DateTime.UtcNow, true); Subscribe(); }
                 _sessionReady = true;
+                ConfigureOwner();
             });
         }
 
@@ -246,6 +251,7 @@ namespace Apex.Desktop.Runtime
         {
             // Zatrzymanie awaryjne zapisujemy nawet bez gotowego silnika i przed operacjami brokera.
             if (action == "unlockLive") return "Handel LIVE jest wyłączony globalnie i trwale w wersji DEMO.";
+            if (action == "setupScope") return SetupScope(args);
             if (action == "emergency")
             {
                 _emergencyLatched = true;
@@ -282,6 +288,8 @@ namespace Apex.Desktop.Runtime
                 case "resumeSuspended": return e.CmdResumeSuspended();
                 case "executionTest":
                     {
+                        if (!_config.TrustedSyntheticComposition && !(args.ValueKind == JsonValueKind.Object && args.TryGetProperty("confirmDemoTrade", out var approval) && approval.ValueKind == JsonValueKind.True))
+                            return "Test wymaga osobnego jawnego potwierdzenia transakcji DEMO (confirmDemoTrade). Konfiguracja zakresu nie jest zgodą na transakcję.";
                         if (_storageFault || _store.HasFault) return "Test zablokowany: błąd trwałego stanu.";
                         string? sym = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("symbol", out var s) ? s.GetString() : null;
                         return e.CmdExecutionTest(now, string.IsNullOrWhiteSpace(sym) ? _testSymbol : sym);
@@ -360,9 +368,9 @@ namespace Apex.Desktop.Runtime
                 && session.HasFreshSnapshots && EvaluateGuard().Allowed;
             if (!Authorized()) return "Pełne zamknięcie zablokowane: brak świeżej, stałej tożsamości DEMO.";
             int sent = 0;
-            foreach (var p in session!.Positions.Where(p => p.Id > 0 && string.Equals(p.Label, _config.Config.Label, StringComparison.Ordinal)))
+            foreach (var p in session!.Positions.Where(p => p.Id > 0 && string.Equals(p.Label, ResolvedLabel, StringComparison.Ordinal)))
             {
-                var result = session.RequestOwnedFullClose(p.Id, _config.Config.Label, Authorized, _adapter.OrderTimeout);
+                var result = session.RequestOwnedFullClose(p.Id, ResolvedLabel, Authorized, _adapter.OrderTimeout);
                 if (result.sent) sent++;
             }
             // Nie odtwarzamy stanu z uszkodzonych danych, nie certyfikujemy historii ani trwałego intentu.
@@ -434,7 +442,7 @@ namespace Apex.Desktop.Runtime
                 if (risk.Validate() != null) risk = new RiskSettings();
                 var engineCfg = new EngineConfig
                 {
-                    Label = cfg.Label,
+                    Label = ResolvedLabel,
                     Risk = risk,
                     Scoring = new Apex.Core.Scanner.ScoringSettings { MinScore = accSettings.MinScore ?? cfg.MinScore },
                     News = cfg.News,
@@ -445,8 +453,11 @@ namespace Apex.Desktop.Runtime
                 engine.Initialize(DateTime.UtcNow);
                 if (_emergencyLatched) engine.CmdEmergencyStop(DateTime.UtcNow, "odtworzony AWARYJNY STOP");
                 else if (engine.Mode == EngineMode.Running) engine.CmdStop();
+                if (Settings.ScopeReservation is { } reservation && (engine.ScopedBaseline?.BaselineId != reservation.BaselineId || engine.ScopedBaseline.Identity != reservation.Identity))
+                    throw new InvalidDataException("Brak/obcy trwały stan zarezerwowanego zakresu – zachowaj pliki, bez odtwarzania pustego zakresu.");
                 engine.SaveState(DateTime.UtcNow, true);
                 _engine = engine;
+                ConfigureOwner();
                 RecomputeUniverse();
                 Subscribe();
                 _log.Info($"Silnik konta gotowy: {(acc.IsLive ? "LIVE" : "DEMO")} {acc.Number} ({acc.BrokerName}), strategie aktywne dla klas: {string.Join(", ", book.Classes)}. Strażnik: {guard.Reason}");
@@ -469,11 +480,15 @@ namespace Apex.Desktop.Runtime
                     using var doc = JsonDocument.Parse(control);
                     _emergencyLatched = doc.RootElement.GetProperty("EmergencyStopped").GetBoolean();
                 }
-                string label = new string(_config.Config.Label.Where(char.IsLetterOrDigit).ToArray());
+                string label = new string(ResolvedLabel.Where(char.IsLetterOrDigit).ToArray());
                 string key = $"APEX {label} {account}";
                 if (key.Length > 50) key = key.Substring(0, 50);
                 var json = _store.Get(key);
-                if (json == null) return;
+                if (json == null)
+                {
+                    if (Settings.ScopeReservation != null) throw new InvalidDataException("Brak trwałego stanu zarezerwowanego zakresu – bez odtwarzania pustego stanu.");
+                    return;
+                }
                 var state = JsonSerializer.Deserialize<EngineState>(json, ConfigStore.Json);
                 using var parsed = JsonDocument.Parse(json);
                 if (state == null || state.AccountNumber != account || (state.SchemaVersion != 1 && state.SchemaVersion != 2 && state.SchemaVersion != 3)
@@ -554,7 +569,8 @@ namespace Apex.Desktop.Runtime
                 try
                 {
                     var now = DateTime.UtcNow;
-                    _adapter.Session?.EnsureHistory(_config.Config.Label);
+                    _adapter.Session?.EnsureHistory(ResolvedLabel);
+                    UpdateRecoveryOperations();
                     if (_engine != null)
                     {
                         _engine.SetGuard(EvaluateGuard());
@@ -652,6 +668,7 @@ namespace Apex.Desktop.Runtime
                 engineReady = _engine != null,
                 buildError = _lastBuildError,
                 engine = st,
+                scope = ScopeStatus(),
                 modeText = st != null ? TradingEngine.ModeText(st.Mode) : "OCZEKIWANIE NA DANE",
                 equity = eq,
                 stats = new

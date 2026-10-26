@@ -56,6 +56,12 @@ namespace cAlgo.Robots
         private string _accountCurrency = "";
         private TextBlock? _status;
         private bool _blocked;
+        private readonly ScopedPlatformState _scopeState = new();
+        private Guid _baseline;
+        private string _transportGeneration = "";
+        private BrokerStateMsg BrokerState() => new() { BrokerEpoch = _scopeState.BrokerEpoch, BrokerConnected = _scopeState.BrokerConnected };
+        private void BrokerConnectedEvent() { _scopeState.BrokerEvent(true); BeginInvokeOnMainThread(() => Send(BrokerState())); }
+        private void BrokerDisconnectedEvent() { _scopeState.BrokerEvent(false); BeginInvokeOnMainThread(() => Send(BrokerState())); }
 
         protected override void OnStart()
         {
@@ -83,6 +89,9 @@ namespace cAlgo.Robots
             _accountNumber = Account.Number;
             _accountBroker = Account.BrokerName ?? "";
             _accountCurrency = Account.Asset?.Name ?? "";
+            _scopeState.BrokerEvent(Server.IsConnected);
+            Server.Connected += BrokerConnectedEvent;
+            Server.Disconnected += BrokerDisconnectedEvent;
             string storageKey = PlatformSafety.StorageKey("Bridge", _accountBroker, _accountNumber, LabelPrefix);
             string? saved;
             try { saved = LocalStorage.GetString(storageKey, LocalStorageScope.Type); }
@@ -95,6 +104,10 @@ namespace cAlgo.Robots
             Positions.Opened += _ => SendPositions();
             Positions.Modified += _ => SendPositions();
             Positions.Closed += OnPositionClosed;
+            PendingOrders.Created += _ => SendPositions();
+            PendingOrders.Modified += _ => SendPositions();
+            PendingOrders.Cancelled += _ => SendPositions();
+            PendingOrders.Filled += _ => SendPositions();
             Timer.Start(TimeSpan.FromSeconds(1));
             Connect();
         }
@@ -148,6 +161,10 @@ namespace cAlgo.Robots
                     Platform = "cTrader",
                     BridgeVersion = Version,
                     HistoryCapability = HistoryPage.Capability,
+                    ScopedCapability = ScopeFrame.Capability, Label = LabelPrefix,
+                    BrokerEpoch = _scopeState.BrokerEpoch, BrokerConnected = _scopeState.BrokerConnected,
+                    DeploymentInventory = PlatformDeploymentCatalog.Inventory(_accountBroker, _accountNumber, _accountCurrency, LabelPrefix,
+                        key => LocalStorage.GetString(key, LocalStorageScope.Type), (key, value) => { LocalStorage.SetString(key, value, LocalStorageScope.Type); LocalStorage.Flush(LocalStorageScope.Type); }),
                     Key = PairingKey.Trim(),
                     Account = AccountDto(),
                     Time = BridgeProtocol.ToUnixMs(Server.TimeInUtc),
@@ -163,6 +180,7 @@ namespace cAlgo.Robots
 
         private void Send<T>(T msg)
         {
+            if (msg is ResultMsg result) result.BrokerState = BrokerState();
             try
             {
                 if (_ws != null && _ws.State == WebSocketClientState.Open) _ws.Send(BridgeProtocol.Serialize(msg));
@@ -204,12 +222,15 @@ namespace cAlgo.Robots
         {
             if (!_welcomed || (DateTime.UtcNow - _lastAccount).TotalSeconds < 2) return;
             _lastAccount = DateTime.UtcNow;
-            Send(new AccountMsg { Account = AccountDto() });
+            Send(new AccountMsg { Account = AccountDto(), BrokerState = BrokerState() });
             SendPositions();
         }
 
         protected override void OnStop()
         {
+            Server.Connected -= BrokerConnectedEvent;
+            Server.Disconnected -= BrokerDisconnectedEvent;
+            _scopeState.BrokerEvent(false);
             try
             {
                 Send(new SimpleMsg { Type = "bye", Reason = "cBot zatrzymany" });
@@ -247,9 +268,10 @@ namespace cAlgo.Robots
                         if (!PlatformSafety.OwnLabel(w.Label, LabelPrefix))
                         { Print("APEX Bridge: etykieta hosta nie zgadza się z dokładną etykietą instancji."); _blocked = true; _ws?.Dispose(); Stop(); return; }
                         _welcomed = true;
+                        _baseline = w.BaselineId; _transportGeneration = w.TransportGeneration;
                         SetStatus($"połączono z APEX {w.HostVersion} – konto {(Account.IsLive ? "LIVE" : "DEMO")} {Account.Number}");
                         SendSymbols();
-                        Send(new AccountMsg { Account = AccountDto() });
+                        Send(new AccountMsg { Account = AccountDto(), BrokerState = BrokerState() });
                         SendPositions();
                         break;
                     }
@@ -428,7 +450,9 @@ namespace cAlgo.Robots
         private void SendPositions()
         {
             if (!_welcomed) return;
-            Send(new PositionsMsg { Items = Positions.Select(ToDto).ToList() });
+            var positions = Positions.Select(ToDto).ToList(); var pending = CTraderScopeEvidence.Pending(PendingOrders);
+            _scopeState.Observe(positions, pending);
+            Send(new PositionsMsg { Items = positions, PendingOrders = pending, Scoped = _scopeState.Current(_baseline, LabelPrefix, _transportGeneration) });
         }
 
         private bool IsOwn(Position p) => PlatformSafety.OwnLabel(p.Label, LabelPrefix);
@@ -462,18 +486,29 @@ namespace cAlgo.Robots
         private void SendHistory(HistoryRequest request)
         {
             // Handle is entered only through BeginInvokeOnMainThread; freeze before paging.
-            if (!_welcomed || !SafeAccount || !Server.IsConnected || request.Label != LabelPrefix) return;
+            if (!_welcomed || !SafeAccount || !Server.IsConnected || request.Label != LabelPrefix || request.BaselineId != _baseline) return;
             try
             {
+                string epoch = _scopeState.BrokerEpoch;
+                long captured = BridgeProtocol.ToUnixMs(Server.TimeInUtc);
                 var rows = CTraderHistory.Capture(History, LabelPrefix);
                 var positions = Positions.Select(ToDto).ToList(); var account = AccountDto();
-                long captured = BridgeProtocol.ToUnixMs(Server.TimeInUtc);
+                var pending = CTraderScopeEvidence.Pending(PendingOrders);
+                var openings = CTraderScopeEvidence.CaptureOpenings(Positions, History, LabelPrefix).ToList();
+                if (positions.Count > 10000 || pending.Count > 10000 || rows.Count > 100000 || request.RecoverOperations.Count > 1000)
+                    throw new InvalidOperationException("scoped inventory overflow – no truncated proof");
+                _scopeState.Observe(positions, pending);
+                var scoped = _scopeState.Capture(_baseline, LabelPrefix, _transportGeneration);
+                if (epoch != scoped.BrokerEpoch || scoped.BrokerConnected != true || !SafeAccount || !Server.IsConnected) throw new InvalidOperationException("broker epoch changed during capture");
+                var recovered = request.RecoverOperations.Select(id => _journal?.Lookup(id)).Where(r => r != null).Cast<ResultMsg>().ToList();
                 int pages = Math.Max(1, (rows.Count + 249) / 250);
                 for (int page = 0; page < pages; page++) Send(new HistoryPage
                 {
                     RequestId = request.RequestId, Page = page, Pages = pages, Total = rows.Count, CapturedAt = captured,
                     Coverage = "unknown", Deals = rows.Skip(page * 250).Take(250).ToList(),
                     Account = page == pages - 1 ? account : null, Positions = page == pages - 1 ? positions : null,
+                    Scoped = scoped, PendingOrders = page == pages - 1 ? pending : null,
+                    OpeningObservations = page == pages - 1 ? openings : null, RecoveredResults = page == pages - 1 ? recovered : null,
                 });
             }
             catch (Exception ex) { Send(new HistoryPage { RequestId = request.RequestId, Error = ex.Message }); }
@@ -536,9 +571,18 @@ namespace cAlgo.Robots
                 Message = "sygnał już istnieje u brokera – nie otwarto ponownie" };
             if (History.Any(x => x.Label == c.Label && x.Comment == c.Comment)) return Reject(c.Id, "InvalidRequest", "sygnał już wykonany w historii brokera");
             var tt = side == Apex.Core.Model.TradeDirection.Long ? TradeType.Buy : TradeType.Sell;
-            TradeResult r = c.MaxSlipPips is double slip
+            TradeResult? actual = null;
+            bool sent = _scopeState.TryRun(c.Scoped, () =>
+            {
+                _scopeState.Observe(Positions.Select(ToDto), CTraderScopeEvidence.Pending(PendingOrders));
+                return SafeAccount && Server.IsConnected && Account.AccountType == AccountType.Hedged
+                    && c.Scoped?.BaselineId == _baseline && _baseline != Guid.Empty && c.Scoped.Label == LabelPrefix
+                    && c.Scoped.TransportGeneration == _transportGeneration && PendingOrders.Count == 0 && Positions.All(p => p.Label == LabelPrefix);
+            }, () => actual = c.MaxSlipPips is double slip
                 ? ExecuteMarketRangeOrder(tt, sym.Name, vol, slip, tt == TradeType.Buy ? sym.Ask : sym.Bid, c.Label, c.SlPips, c.TpPips, c.Comment)
-                : ExecuteMarketOrder(tt, sym.Name, vol, c.Label, c.SlPips, c.TpPips, c.Comment);
+                : ExecuteMarketOrder(tt, sym.Name, vol, c.Label, c.SlPips, c.TpPips, c.Comment));
+            if (!sent || actual == null) return Reject(c.Id, "NoTradingPermission", "scope/epoch/revision expired immediately before SDK open – not sent");
+            TradeResult r = actual;
             // Freeze original opening graph before any protection repair/emergency liquidation.
             var openingFill = r.IsSuccessful && r.Position != null ? CTraderOpeningEvidence.Capture(r.Position, new OrderRequest
             {

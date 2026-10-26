@@ -1,5 +1,12 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Autonomia Phase C — runtime checkpoint 1 (w toku, nie końcowa akceptacja)
+
+- Negocjacja `scoped-recovery-v1`, eventowe epoki SDK (również między pollami), pełne pozycje/pending orders/opening observations, frozen pages, owner `ScopedReceiptAuthority`, value-based/current/monotonic fence i opaque Core→SessionAdapter dispatch. SDK sprawdza ponownie epoch/revisions po trwałej rezerwacji bezpośrednio przed open.
+- Produkcyjny **ApexDesktop.dll**, nie friend-only entry, z lokalnym cTrader-shaped peer potrafi read-only wygenerować/zarezerwować zakres, po zmianie dokładnej etykiety ustanowić go przy CoverageUnknown oraz wykonać wyłącznie jawny syntetyczny test open/SL/close. Manifest/opID/oryginalny fill/net/restart sprawdzane. START strategii nadal bezwarunkowo blokowany dla produkcyjnego scope do Task2 PASS. Żadnego brokera ani prawdziwej transakcji.
+- Setup odmawia starych stanów/config/dzienników; źródło SDK ma trwały katalog znanych etykiet/rezerwacji. Brak zarezerwowanego stanu po restarcie nie jest odtwarzany jako pusty. Normalny save może ponownie uzgodnić tę samą niezmienną receipt wyłącznie do ORYGINALNEGO deadline, bez odnawiania wieku. Native jawnie tylko odczyt/redukcja (setup/permit nieukończony); izolowany backtest wyłącznie z actual SDK IsBacktesting.
+- RED wire 3, Core runtime 1, production host brak setup, SDK fence/lookup 5, opening references 1, catalog 1, lifecycle 2. Pośredni pełny Core/Desktop **448/448**, platform **107/107**, oba actual SDK `.algo` 0 warnings/errors; po ostatnich lifecycle poprawkach focused **83/83**. Dowody `/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task1-scope-runtime/`. Pełne końcowe bramki/polski panel/rozszerzone negatywy i raport nadal w toku. Bez dzieci/push/fallback; rodzic wykona niezależny review.
+
 ## Autonomia Phase B — poprawki review B1/B2 (lokalne, Phase C nadal OTWARTA)
 
 - **B1:** deadline monotonic ustalany przed blokującą walidacją/zapisem/księgowaniem/eksportem; publikacja nie odnawia czasu ze starego `utc`. Admission zachowuje oryginalny deadline konsumowanego permitu i sprawdza go wraz z live fence bezpośrednio przed gateway. +31 s ze stabilnymi tokenami nie daje permitu/open; +1 s działa i nie przedłuża początkowego okna 30 s. Zapisane księgowanie/CSV nadal dochodzi mimo wygaśnięcia, ale bez nowej zgody na ryzyko.

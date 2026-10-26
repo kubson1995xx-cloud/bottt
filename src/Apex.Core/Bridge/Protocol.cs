@@ -108,7 +108,12 @@ namespace Apex.Core.Bridge
         public string Platform { get; set; } = "";
         public string BridgeVersion { get; set; } = "";
         public string? HistoryCapability { get; set; }
+        public string? ScopedCapability { get; set; }
+        public string Label { get; set; } = "";
+        public string BrokerEpoch { get; set; } = "";
+        public bool? BrokerConnected { get; set; }
         public string Key { get; set; } = "";
+        public List<PlatformStateInventory>? DeploymentInventory { get; set; }
         public AccountDto Account { get; set; } = new();
         public long Time { get; set; }
     }
@@ -185,6 +190,7 @@ namespace Apex.Core.Bridge
     {
         public string Type { get; set; } = "account";
         public AccountDto Account { get; set; } = new();
+        public BrokerStateMsg? BrokerState { get; set; }
     }
 
     public sealed class PositionDto
@@ -231,6 +237,34 @@ namespace Apex.Core.Bridge
     {
         public string Type { get; set; } = "positions";
         public List<PositionDto> Items { get; set; } = new();
+        public List<PendingOrderDto>? PendingOrders { get; set; }
+        public ScopeFrame? Scoped { get; set; }
+    }
+
+    public sealed record PlatformStateInventory(string Label, bool Healthy, int Entries, bool Missing);
+    public sealed record PendingOrderDto(long Id, string Label, string Symbol = "", string Side = "", double Units = 0, double Target = 0, double? Sl = null, double? Tp = null, string Comment = "");
+
+    // DATA only; the local owner/Core authority is never serialized.
+    public sealed record ScopeFrame
+    {
+        public const string Capability = "scoped-recovery-v1";
+        public Guid BaselineId { get; init; }
+        public string Label { get; init; } = "";
+        public string ExecutionPath { get; init; } = "desktop-bridge";
+        public string SafetyVersion { get; init; } = "scoped-demo-v1";
+        public string TransportGeneration { get; init; } = "";
+        public string BrokerEpoch { get; init; } = "";
+        public bool? BrokerConnected { get; init; }
+        public long? PositionRevision { get; init; }
+        public long? PendingOrderRevision { get; init; }
+        public string SnapshotId { get; init; } = "";
+    }
+
+    public sealed class BrokerStateMsg
+    {
+        public string Type { get; set; } = "brokerState";
+        public string BrokerEpoch { get; set; } = "";
+        public bool? BrokerConnected { get; set; }
     }
 
     public sealed class ClosedDto
@@ -260,6 +294,8 @@ namespace Apex.Core.Bridge
         public string Type { get; set; } = "historyRequest";
         public string RequestId { get; set; } = "";
         public string Label { get; set; } = "";
+        public Guid BaselineId { get; set; }
+        public List<string> RecoverOperations { get; set; } = new();
     }
 
     public sealed class HistoryPage
@@ -277,6 +313,10 @@ namespace Apex.Core.Bridge
         public AccountDto? Account { get; set; }
         public List<PositionDto>? Positions { get; set; }
         public List<ClosedDto> Deals { get; set; } = new();
+        public ScopeFrame? Scoped { get; set; }
+        public List<PendingOrderDto>? PendingOrders { get; set; }
+        public List<OpeningDealEvidence>? OpeningObservations { get; set; }
+        public List<ResultMsg>? RecoveredResults { get; set; }
     }
 
     public sealed class ClosedMsg
@@ -297,6 +337,7 @@ namespace Apex.Core.Bridge
         public OpeningFillEvidence? OpeningFill { get; set; }
         public string? Error { get; set; }
         public string? Message { get; set; }
+        public BrokerStateMsg? BrokerState { get; set; }
     }
 
     /// <summary>One lossless result boundary for Desktop and Native, including uncertain fills.
@@ -353,6 +394,9 @@ namespace Apex.Core.Bridge
         public string Reason { get; set; } = "";
         public string HostVersion { get; set; } = "";
         public string Label { get; set; } = "APEX";
+        public string? ScopedCapability { get; set; }
+        public Guid BaselineId { get; set; }
+        public string TransportGeneration { get; set; } = "";
     }
 
     public sealed class SubscribeMsg
@@ -376,6 +420,7 @@ namespace Apex.Core.Bridge
         public string Label { get; set; } = "";
         public string Comment { get; set; } = "";
         public double? MaxSlipPips { get; set; }
+        public ScopeFrame? Scoped { get; set; }
     }
 
     public sealed class ModifyCmd
