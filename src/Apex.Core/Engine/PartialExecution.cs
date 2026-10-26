@@ -97,8 +97,9 @@ public sealed partial class TradingEngine
                 plan.PartialDone = true;
             return result.Status == OrderStatus.Filled;
         }
-        if (_broker is not IPartialCloseGateway gateway || _scopedAuthority == null) return false;
-        var permit = GetScopedPermit(_scopedAuthority, utc);
+        if (_broker is not IPartialCloseGateway || _broker is not IScopedPartialDispatchGateway gateway || _scopedAuthority == null) return false;
+        var authority = _scopedAuthority;
+        var permit = GetScopedPermit(authority, utc);
         var snapshot = permit?.Receipt.Positions?.SingleOrDefault(p => p.Id == observed.Id);
         var admission = _state.OpenAdmissions.SingleOrDefault(a => a.Fill?.PositionId == observed.Id);
         if (permit == null || snapshot == null || admission?.Fill == null || spec.VolumeStep != admission.Fill.VolumeStep || snapshot.VolumeUnits != observed.VolumeUnits
@@ -122,11 +123,25 @@ public sealed partial class TradingEngine
         nextPlan.Partial = intent;
         if (!CommitScope(next, utc) || intent.Stage == PartialCloseStage.Skipped) return false;
         // Original absolute permit deadline survives the reservation; do not issue a new lifetime.
-        if (!CurrentScopedReceipt(permit.Receipt, _scopedAuthority, utc, permit.Expires)
+        if (!CurrentScopedReceipt(permit.Receipt, authority, utc, permit.Expires)
             || !OwnPositions().Any(p => p.Id == observed.Id && p.VolumeUnits == observed.VolumeUnits && p.Comment == observed.Comment
                 && p.StopLoss == observed.StopLoss && p.TakeProfit == observed.TakeProfit)) return false;
         OrderOutcome outcome;
-        try { outcome = gateway.ClosePartial(intent.ActionId, observed.Id, plan.SignalId, observed.VolumeUnits, units); }
+        var request = new PartialCloseRequest(intent.ActionId, observed.Id, plan.SignalId, observed.VolumeUnits, units);
+        var reservedRevision = _state.DurableRevision;
+        try
+        {
+            outcome = gateway.ClosePartialScoped(request, new ScopedPartialDispatchAuthorization(permit.Receipt, r =>
+                r == request && ReferenceEquals(authority, _scopedAuthority) && _state.DurableRevision == reservedRevision
+                && !_stateReadFault && _persistenceHealthy && _state.ScopeConflict.Length == 0
+                && _state.Baseline?.Stage == BaselineStage.Established
+                && _state.Plans.Any(p => p.PositionId == request.PositionId && p.Partial?.ActionId == request.ActionId
+                    && p.Partial.Stage == PartialCloseStage.Reserved && p.Partial.SignalId == request.SignalId
+                    && p.Partial.ObservedUnits == request.ObservedUnits && p.Partial.RequestedUnits == request.Units)
+                && CurrentScopedReceipt(permit.Receipt, authority, utc, permit.Expires)
+                && OwnPositions().Any(p => p.Id == observed.Id && p.VolumeUnits == observed.VolumeUnits && p.Comment == observed.Comment
+                    && p.StopLoss == observed.StopLoss && p.TakeProfit == observed.TakeProfit)));
+        }
         catch (Exception) { return true; } // durable Reserved remains uncertain
         var completed = ScopeCandidate(); var saved = completed.Plans.Single(p => p.PositionId == observed.Id).Partial!;
         ApplyPartialOutcome(saved, outcome);

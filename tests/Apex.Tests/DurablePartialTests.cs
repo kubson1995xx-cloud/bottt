@@ -22,6 +22,66 @@ public sealed partial class ScopedRecoveryTests
         return f;
     }
 
+    [Theory]
+    [InlineData("healthy")][InlineData("expiry")][InlineData("currentness")][InlineData("account")][InlineData("request")]
+    public void Fix1_CoreIssuesOnlyOriginalReservedPartialAuthorization(string fault)
+    {
+        var f = PartialFixture(); int calls = 0;
+        f.Tick = TimeSpan.FromSeconds(29); // already almost expired; dispatch cannot start another 30s window
+        f.Broker.OnScopedPartial = (request, authorization) =>
+        {
+            Assert.Equal("Reserved", PartialStage(f));
+            Assert.Equal(f.State.Plans[0].Partial!.ActionId, request.ActionId);
+            Assert.True(authorization.IsCurrent(request));
+            Assert.Equal(f.State.Plans[0].Partial!.ObservationSequence, authorization.Receipt.Sequence);
+            if (fault == "expiry") f.Tick = TimeSpan.FromSeconds(30);
+            if (fault == "currentness") f.Current = false;
+            if (fault == "account") f.Broker.Live = true;
+            var actual = fault == "request" ? request with { Units = 0.5 } : request;
+            if (authorization.IsCurrent(actual)) calls++;
+            return OrderOutcome.Uncertain(BrokerErrorKind.Timeout, "no positive durable result");
+        };
+        Assert.True(Partial(f, 1)); Assert.Equal(fault == "healthy" ? 1 : 0, calls);
+        Assert.Equal("AwaitingEvidence", PartialStage(f));
+        Assert.False(Partial(f, 1)); // never resend this unknown/unsent reservation
+        f.Restart(); Assert.False(Partial(f, 1));
+    }
+
+    [Theory]
+    [InlineData(false)][InlineData(true)]
+    public async System.Threading.Tasks.Task Fix1_ActualCoreReservedAuthorizationSurvivesThroughDesktopWithoutRenewal(bool expire)
+    {
+        var f = PartialFixture();
+        var r = new PartialDispatchFenceTests.Rig(f.Proposal, f.Position(2));
+        var now = DateTime.UtcNow; f.Broker.Now = now;
+        Assert.True(f.Engine.ReconcileScoped(r.Receipt with { Sequence = ++f.Sequence }, f.Authority, now));
+        f.Tick = TimeSpan.FromSeconds(29);
+        f.Broker.OnScopedPartial = (request, authorization) =>
+            ((IScopedPartialDispatchGateway)r.Adapter).ClosePartialScoped(request, authorization);
+        var gate = (System.Threading.SemaphoreSlim)typeof(Apex.Desktop.Bridge.BridgeSession)
+            .GetField("_sendLock", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r.Session)!;
+        var pending = (System.Collections.Concurrent.ConcurrentDictionary<string, System.Threading.Tasks.TaskCompletionSource<string>>)
+            typeof(Apex.Desktop.Bridge.BridgeSession).GetField("_pending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r.Session)!;
+        await gate.WaitAsync();
+        var task = System.Threading.Tasks.Task.Run(() => Partial(f, 1, now));
+        try
+        {
+            Assert.True(System.Threading.SpinWait.SpinUntil(() => !pending.IsEmpty, TimeSpan.FromSeconds(5)), "actual authorized Core request must reach transport scheduling");
+            Assert.Equal("Reserved", PartialStage(f));
+            if (expire) f.Tick = TimeSpan.FromSeconds(30);
+        }
+        finally { gate.Release(); }
+        Assert.True(await task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(expire ? 0 : 1, r.PartialCalls); Assert.Equal(expire ? 0 : 1, r.Transport.Closes.Count);
+        Assert.Equal("AwaitingEvidence", PartialStage(f)); Assert.False(Partial(f, 1, now));
+        if (!expire)
+        {
+            Assert.Equal(r.Frame, r.Transport.Closes[0].Scoped);
+            Assert.Equal(f.State.Plans[0].Partial!.ActionId, r.Transport.Closes[0].Id);
+            Assert.NotNull(f.State.Plans[0].Partial!.Confirmation);
+        }
+    }
+
     [Fact]
     public void Task2B_PartialRejectionPersistsIntentBeforeSendAndRequiresFreshBackoffRetry()
     {

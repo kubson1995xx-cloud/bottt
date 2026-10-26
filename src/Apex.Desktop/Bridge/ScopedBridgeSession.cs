@@ -112,4 +112,6 @@ public sealed partial class BridgeSession
     { lock (_lock) return IsCurrent(receipt) ? _acceptedScope!.Source : null; }
     internal (bool sent, string? response) RequestScopedOpen(OpenCmd command, Func<bool> authorized, TimeSpan timeout) =>
         RequestAsync(command, command.Id, timeout, authorized).GetAwaiter().GetResult();
+    internal (bool sent, string? response) RequestScopedPartial(CloseCmd command, Func<bool> authorized, TimeSpan timeout) =>
+        RequestAsync(command, command.Id, timeout, authorized).GetAwaiter().GetResult();
 }

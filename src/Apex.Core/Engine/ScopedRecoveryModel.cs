@@ -127,6 +127,20 @@ internal interface IScopedDispatchGateway
     OrderOutcome OpenScoped(OrderRequest request, ScopedDispatchAuthorization authorization);
 }
 
+// Immutable request and opaque owner-issued authorization; never a client boolean.
+internal sealed record PartialCloseRequest(string ActionId, long PositionId, string SignalId, double ObservedUnits, double Units);
+internal sealed class ScopedPartialDispatchAuthorization
+{
+    internal readonly ScopedReceipt Receipt;
+    internal readonly Func<PartialCloseRequest, bool> IsCurrent;
+    internal ScopedPartialDispatchAuthorization(ScopedReceipt receipt, Func<PartialCloseRequest, bool> isCurrent)
+    { Receipt = receipt; IsCurrent = isCurrent; }
+}
+internal interface IScopedPartialDispatchGateway
+{
+    OrderOutcome ClosePartialScoped(PartialCloseRequest request, ScopedPartialDispatchAuthorization authorization);
+}
+
 public static class ScopedRecoveryPolicy
 {
     public const string SafetyVersion = "scoped-demo-v1";

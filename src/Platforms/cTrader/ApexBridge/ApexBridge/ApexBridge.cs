@@ -652,7 +652,24 @@ namespace cAlgo.Robots
             if (c.Units.HasValue && (c.ObservedUnits != before || c.Units.Value >= before || !CTraderData.Protected(position)
                 || !PlatformSafety.SignalMatches(position.Comment, c.SignalId)))
                 return Reject(c.Id, "InvalidRequest", "partial requires exact stable action/signal/observed volume/protection");
-            TradeResult r = c.Units.HasValue ? ClosePosition(position, c.Units.Value) : ClosePosition(position);
+            TradeResult? actual = null;
+            if (c.Units.HasValue)
+            {
+                // ExecuteCommand has flushed the journal. Re-observe ALL inventory/protection
+                // here and fence the ORIGINAL capture under the SDK event lock, never renew it.
+                bool sent = _scopeState.TryRun(c.Scoped, () =>
+                {
+                    _scopeState.Observe(Positions.Select(ToDto), CTraderScopeEvidence.Pending(PendingOrders));
+                    return SafeAccount && _welcomed && Server.IsConnected && Account.AccountType == AccountType.Hedged
+                        && c.Scoped?.BaselineId == _baseline && _baseline != Guid.Empty && c.Scoped.Label == LabelPrefix
+                        && c.Scoped.TransportGeneration == _transportGeneration && FindOwn(c.PositionId) == position
+                        && position.VolumeInUnits == before && CTraderData.Protected(position)
+                        && PlatformSafety.SignalMatches(position.Comment, c.SignalId);
+                }, () => actual = ClosePosition(position, c.Units.Value));
+                if (!sent || actual == null) return Reject(c.Id, "NoTradingPermission", "scope/epoch/revision expired immediately before SDK partial – not sent");
+            }
+            else actual = ClosePosition(position); // protective full close: no scoped/storage-health gate
+            TradeResult r = actual;
             var result = Result(c.Id, r, position.Id, null);
             if (c.Units.HasValue)
             {

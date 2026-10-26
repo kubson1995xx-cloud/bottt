@@ -442,6 +442,7 @@ namespace Apex.Core.Bridge
         public double? Units { get; set; }
         public string? SignalId { get; set; }
         public double? ObservedUnits { get; set; }
+        public ScopeFrame? Scoped { get; set; }
     }
 
     public sealed class MarginCmd

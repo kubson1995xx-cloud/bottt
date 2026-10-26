@@ -14,6 +14,8 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="../../src/Platforms/cTrader/Shared/CommandJournal.cs" Link="Production/CommandJournal.cs" />
+    <Compile Include="../../src/Platforms/cTrader/Shared/ScopedPlatformState.cs" Link="Production/ScopedPlatformState.cs" />
     <ProjectReference Include="..\..\src\Apex.Core\Apex.Core.csproj" />
     <ProjectReference Include="..\..\src\Apex.Desktop\Apex.Desktop.csproj" />
     <ProjectReference Include="..\..\tools\Apex.PlatformSimulator\Apex.PlatformSimulator.csproj" />

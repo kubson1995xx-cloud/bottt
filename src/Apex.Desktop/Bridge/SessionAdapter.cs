@@ -14,7 +14,7 @@ namespace Apex.Desktop.Bridge
     /// po rozłączeniu silnik widzi IsConnected = false (wstrzymuje działania), po powrocie – uzgadnia stan pozycji.
     /// Każde polecenie handlowe bez odpowiedzi po wysłaniu jest raportowane jako NIEPEWNE (silnik najpierw sprawdza pozycje).
     /// </summary>
-    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider, ITrustedSimulationGateway, IScopedDispatchGateway, IPartialCloseGateway
+    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider, ITrustedSimulationGateway, IScopedDispatchGateway, IPartialCloseGateway, IScopedPartialDispatchGateway
     {
         private readonly bool _trustedSimulation;
         bool ITrustedSimulationGateway.TrustedSimulation => _trustedSimulation;
@@ -111,6 +111,7 @@ namespace Apex.Desktop.Bridge
 
         public OrderOutcome ClosePosition(long positionId, double? units)
         {
+            if (units.HasValue && !_trustedSimulation) return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "partial requires opaque scoped authorization");
             var s = Session;
             if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
             string id = s.NextId();
@@ -119,10 +120,19 @@ namespace Apex.Desktop.Bridge
         }
 
         public OrderOutcome ClosePartial(string actionId, long positionId, string signalId, double observedUnits, double units)
+            => OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "partial requires opaque scoped authorization");
+
+        OrderOutcome IScopedPartialDispatchGateway.ClosePartialScoped(PartialCloseRequest request, ScopedPartialDispatchAuthorization authorization)
         {
             var s = Session;
-            if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
-            var (sent, json) = s.Request(new CloseCmd { Id = actionId, PositionId = positionId, Units = units, SignalId = signalId, ObservedUnits = observedUnits }, actionId, OrderTimeout);
+            bool Authorized() => s != null && ReferenceEquals(s, Session) && authorization.IsCurrent(request) && s.IsCurrent(authorization.Receipt);
+            var frame = s?.DispatchScope(authorization.Receipt);
+            if (frame == null || !Authorized()) return OrderOutcome.Uncertain(BrokerErrorKind.Disconnected, "nieaktualny zakres partial – rezerwacja zachowana");
+            var (sent, json) = s!.RequestScopedPartial(new CloseCmd { Id = request.ActionId, PositionId = request.PositionId, Units = request.Units,
+                SignalId = request.SignalId, ObservedUnits = request.ObservedUnits, Scoped = frame }, Authorized, OrderTimeout);
+            // A locally unsent reservation is NOT a durable platform no-send result. Never turn
+            // this into Core's definite-rejection retry path.
+            if (!sent) return OrderOutcome.Uncertain(BrokerErrorKind.Disconnected, "partial nie wysłano; rezerwacja zachowana");
             return MapResult(sent, json, "częściowe zamknięcie");
         }
         public OrderOutcome? LookupPartial(string actionId) => Session?.LookupRecovered(actionId) is ResultMsg result ? ProtocolResult.ToOutcome(result) : null;

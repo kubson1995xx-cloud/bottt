@@ -23,7 +23,8 @@ namespace Apex.Core.Engine
     }
 
     /// <summary>Stable Core action ID must be the journal command ID. Lookup is read-only;
-    /// missing/uncertain never authorizes another mutation.</summary>
+    /// missing/uncertain never authorizes another mutation. Generic ClosePartial cannot grant
+    /// production authority; Core dispatches only through its opaque scoped capability.</summary>
     public interface IPartialCloseGateway
     {
         OrderOutcome ClosePartial(string actionId, long positionId, string signalId, double observedUnits, double units);

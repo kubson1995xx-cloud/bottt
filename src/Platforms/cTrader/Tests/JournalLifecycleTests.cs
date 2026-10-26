@@ -69,6 +69,20 @@ public sealed class JournalLifecycleTests
     }
 
     [Fact]
+    public void Fix1_ActualNativeGenericPartialCannotReachSdkWithoutScopedAuthority()
+    {
+        string configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
+        string dll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../ApexTradingAI/ApexTradingAI/bin", configuration, "net6.0/ApexTradingAI.dll"));
+        var assembly = System.Reflection.Assembly.LoadFrom(dll);
+        var adapterType = assembly.GetType("cAlgo.Robots.CTraderAdapter")!;
+        var adapter = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(adapterType);
+        // Missing opaque authority must refuse BEFORE touching an SDK Robot or journal.
+        var result = adapterType.GetMethod("ClosePartial")!.Invoke(adapter, new object[] { "partial", 42L, "s1", 2.0, 1.0 })!;
+        Assert.Equal("Rejected", result.GetType().GetProperty("Status")!.GetValue(result)!.ToString());
+        Assert.Equal("InvalidRequest", result.GetType().GetProperty("Error")!.GetValue(result)!.ToString());
+    }
+
+    [Fact]
     public void Task2B_VersionedSnapshotDetectsWellFormedPayloadCorruption()
     {
         string saved = ""; var journal = new CommandJournal(null, s => saved = s);
