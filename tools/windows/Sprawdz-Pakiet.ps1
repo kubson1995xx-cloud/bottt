@@ -1,12 +1,20 @@
 #Requires -Version 5.1
 param([string]$Pakiet = $PSScriptRoot)
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "TestEvidence.ps1")
 $base = (Resolve-Path -LiteralPath $Pakiet).Path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 foreach ($required in @("APEX-Desktop/ApexDesktop.exe", "APEX-Desktop/wwwroot/index.html", "APEX-Desktop/wwwroot/app.js", "APEX-Desktop/wwwroot/decision-center.js", "cTrader/ApexBridge.algo", "Uruchom APEX.cmd", "apex-build.json", "manifest.sha256")) {
     if (-not (Test-Path -LiteralPath (Join-Path $base $required) -PathType Leaf)) { throw "Brak pliku: $required" }
 }
 $meta = Get-Content -LiteralPath (Join-Path $base "apex-build.json") -Raw | ConvertFrom-Json
-if (-not $meta.demoOnly -or -not $meta.botTestsRun -or -not $meta.platformTestsRun -or -not $meta.panelTestsRun) { throw "Pakiet bez potwierdzonych testow DEMO." }
+if (-not $meta.demoOnly -or -not $meta.botTestsRun -or -not $meta.platformTestsRun -or -not $meta.backtesterTestsRun -or -not $meta.panelTestsRun) { throw "Pakiet bez potwierdzonych testow DEMO." }
+foreach ($suite in @('bot', 'platform', 'backtester')) {
+    $actual = Read-ApexTestCounts (Join-Path $base ("Weryfikacja/" + $suite + ".trx"))
+    $declared = $meta.testCounts.$suite
+    if ($null -eq $declared -or $declared.total -ne $actual.total -or $declared.passed -ne $actual.passed -or $declared.failed -ne $actual.failed) {
+        throw "Test metadata does not match TRX: $suite"
+    }
+}
 $listed = @{}
 foreach ($line in [IO.File]::ReadAllLines((Join-Path $base "manifest.sha256"))) {
     if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Nieprawidlowa linia manifestu." }

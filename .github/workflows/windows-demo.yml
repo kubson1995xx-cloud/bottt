@@ -26,7 +26,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Build and test complete DEMO package (PowerShell 5.1)
+      # Package script hard-gates Core, platform, actual-source backtester and panel; reads counts from TRX.
+      - name: Build and test complete DEMO package including backtester (PowerShell 5.1)
         shell: powershell
         run: ./tools/windows/Zbuduj-APEX.ps1 -Wyjscie "$env:RUNNER_TEMP/APEX Windows DEMO"
       - name: Run actual Windows executable (no broker, no orders)

@@ -1,7 +1,9 @@
 # Metodologia testów strategii APEX
 
+> **ARCHIWALNA METODOLOGIA/WYNIKI v1.** Backtester v2 zmienił cashflow, FX, minima i niezależność WF; ten opis historycznych okresów nie waliduje v2. Okres OANDA był już używany, nie jest nietkniętym holdoutem. Aktualne CLI, kontrakt danych i ograniczenia: [BACKTESTER.md](BACKTESTER.md).
+
 Ten dokument opisuje zasady testów **ustalone przed obejrzeniem wyników** danej rundy.
-Kod realizujący dokładnie te zasady: `tools/Apex.Backtester/Research/ResearchPipeline.cs`.
+Historyczną implementacją był `tools/Apex.Backtester/Research/ResearchPipeline.cs`; obecna v2 ma semantykę opisaną w BACKTESTER.md.
 
 ## 1. Dane
 

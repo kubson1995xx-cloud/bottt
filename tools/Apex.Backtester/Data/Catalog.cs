@@ -7,9 +7,10 @@ namespace Apex.Backtester.Data
 {
     /// <summary>
     /// Definicja instrumentu w backteście wraz z modelem kosztów.
-    /// Spready i prowizje odpowiadają typowym (nie najlepszym) warunkom konta typu "Razor" u brokerów cTrader
-    /// (FX/metale: prowizja 3,5 USD za lot za stronę). Dane źródłowe to ceny MID, więc spread jest modelowany:
-    /// ask = mid + spread/2, bid = mid − spread/2, z poszerzeniem ×3 w godzinach rollover (21–23 UTC).
+    /// Offline COST ASSUMPTIONS, not verified Pepperstone/broker fees: FX/metals USD3.50/lot/side,
+    /// USD0.50 minimum per operation; spread-only CFDs explicitly assume zero commission minimum.
+    /// Simulator consumes MID; BID/ASK source requires declared modeled conversion in DataLoader.
+    /// Modeled spread is widened x3 at 21–23 UTC. No claim of historical executable broker quotes.
     /// </summary>
     public sealed class InstrumentDef
     {
@@ -23,6 +24,8 @@ namespace Apex.Backtester.Data
         public double Spread { get; init; }
         /// <summary>Prowizja USD za lot za stronę (0 = brak prowizji, koszt w spreadzie).</summary>
         public double CommissionUsdPerLot { get; init; }
+        /// <summary>Assumed USD minimum per executed operation, NOT verified broker fees.</summary>
+        public double MinCommissionUsd { get; init; }
         public double LotSize { get; init; } = 1;
         public double VolumeMin { get; init; } = 1;
         public double VolumeStep { get; init; } = 1;
@@ -37,7 +40,7 @@ namespace Apex.Backtester.Data
         private static InstrumentDef Fx(string s, string quote, double pip, int digits, double spreadPips, double lev = 30) => new()
         {
             Symbol = s, AssetClass = AssetClass.Forex, BaseAsset = s.Substring(0, 3), QuoteCcy = quote, PipSize = pip, Digits = digits,
-            Spread = spreadPips * pip, CommissionUsdPerLot = 3.5, LotSize = 100_000, VolumeMin = 1000, VolumeStep = 1000, Leverage = lev,
+            Spread = spreadPips * pip, CommissionUsdPerLot = 3.5, MinCommissionUsd = 0.5, LotSize = 100_000, VolumeMin = 1000, VolumeStep = 1000, Leverage = lev,
         };
 
         private static InstrumentDef Cfd(string s, AssetClass c, string quote, double pip, int digits, double spread, double lev, double volMin = 0.1,
@@ -56,7 +59,7 @@ namespace Apex.Backtester.Data
             Fx("AUDJPY", "JPY", 0.01, 3, 0.8, 20),
             Fx("EURJPY", "JPY", 0.01, 3, 0.8, 20),
             new InstrumentDef { Symbol = "XAUUSD", AssetClass = AssetClass.Metal, BaseAsset = "XAU", QuoteCcy = "USD", PipSize = 0.01, Digits = 2, Spread = 0.20,
-                CommissionUsdPerLot = 3.5, LotSize = 100, VolumeMin = 1, VolumeStep = 1, Leverage = 20 },
+                CommissionUsdPerLot = 3.5, MinCommissionUsd = 0.5, LotSize = 100, VolumeMin = 1, VolumeStep = 1, Leverage = 20 },
             Cfd("SpotCrude", AssetClass.Energy, "USD", 0.01, 2, 0.03, 10, 1),
             Cfd("NatGas", AssetClass.Energy, "USD", 0.001, 3, 0.008, 10, 10),
             Cfd("US500", AssetClass.Index, "USD", 0.1, 1, 0.5, 20),

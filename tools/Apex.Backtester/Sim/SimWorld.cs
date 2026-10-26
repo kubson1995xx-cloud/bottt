@@ -35,7 +35,7 @@ namespace Apex.Backtester.Sim
         public double? Tp;
         public string Label = "";
         public string Comment = "";
-        public double EntryCommissionPerUnit;
+        public double EntryCommission;
         public double SwapAccrued;
         public double RealizedNet;
         public double RealizedGross;
@@ -62,7 +62,15 @@ namespace Apex.Backtester.Sim
 
         public SimWorld(IEnumerable<SymbolData> data, FxRates fx, CostScenario cost, double startEquity)
         {
+            if (!double.IsFinite(cost.CommissionMult) || cost.CommissionMult <= 0 ||
+                !double.IsFinite(cost.SpreadMult) || cost.SpreadMult < 0 ||
+                !double.IsFinite(cost.SlippageMult) || cost.SlippageMult < 0 ||
+                !double.IsFinite(cost.FinancingMult) || cost.FinancingMult < 0)
+                throw new ArgumentException("Invalid cost multipliers");
             _data = data.ToDictionary(d => d.Def.Symbol, StringComparer.OrdinalIgnoreCase);
+            if (_data.Values.Any(s => !double.IsFinite(s.Def.MinCommissionUsd) || s.Def.MinCommissionUsd < 0 ||
+                !double.IsFinite(s.Def.CommissionUsdPerLot) || s.Def.CommissionUsdPerLot < 0 ||
+                !double.IsFinite(s.Def.LotSize) || s.Def.LotSize <= 0)) throw new ArgumentException("Invalid fee definition");
             _fx = fx;
             _cost = cost;
             Balance = startEquity;
@@ -97,11 +105,11 @@ namespace Apex.Backtester.Sim
 
         private double QuoteToUsd(InstrumentDef d, DateTime utc)
         {
-            double r = _fx.ToUsd(d.QuoteCcy, utc);
-            return double.IsNaN(r) || r <= 0 ? 1.0 : r;
+            return _fx.ToUsd(d.QuoteCcy, utc);
         }
 
-        private double CommissionPerUnit(InstrumentDef d) => d.CommissionUsdPerLot * _cost.CommissionMult / d.LotSize;
+        private double Commission(InstrumentDef d, double units) =>
+            units == 0 ? 0 : Math.Max(d.MinCommissionUsd, d.CommissionUsdPerLot * units / d.LotSize) * _cost.CommissionMult;
 
         // ------------------------------------------------------------- IMarketData
 
@@ -129,6 +137,8 @@ namespace Apex.Backtester.Sim
                 TradingEnabled = true,
                 CommissionKind = d.CommissionUsdPerLot > 0 ? CommissionKind.UsdPerLot : CommissionKind.None,
                 CommissionValue = d.CommissionUsdPerLot * _cost.CommissionMult,
+                MinCommissionAccount = d.MinCommissionUsd * _cost.CommissionMult,
+                MinCommissionKnown = true,
                 UsdToAccount = 1.0,
                 QuoteToAccount = q2u,
             };
@@ -187,7 +197,7 @@ namespace Apex.Backtester.Sim
                 var sd = _data[p.Symbol];
                 double q2u = QuoteToUsd(sd.Def, Now);
                 double px = ExitPriceNow(sd, p.Dir);
-                unreal += (int)p.Dir * (px - p.Entry) * p.Units * q2u + p.SwapAccrued - p.EntryCommissionPerUnit * p.Units;
+                unreal += (int)p.Dir * (px - p.Entry) * p.Units * q2u + p.SwapAccrued - Commission(sd.Def, p.Units);
                 margin += p.Units * px * q2u / sd.Def.Leverage;
             }
             double equity = Balance + unreal;
@@ -210,7 +220,8 @@ namespace Apex.Backtester.Sim
         {
             var q = GetQuote(sd.Def.Symbol);
             if (q == null) return 0;
-            return q.Value.ExitPrice(d);
+            double slip = _cost.SlippageMult * (0.25 * q.Value.Spread + 0.01 * AtrH1(sd, Now));
+            return q.Value.ExitPrice(d) - (int)d * slip;
         }
 
         public IReadOnlyList<PositionInfo> GetPositions()
@@ -235,9 +246,9 @@ namespace Apex.Backtester.Sim
                     Label = p.Label,
                     Comment = p.Comment,
                     GrossProfit = gross,
-                    Commissions = -p.EntryCommissionPerUnit * p.Units * 2,
+                    Commissions = -Commission(sd.Def, p.Units),
                     Swap = p.SwapAccrued,
-                    NetProfit = gross + p.SwapAccrued - p.EntryCommissionPerUnit * p.Units * 2,
+                    NetProfit = gross + p.SwapAccrued - Commission(sd.Def, p.Units),
                     CurrentPrice = px,
                     Margin = p.Units * px * q2u / sd.Def.Leverage,
                 });
@@ -249,8 +260,11 @@ namespace Apex.Backtester.Sim
         {
             if (!_data.TryGetValue(r.Symbol, out var sd)) return OrderOutcome.Rejected(BrokerErrorKind.UnknownSymbol, "nieznany symbol");
             if (!sd.IndexByOpen.ContainsKey(Now)) return OrderOutcome.Rejected(BrokerErrorKind.MarketClosed, "rynek zamknięty");
-            if (r.VolumeUnits < sd.Def.VolumeMin) return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "wolumen poniżej minimum");
+            if (!double.IsFinite(r.VolumeUnits) || r.VolumeUnits < sd.Def.VolumeMin ||
+                Math.Abs(r.VolumeUnits / sd.Def.VolumeStep - Math.Round(r.VolumeUnits / sd.Def.VolumeStep)) > 1e-7)
+                return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "invalid volume");
             if (!(r.StopLossPips > 0)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidStopLossTakeProfit, "brak SL");
+            _ = QuoteToUsd(sd.Def, Now); // validate before any mutation, including entry fee
             var q = GetQuote(r.Symbol)!.Value;
             double spread = q.Spread;
             double slip = _cost.SlippageMult * (0.25 * spread + 0.01 * AtrH1(sd, Now));
@@ -271,8 +285,9 @@ namespace Apex.Backtester.Sim
                 Tp = tp,
                 Label = r.Label,
                 Comment = r.Comment,
-                EntryCommissionPerUnit = CommissionPerUnit(sd.Def),
+                EntryCommission = Commission(sd.Def, r.VolumeUnits),
             };
+            Balance -= pos.EntryCommission;
             _positions.Add(pos);
             return OrderOutcome.Filled(pos.Id, fill);
         }
@@ -300,7 +315,11 @@ namespace Apex.Backtester.Sim
             var q = GetQuote(p.Symbol)!.Value;
             double slip = _cost.SlippageMult * (0.25 * q.Spread + 0.01 * AtrH1(sd, Now));
             double px = q.ExitPrice(p.Dir) - (int)p.Dir * slip;
-            double u = units.HasValue ? Math.Min(units.Value, p.Units) : p.Units;
+            double u = units ?? p.Units;
+            if (!double.IsFinite(u) || u <= 0 || u > p.Units || u < sd.Def.VolumeMin ||
+                Math.Abs(u / sd.Def.VolumeStep - Math.Round(u / sd.Def.VolumeStep)) > 1e-7 ||
+                (u < p.Units && p.Units - u < sd.Def.VolumeMin))
+                return OrderOutcome.Rejected(BrokerErrorKind.BadVolume, "invalid reduction volume");
             Realize(p, sd, u, px, Now, "Closed");
             return OrderOutcome.Filled(p.Id, px);
         }
@@ -320,11 +339,13 @@ namespace Apex.Backtester.Sim
             double q2u = QuoteToUsd(sd.Def, time);
             double frac = p.Units > 0 ? units / p.Units : 1;
             double gross = (int)p.Dir * (price - p.Entry) * units * q2u;
-            double commission = (p.EntryCommissionPerUnit + CommissionPerUnit(sd.Def)) * units;
+            double exitCommission = Commission(sd.Def, units);
+            double entryAllocation = p.EntryCommission * units / p.InitialUnits;
+            double commission = entryAllocation + exitCommission;
             double swap = p.SwapAccrued * frac;
             p.SwapAccrued -= swap;
             double net = gross - commission + swap;
-            Balance += net;
+            Balance += gross - exitCommission + swap; // entry was already paid
             p.RealizedGross += gross;
             p.RealizedCommission += commission;
             p.RealizedSwap += swap;
@@ -441,10 +462,11 @@ namespace Apex.Backtester.Sim
             {
                 var sd = _data[p.Symbol];
                 int j = sd.Features[Tf.H1].IndexAtOrBefore(Now);
-                double mid = j >= 0 ? sd.H1.Close[j] : p.Entry;
-                double half = SpreadAt(sd.Def, Now) / 2;
-                double px = p.Dir == TradeDirection.Long ? mid - half : mid + half;
-                Realize(p, sd, p.Units, px, Now, "Closed");
+                if (j < 0) throw new InvalidOperationException("No closed price for end liquidation");
+                double spread = SpreadAt(sd.Def, Now);
+                double slip = _cost.SlippageMult * (0.25 * spread + 0.01 * AtrH1(sd, Now));
+                double px = sd.H1.Close[j] - (int)p.Dir * (spread / 2 + slip);
+                Realize(p, sd, p.Units, px, Now, "BoundaryLiquidation");
             }
         }
     }

@@ -32,6 +32,7 @@ namespace Apex.Backtester.Sim
         public double MaxEquityDrawdownPct { get; set; }
         public List<string> Events { get; } = new();
         public int Cycles { get; set; }
+        public HashSet<long> BoundaryPositionIds { get; } = new();
     }
 
     internal sealed class CollectingJournal : ITradeJournal
@@ -47,8 +48,22 @@ namespace Apex.Backtester.Sim
     /// <summary>Uruchamia silnik APEX na danych historycznych krok po kroku (co godzinę, na zamknięciach świec H1).</summary>
     public static class BacktestRunner
     {
+        public static void ValidateFxCoverage(IEnumerable<SymbolData> symbols, FxRates fx, DateTime from, DateTime to)
+        {
+            var errors = new List<string>();
+            foreach (var data in symbols)
+                foreach (var t in data.H1.Times.Where(t => t >= from && t < to))
+                    try { _ = fx.ToUsd(data.Def.QuoteCcy, t); }
+                    catch (InvalidOperationException e) { if (errors.Count < 100) errors.Add($"{data.Def.Symbol}: {e.Message}"); }
+            if (errors.Count > 0) throw new InvalidOperationException("Invalid FX coverage (first 100): " + string.Join("; ", errors));
+        }
+
         public static BacktestResult Run(RunSpec spec)
         {
+            if (spec.From >= spec.To || spec.From.Ticks % TimeSpan.TicksPerHour != 0 || spec.To.Ticks % TimeSpan.TicksPerHour != 0 || !double.IsFinite(spec.StartEquity) || spec.StartEquity <= 0)
+                throw new InvalidOperationException("Invalid evaluation range/start equity");
+            // Preflight even if the strategy would produce no trades.
+            ValidateFxCoverage(spec.Symbols, spec.Fx, spec.From, spec.To);
             var result = new BacktestResult { StartEquity = spec.StartEquity };
             var world = new SimWorld(spec.Symbols, spec.Fx, spec.Cost, spec.StartEquity);
             var cfg = spec.ConfigFactory();
@@ -68,7 +83,7 @@ namespace Apex.Backtester.Sim
             foreach (var s in spec.Symbols)
                 foreach (var t in s.H1.Times)
                     if (t >= spec.From && t < spec.To) times.Add(t);
-            if (times.Count == 0) return result;
+            if (times.Count == 0) throw new InvalidOperationException("No evaluation bars in requested range");
 
             world.SetTime(times.Min);
             engine.Initialize(times.Min);
@@ -94,8 +109,17 @@ namespace Apex.Backtester.Sim
                     lastDay = t.Date;
                 }
             }
+            // Complete the final evaluation candle, but never process prices after the exclusive cutoff.
+            var end = prev.AddHours(1) < spec.To ? prev.AddHours(1) : spec.To;
+            world.ProcessIntrabar(prev, end);
+            world.SetTime(end);
+            world.ApplyFinancing(end);
+            world.OnClosed = closed => { result.BoundaryPositionIds.Add(closed.PositionId); engine.OnPositionClosed(closed); };
             world.CloseAllAtEnd();
             result.EndEquity = world.GetAccount().Equity;
+            if (result.EndEquity > peak) peak = result.EndEquity;
+            if (peak > 0) maxDd = Math.Max(maxDd, (peak - result.EndEquity) / peak);
+            result.DailyEquity.Add((end, result.EndEquity));
             result.MaxEquityDrawdownPct = maxDd * 100;
             return result;
         }

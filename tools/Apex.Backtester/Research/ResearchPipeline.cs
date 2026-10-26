@@ -36,10 +36,8 @@ namespace Apex.Backtester.Research
     }
 
     /// <summary>
-    /// Proces badawczy (zasady ustalone PRZED obejrzeniem wyników – patrz docs/METODOLOGIA_TESTOW.md):
-    ///  1. Okres badawczy 2005-01..2017-12, okres odłożony (holdout) 2018-01..2020-05 – używany JEDEN raz na końcu.
-    ///  2. Każda strategia × klasa aktywów × kombinacja parametrów testowana w izolacji (ryzyko stałe w R, koszty pełne).
-    ///  3. Walk-forward: 4 lata in-sample → 1 rok out-of-sample, przesuwane co rok (OOS 2009..2017).
+    /// Offline bounded research with independent IS/OOS engines; see docs/BACKTESTER.md.
+    /// Historical results and previously reused holdout periods do not validate these semantics.
     ///     Wybór parametrów w IS: t-statystyka średniego R wygładzona po sąsiadach w siatce (preferencja "płaskowyżu").
     ///  4. Kryteria włączenia (wszystkie muszą być spełnione): n OOS ≥ 60, E[R] OOS ≥ +0,05, t OOS ≥ 1,65,
     ///     ≥ 55% zyskownych lat OOS, ≥ 60% kombinacji siatki z dodatnim E[R] w całym okresie badawczym,
@@ -49,12 +47,19 @@ namespace Apex.Backtester.Research
     /// </summary>
     public sealed class ResearchPipeline
     {
-        public static readonly DateTime ResearchFrom = new(2005, 1, 1);
-        public static readonly DateTime ResearchTo = new(2018, 1, 1);
-        public static readonly DateTime HoldoutFrom = new(2018, 1, 1);
-        public static readonly DateTime HoldoutTo = new(2020, 6, 1);
-        public static readonly int[] OosYears = Enumerable.Range(2009, 9).ToArray();
+        public DateTime ResearchFrom { get; }
+        public DateTime ResearchTo { get; }
+        public int TrainingYears { get; init; } = 4;
+        public int MaxCombos { get; init; } = 100;
+        public int MaxRuns { get; init; } = 1000;
+        public int Parallelism { get; init; } = 1;
+        public string[] RequestedSymbols { get; init; } = Array.Empty<string>();
+        private int _runCount;
+        public int RunCount => _runCount;
+        public List<object> MachineResults { get; } = new();
+        private IEnumerable<int> OosYears => Enumerable.Range(ResearchFrom.Year + TrainingYears, ResearchTo.Year - ResearchFrom.Year - TrainingYears);
         private const double IsolatedEquity = 1_000_000;
+        public CostScenario BaseCost { get; init; } = CostScenario.Base;
 
         private readonly DataLoader _loader;
         private readonly string _outDir;
@@ -62,8 +67,9 @@ namespace Apex.Backtester.Research
         private readonly string _tag;
         private readonly StringBuilder _log = new();
 
-        public ResearchPipeline(DataLoader loader, string outDir, string? only, string? tag = null)
+        public ResearchPipeline(DataLoader loader, string outDir, string? only, string? tag, DateTime from, DateTime to)
         {
+            ResearchFrom = from; ResearchTo = to;
             _loader = loader;
             _outDir = outDir;
             _only = only;
@@ -93,6 +99,13 @@ namespace Apex.Backtester.Research
             c.Scoring = new Apex.Core.Scanner.ScoringSettings { MinScore = minScore };
             return c;
         }
+
+        private CostScenario Stress(CostScenario factor) => new()
+        {
+            Name = BaseCost.Name + " * " + factor.Name, SpreadMult = BaseCost.SpreadMult * factor.SpreadMult,
+            CommissionMult = BaseCost.CommissionMult * factor.CommissionMult,
+            SlippageMult = BaseCost.SlippageMult * factor.SlippageMult, FinancingMult = BaseCost.FinancingMult * factor.FinancingMult,
+        };
 
         private void Log(string s)
         {
@@ -273,10 +286,12 @@ namespace Apex.Backtester.Research
 
         // ------------------------------------------------------------------ uruchamianie izolowane
 
-        private List<string> SymbolsOf(AssetClass c) => Catalog.ByClass(c).Select(d => d.Symbol).Where(_loader.Exists).ToList();
+        private List<string> SymbolsOf(AssetClass c) => Catalog.ByClass(c).Select(d => d.Symbol).Where(s => _loader.Exists(s) && (RequestedSymbols.Length == 0 || RequestedSymbols.Contains(s))).ToList();
 
         public List<TradeRecord> RunIsolated(ProfileEntry entry, string symbol, DateTime from, DateTime to, CostScenario cost)
         {
+            if (System.Threading.Interlocked.Increment(ref _runCount) > MaxRuns)
+                throw new InvalidOperationException($"Research run budget exceeded ({MaxRuns}); no successful report");
             var sd = _loader.Load(symbol);
             var res = BacktestRunner.Run(new RunSpec
             {
@@ -289,14 +304,14 @@ namespace Apex.Backtester.Research
                 StartEquity = IsolatedEquity,
                 Fx = _loader.Fx,
             });
-            return res.Trades;
+            return res.Trades.Where(t => !res.BoundaryPositionIds.Contains(t.PositionId)).ToList();
         }
 
         private ComboTrades RunComboClass(Combo combo, AssetClass cls, DateTime from, DateTime to, CostScenario cost)
         {
             var ct = new ComboTrades { Combo = combo, AssetClass = cls };
             var bag = new ConcurrentBag<TradeRecord>();
-            Parallel.ForEach(SymbolsOf(cls), new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, sym =>
+            Parallel.ForEach(SymbolsOf(cls), new ParallelOptions { MaxDegreeOfParallelism = Parallelism }, sym =>
             {
                 foreach (var t in RunIsolated(combo.Build(cls), sym, from, to, cost)) bag.Add(t);
             });
@@ -316,15 +331,6 @@ namespace Apex.Backtester.Research
             return (n, m, sd > 0 ? m / (sd / Math.Sqrt(n)) : 0);
         }
 
-        private static double Objective(IEnumerable<TradeRecord> trades)
-        {
-            var (n, _, t) = RStats(trades);
-            return n < 30 ? double.NegativeInfinity : t;
-        }
-
-        private static IEnumerable<Combo> Neighbors(Combo c, List<Combo> grid) =>
-            grid.Where(o => o != c && o.Index.Length == c.Index.Length &&
-                            o.Index.Zip(c.Index, (x, y) => Math.Abs(x - y)).Sum() == 1);
 
         // ------------------------------------------------------------------ główny proces
 
@@ -354,7 +360,7 @@ namespace Apex.Backtester.Research
         {
             var sw = Stopwatch.StartNew();
             Log($"# APEX – badanie strategii ({DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC)");
-            Log($"Okres badawczy: {ResearchFrom:yyyy-MM-dd} – {ResearchTo:yyyy-MM-dd}; holdout: {HoldoutFrom:yyyy-MM-dd} – {HoldoutTo:yyyy-MM-dd}");
+            Log($"Evaluation [{ResearchFrom:o}, {ResearchTo:o}); {TrainingYears} years IS then independent yearly OOS. No untouched holdout claimed. Cost assumptions, not broker fees.");
             var results = new List<StrategyClassResult>();
             var strategies = new[] { StrategyId.TrendPullback, StrategyId.DonchianBreakout, StrategyId.MeanReversion, StrategyId.MomentumImpulse, StrategyId.IndexDipBuy, StrategyId.DailyTrend };
             foreach (var sid in strategies)
@@ -365,18 +371,15 @@ namespace Apex.Backtester.Research
                     if (SymbolsOf(cls).Count == 0) continue;
                     var r = EvaluateStrategyClass(sid, cls);
                     results.Add(r);
-                    Log($"[{sw.Elapsed:hh\\:mm\\:ss}] {sid}/{cls}: WF OOS n={r.Wf.n} E={r.Wf.mean:F3}R t={r.Wf.t:F2} | lata+ {r.OosYearsPositive}/{r.OosYearsTotal} | siatka+ {r.PctCombosPositive:P0} | x1.5 E={r.ChosenElevated.mean:F3} => {(r.Enabled ? "WŁĄCZONA" : "odrzucona: " + string.Join("; ", r.FailedCriteria))}");
+                    Log($"[{sw.Elapsed:hh\\:mm\\:ss}] {sid}/{cls}: WF OOS n={r.Wf.n} E={r.Wf.mean:F3}R t={r.Wf.t:F2} | lata+ {r.OosYearsPositive}/{r.OosYearsTotal} | siatka+ {r.PctCombosPositive:P0} | x1.5 E={r.ChosenElevated.mean:F3} => {(r.Enabled ? "offline criteria met (no activation)" : "rejected: " + string.Join("; ", r.FailedCriteria))}");
                 }
             }
+            if (results.Count == 0) throw new InvalidOperationException("No applicable strategy/class for requested symbols/filter");
             WriteResearchReport(results);
             var profile = BuildProfile(results);
-            File.WriteAllText(Path.Combine(_outDir, $"profile_validated{_tag}.json"), profile.ToJson());
+            File.WriteAllText(Path.Combine(_outDir, $"research_candidates{_tag}.json"), profile.ToJson());
             Log($"Profil zapisany: {profile.Entries.Count(e => e.Enabled)} aktywnych par strategia/klasa.");
-            if (_only == null)
-            {
-                RunPortfolio(profile);
-                RunTimeframeComparison();
-            }
+            // No automatic portfolio/holdout sweep or production promotion. Explicit portfolio command only.
             File.WriteAllText(Path.Combine(_outDir, $"research_log{_tag}.txt"), _log.ToString());
             Log($"Zakończono w {sw.Elapsed}.");
             return 0;
@@ -392,11 +395,14 @@ namespace Apex.Backtester.Research
             var merged = new StrategyProfile { Version = "merged", Entries = new List<ProfileEntry>() };
             foreach (var path in profilePaths)
             {
-                var p = StrategyProfile.FromJson(File.ReadAllText(path));
+                string text = File.ReadAllText(path);
+                var p = StrategyProfile.FromJson(text);
+                MachineResults.Add(new { profilePath = path, sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant(), profile = p });
                 merged.Entries.AddRange(p.Entries);
                 Log($"Profil {Path.GetFileName(path)}: {p.Entries.Count(e => e.Enabled)} włączonych wpisów.");
             }
             RunPortfolio(merged);
+            MachineResults.AddRange(_portfolioSummary);
             File.WriteAllText(Path.Combine(_outDir, $"portfolio_log{_tag}.txt"), _log.ToString());
             if (!string.IsNullOrWhiteSpace(SummaryPath))
                 File.WriteAllText(SummaryPath!, System.Text.Json.JsonSerializer.Serialize(new { profile = merged.Version, enabledEntries = merged.Entries.Count(e => e.Enabled), runs = _portfolioSummary },
@@ -406,40 +412,31 @@ namespace Apex.Backtester.Research
 
         private StrategyClassResult EvaluateStrategyClass(StrategyId sid, AssetClass cls)
         {
-            var grid = Grid(sid);
-            var all = new List<ComboTrades>();
-            foreach (var combo in grid) all.Add(RunComboClass(combo, cls, ResearchFrom, ResearchTo, CostScenario.Base));
-            var byKey = all.ToDictionary(a => a.Combo.Key);
-
+            var grid = Grid(sid).OrderByDescending(c => c.IsDefault).Take(MaxCombos).ToList();
             var res = new StrategyClassResult { Strategy = sid, AssetClass = cls, GridSize = grid.Count };
-            var fullMeans = all.Select(a => RStats(a.Trades)).ToList();
-            res.PctCombosPositive = fullMeans.Count(x => x.n >= 30 && x.mean > 0) / (double)grid.Count;
-            res.MedianComboR = Apex.Core.Indicators.Ta.Median(fullMeans.Where(x => x.n > 0).Select(x => x.mean));
+            var defaultOos = new List<TradeRecord>();
 
             // Walk-forward.
             var oos = new List<TradeRecord>();
             var chosenCount = new Dictionary<string, int>();
             foreach (int y in OosYears)
             {
-                var isFrom = new DateTime(y - 4, 1, 1);
-                var isTo = new DateTime(y, 1, 1);
-                var oosTo = new DateTime(y + 1, 1, 1);
-                var objective = all.ToDictionary(a => a.Combo.Key, a => Objective(a.Trades.Where(t => t.EntryTimeUtc >= isFrom && t.EntryTimeUtc < isTo)));
-                Combo? best = null;
-                double bestVal = double.NegativeInfinity;
-                foreach (var c in grid)
+                var isFrom = DateTime.SpecifyKind(new DateTime(y - TrainingYears, 1, 1), DateTimeKind.Utc);
+                var isTo = DateTime.SpecifyKind(new DateTime(y, 1, 1), DateTimeKind.Utc);
+                var oosTo = DateTime.SpecifyKind(new DateTime(y + 1, 1, 1), DateTimeKind.Utc);
+                // Each call creates a fresh world/engine/store. No full-history trades or OOS state enter IS.
+                var training = grid.Select(c => RunComboClass(c, cls, isFrom, isTo, BaseCost)).ToList();
+                var best = WalkForward.Select(training, isFrom, isTo);
+                if (best == null)
                 {
-                    var vals = new List<double> { objective[c.Key] };
-                    vals.AddRange(Neighbors(c, grid).Select(nb => objective[nb.Key]));
-                    var finite = vals.Where(v => !double.IsNegativeInfinity(v)).ToList();
-                    if (finite.Count == 0) continue;
-                    double smooth = finite.Average() * finite.Count / vals.Count; // brak danych u sąsiadów = kara
-                    if (smooth > bestVal || (smooth == bestVal && c.IsDefault)) { bestVal = smooth; best = c; }
+                    res.WfChoices.Add($"{y}: no eligible IS evidence; OOS not selected");
+                    res.OosByYear[y] = (0, 0);
+                    continue;
                 }
-                best ??= grid.First(c => c.IsDefault);
                 chosenCount[best.Key] = chosenCount.TryGetValue(best.Key, out var cc) ? cc + 1 : 1;
-                res.WfChoices.Add($"{y}: {best.Label} (IS obj {bestVal:F2})");
-                var yearTrades = byKey[best.Key].Trades.Where(t => t.EntryTimeUtc >= isTo && t.EntryTimeUtc < oosTo).ToList();
+                res.WfChoices.Add($"{y}: {best.Label}; independent IS [{isFrom:o},{isTo:o}), OOS [{isTo:o},{oosTo:o})");
+                var yearTrades = RunComboClass(best, cls, isTo, oosTo, BaseCost).Trades;
+                defaultOos.AddRange(RunComboClass(grid.First(c => c.IsDefault), cls, isTo, oosTo, BaseCost).Trades);
                 oos.AddRange(yearTrades);
                 var ys = RStats(yearTrades);
                 res.OosByYear[y] = (ys.n, ys.mean);
@@ -449,14 +446,20 @@ namespace Apex.Backtester.Research
             res.OosYearsTotal = res.OosByYear.Count(kv => kv.Value.n > 0);
             res.OosYearsPositive = res.OosByYear.Count(kv => kv.Value.n > 0 && kv.Value.mean > 0);
             var def = grid.First(c => c.IsDefault);
-            res.DefaultOos = RStats(byKey[def.Key].Trades.Where(t => t.EntryTimeUtc >= new DateTime(OosYears[0], 1, 1)));
+            res.DefaultOos = RStats(defaultOos);
+            // Retrospective grid diagnostics are explicitly NOT inputs to fold selection.
+            var all = grid.Select(c => RunComboClass(c, cls, ResearchFrom, ResearchTo, BaseCost)).ToList();
+            var byKey = all.ToDictionary(a => a.Combo.Key);
+            var fullMeans = all.Select(a => RStats(a.Trades)).ToList();
+            res.PctCombosPositive = fullMeans.Count(x => x.n >= 30 && x.mean > 0) / (double)grid.Count;
+            res.MedianComboR = Apex.Core.Indicators.Ta.Median(fullMeans.Where(x => x.n > 0).Select(x => x.mean));
 
             // Parametry docelowe: najczęściej wybierane w walk-forward (remis → domyślne).
-            string chosenKey = chosenCount.OrderByDescending(kv => kv.Value).ThenByDescending(kv => kv.Key == def.Key).First().Key;
+            string chosenKey = chosenCount.OrderByDescending(kv => kv.Value).ThenByDescending(kv => kv.Key == def.Key).Select(kv => kv.Key).FirstOrDefault() ?? def.Key;
             res.Chosen = grid.First(c => c.Key == chosenKey);
             res.ChosenFull = RStats(byKey[chosenKey].Trades);
-            res.ChosenElevated = RStats(RunComboClass(res.Chosen, cls, ResearchFrom, ResearchTo, CostScenario.Elevated).Trades);
-            res.ChosenDouble = RStats(RunComboClass(res.Chosen, cls, ResearchFrom, ResearchTo, CostScenario.Double).Trades);
+            res.ChosenElevated = RStats(RunComboClass(res.Chosen, cls, ResearchFrom, ResearchTo, Stress(CostScenario.Elevated)).Trades);
+            res.ChosenDouble = RStats(RunComboClass(res.Chosen, cls, ResearchFrom, ResearchTo, Stress(CostScenario.Double)).Trades);
 
             // Kryteria włączenia (ustalone z góry).
             if (res.Wf.n < 60) res.FailedCriteria.Add($"za mało transakcji OOS ({res.Wf.n} < 60)");
@@ -470,6 +473,13 @@ namespace Apex.Backtester.Research
             // Zapis transakcji WF do CSV (audyt).
             Directory.CreateDirectory(Path.Combine(_outDir, "trades"));
             File.WriteAllLines(Path.Combine(_outDir, "trades", $"wf_{sid}_{cls}.csv"), new[] { TradeRecord.CsvHeader }.Concat(oos.Select(t => t.ToCsv())));
+            MachineResults.Add(new { strategy = sid.ToString(), assetClass = cls.ToString(), gridSize = grid.Count,
+                selectedFolds = res.WfChoices, oosByYear = res.OosByYear.ToDictionary(k => k.Key, v => new { trades = v.Value.n, meanR = v.Value.mean }),
+                oosTrades = res.Wf.n, oosMeanR = res.Wf.mean, oosT = res.Wf.t, net = res.WfStats.NetProfit,
+                commission = oos.Sum(t => t.Commission), swap = oos.Sum(t => t.Swap), gross = oos.Sum(t => t.GrossProfit),
+                profitFactor = double.IsFinite(res.WfStats.ProfitFactor) ? (double?)res.WfStats.ProfitFactor : null,
+                closedTradeMaxDrawdownPct = res.WfStats.MaxDrawdownPct, winRate = res.WfStats.WinRate,
+                researchCriteriaMet = res.Enabled, productionEnabled = false, failures = res.FailedCriteria });
             return res;
         }
 
@@ -478,14 +488,14 @@ namespace Apex.Backtester.Research
             var p = new StrategyProfile
             {
                 Version = "1.0.0-" + DateTime.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture),
-                Description = "Profil zweryfikowany walk-forward na danych 2005–2017 (OANDA/histdata), kryteria w docs/METODOLOGIA_TESTOW.md.",
+                Description = $"OFFLINE CANDIDATES ONLY [{ResearchFrom:o},{ResearchTo:o}); no production validation or activation.",
                 Validation = "reports/RAPORT_BADAN.md",
             };
             foreach (var r in results)
             {
                 var e = r.Chosen.Build(r.AssetClass);
-                e.Enabled = r.Enabled;
-                e.Evidence = string.Format(CultureInfo.InvariantCulture, "WF OOS 2009–2017: n={0}, E={1:F3}R, t={2:F2}; lata+ {3}/{4}; {5}",
+                e.Enabled = false; // research never enables or promotes production strategies
+                e.Evidence = string.Format(CultureInfo.InvariantCulture, "Independent WF OOS: n={0}, E={1:F3}R, t={2:F2}; years+ {3}/{4}; {5}",
                     r.Wf.n, r.Wf.mean, r.Wf.t, r.OosYearsPositive, r.OosYearsTotal, r.Enabled ? "SPEŁNIA kryteria" : "NIE spełnia: " + string.Join("; ", r.FailedCriteria));
                 p.Entries.Add(e);
             }
@@ -507,7 +517,7 @@ namespace Apex.Backtester.Research
             Directory.CreateDirectory(Path.Combine(_outDir, "trades"));
             var classes = enabled.Select(e => e.AssetClass).Distinct().ToList();
             var symbols = classes.SelectMany(SymbolsOf).Distinct().Select(_loader.Load).ToList();
-            foreach (var (name, from, to) in new[] { ("badawczy 2005–2017", ResearchFrom, ResearchTo), ("HOLDOUT 2018–2020.05", HoldoutFrom, HoldoutTo) })
+            foreach (var (name, from, to) in new[] { ("explicit bounded evaluation (not untouched holdout)", ResearchFrom, ResearchTo) })
             {
                 foreach (double minScore in new[] { 0.0, 50.0 })
                 {
@@ -519,6 +529,7 @@ namespace Apex.Backtester.Research
                         From = from,
                         To = to,
                         StartEquity = 10_000,
+                        Cost = BaseCost,
                         Fx = _loader.Fx,
                     });
                     double years = (to - from).TotalDays / 365.25;
@@ -621,7 +632,7 @@ namespace Apex.Backtester.Research
             {
                 sb.AppendLine(string.Format(ci, "| {0} | {1} | {2} | {3:F3} | {4:F2} | {5:F2} | {6}/{7} | {8:P0} | {9:F3} | {10} | {11:F3} | {12:F3} | {13} |",
                     r.Strategy, r.AssetClass, r.Wf.n, r.Wf.mean, r.Wf.t, r.WfStats.ProfitFactor, r.OosYearsPositive, r.OosYearsTotal, r.PctCombosPositive,
-                    r.DefaultOos.mean, r.Chosen.Label, r.ChosenElevated.mean, r.ChosenDouble.mean, r.Enabled ? "**WŁĄCZONA**" : "odrzucona"));
+                    r.DefaultOos.mean, r.Chosen.Label, r.ChosenElevated.mean, r.ChosenDouble.mean, r.Enabled ? "criteria met (offline candidate ONLY)" : "rejected"));
             }
             sb.AppendLine();
             foreach (var r in results)

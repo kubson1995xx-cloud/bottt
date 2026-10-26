@@ -10,6 +10,7 @@
 #>
 param([string]$Wyjscie = "")
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "TestEvidence.ps1")
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 if ([string]::IsNullOrWhiteSpace($Wyjscie)) { $Wyjscie = Join-Path $repo "dist" }
 $Wyjscie = [System.IO.Path]::GetFullPath($Wyjscie)
@@ -40,6 +41,15 @@ try {
     Krok "Wykonywalne testy adaptera cTrader (bez brokera)"
     & dotnet test src/Platforms/cTrader/Tests/Apex.Platform.Tests.csproj -c Release --no-build --logger "trx;LogFileName=platform.trx" --results-directory $evidence
     Sprawdz "Testy adaptera cTrader"
+    Krok "Testy backtestera z rzeczywistym zrodlem produktu (twarda bramka)"
+    & dotnet test tests/Apex.Backtester.Tests/Apex.Backtester.Tests.csproj -c Release --no-build --logger "trx;LogFileName=backtester.trx" --results-directory $evidence
+    Sprawdz "Testy backtestera"
+    & (Join-Path $repo "tests/package/Test-BacktesterGate.ps1") -Source $repo -Scratch (Join-Path $env:TEMP "apex-package-gate-fixtures")
+    $testCounts = [ordered]@{
+        bot = Read-ApexTestCounts (Join-Path $evidence "bot.trx")
+        platform = Read-ApexTestCounts (Join-Path $evidence "platform.trx")
+        backtester = Read-ApexTestCounts (Join-Path $evidence "backtester.trx")
+    }
     Krok "Testy panelu i pakietu"
     & npm ci --ignore-scripts --no-audit --no-fund
     Sprawdz "Zaleznosci testowe panelu"
@@ -63,17 +73,18 @@ try {
     $docs = Join-Path $Wyjscie "Dokumentacja"
     New-Item -ItemType Directory -Force -Path $docs | Out-Null
     # Jawna lista: nie pakujemy dokumentow odlozonego modulu AI Lab.
-    foreach ($name in @("INSTALACJA_WINDOWS.md", "PROCEDURA_DEMO_PEPPERSTONE.md", "PODLACZENIE_PLATFORM.md", "INSTRUKCJA_PANELU.md", "KONFIGURACJA.md", "OGRANICZENIA_I_STATUS.md", "WYNIKI_TESTOW.md", "PRZEGLAD_BEZPIECZENSTWA.md", "METODOLOGIA_TESTOW.md")) {
+    foreach ($name in @("INSTALACJA_WINDOWS.md", "PROCEDURA_DEMO_PEPPERSTONE.md", "PODLACZENIE_PLATFORM.md", "INSTRUKCJA_PANELU.md", "KONFIGURACJA.md", "OGRANICZENIA_I_STATUS.md", "WYNIKI_TESTOW.md", "PRZEGLAD_BEZPIECZENSTWA.md", "METODOLOGIA_TESTOW.md", "BACKTESTER.md")) {
         Copy-Item (Join-Path "docs" $name) $docs
     }
     Copy-Item "README.md" $docs
     Copy-Item "reports/RAPORT_BADAN.md" $docs
     Copy-Item (Join-Path $PSScriptRoot "Sprawdz-Pakiet.ps1") $Wyjscie
+    Copy-Item (Join-Path $PSScriptRoot "TestEvidence.ps1") $Wyjscie
     Copy-Item (Join-Path $PSScriptRoot "Smoke-Windows.ps1") $evidence
     $cmd = "@echo off`r`nrem APEX DEMO - cTrader Desktop musi dzialac na tym samym komputerze.`r`nstart `"`" `"%~dp0APEX-Desktop\ApexDesktop.exe`"`r`n"
     [IO.File]::WriteAllText((Join-Path $Wyjscie "Uruchom APEX.cmd"), $cmd, [Text.Encoding]::ASCII)
-    $info = [ordered]@{ product = "APEX Trading AI DEMO"; sourceCommit = "$commit".Trim(); sourceDirty = $dirty; builtUtc = [DateTime]::UtcNow.ToString("o"); target = "win-x64"; demoOnly = $true; botTestsRun = $true; platformTestsRun = $true; panelTestsRun = $true; brokerTested = $false; windowsRuntimeTested = $false }
-    [IO.File]::WriteAllText((Join-Path $Wyjscie "apex-build.json"), ($info | ConvertTo-Json), [Text.Encoding]::UTF8)
+    $info = [ordered]@{ product = "APEX Trading AI DEMO"; sourceCommit = "$commit".Trim(); sourceDirty = $dirty; builtUtc = [DateTime]::UtcNow.ToString("o"); target = "win-x64"; demoOnly = $true; botTestsRun = $true; platformTestsRun = $true; backtesterTestsRun = $true; testCounts = $testCounts; panelTestsRun = $true; brokerTested = $false; windowsRuntimeTested = $false }
+    [IO.File]::WriteAllText((Join-Path $Wyjscie "apex-build.json"), ($info | ConvertTo-Json -Depth 5), [Text.Encoding]::UTF8)
     $base = $Wyjscie.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     $hashes = @(Get-ChildItem -LiteralPath $Wyjscie -Recurse -File | Sort-Object FullName | ForEach-Object {
         $relative = $_.FullName.Substring($base.Length).Replace('\', '/')

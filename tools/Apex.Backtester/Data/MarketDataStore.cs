@@ -13,19 +13,31 @@ namespace Apex.Backtester.Data
     {
         public static BarSeries Load(string path, string symbol, Tf tf, DateTime? from = null, DateTime? to = null)
         {
+            using var reader = new StreamReader(path);
+            return Load(reader, path, symbol, tf, from, to);
+        }
+
+        public static BarSeries Load(TextReader sr, string path, string symbol, Tf tf, DateTime? from = null, DateTime? to = null)
+        {
             var bars = new List<Bar>(120_000);
-            using var sr = new StreamReader(path);
-            string? line = sr.ReadLine(); // nagłówek
+            string? line = sr.ReadLine();
+            if (line != "time,open,high,low,close,volume") throw new InvalidDataException($"{path}: invalid CSV header");
+            DateTime? previous = null;
+            int row = 1;
             var ci = CultureInfo.InvariantCulture;
             while ((line = sr.ReadLine()) != null)
             {
                 var p = line.Split(',');
-                if (p.Length < 6) continue;
+                row++;
+                if (p.Length != 6) throw new InvalidDataException($"{path}:{row}: expected six columns");
                 var t = DateTime.ParseExact(p[0], "yyyy-MM-dd HH:mm", ci, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
-                if (from.HasValue && t < from.Value) continue;
-                if (to.HasValue && t >= to.Value) break;
+                if (previous.HasValue && t <= previous.Value) throw new InvalidDataException($"{path}:{row}: duplicate or unordered timestamp");
+                if (t.Ticks % tf.Duration().Ticks != 0) throw new InvalidDataException($"{path}:{row}: unaligned timestamp");
+                previous = t;
                 var b = new Bar(t, double.Parse(p[1], ci), double.Parse(p[2], ci), double.Parse(p[3], ci), double.Parse(p[4], ci), double.Parse(p[5], ci));
-                if (b.IsValid) bars.Add(b);
+                if (!b.IsValid || !double.IsFinite(b.Volume) || b.Volume < 0)
+                    throw new InvalidDataException($"{path}:{row}: invalid OHLC/volume");
+                if ((!from.HasValue || t >= from.Value) && (!to.HasValue || t < to.Value)) bars.Add(b);
             }
             return BarSeries.FromBars(symbol, tf, bars);
         }
@@ -98,18 +110,38 @@ namespace Apex.Backtester.Data
     {
         private readonly Dictionary<string, BarSeries> _series = new();
 
-        public void Add(string pair, BarSeries h1) => _series[pair] = h1;
+        public TimeSpan MaxAge { get; }
+        public FxRates(TimeSpan? maxAge = null)
+        {
+            MaxAge = maxAge ?? TimeSpan.FromHours(2);
+            if (MaxAge <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(maxAge));
+        }
+        public void Add(string pair, BarSeries h1)
+        {
+            if (h1.TimeFrame != Tf.H1 || h1.Times.Any(t => t.Kind != DateTimeKind.Utc) ||
+                h1.Times.Zip(h1.Times.Skip(1), (a, b) => b <= a).Any(b => b))
+                throw new InvalidOperationException($"FX {pair}: expected ordered UTC H1 series");
+            _series[pair] = h1;
+        }
+        private static double ValidConversion(double rate, string ccy, DateTime utc) =>
+            double.IsFinite(rate) && rate > 0 ? rate : throw new InvalidOperationException($"FX {ccy}: invalid converted rate at {utc:o}");
 
         private double Close(string pair, DateTime utc)
         {
-            if (!_series.TryGetValue(pair, out var s) || s.Count == 0) return double.NaN;
+            if (!_series.TryGetValue(pair, out var s) || s.Count == 0) throw new InvalidOperationException($"FX {pair}: missing at {utc:o}");
             int lo = 0, hi = s.Count - 1, ans = -1;
             while (lo <= hi)
             {
                 int mid = (lo + hi) >> 1;
                 if (s.Times[mid].AddHours(1) <= utc) { ans = mid; lo = mid + 1; } else hi = mid - 1;
             }
-            return ans < 0 ? s.Open[0] : s.Close[ans];
+            if (ans < 0) throw new InvalidOperationException($"FX {pair}: not yet known at {utc:o}");
+            if (utc - s.Times[ans].AddHours(1) > MaxAge)
+                throw new InvalidOperationException($"FX {pair}: stale at {utc:o}, last close {s.Times[ans].AddHours(1):o}");
+            double value = s.Close[ans];
+            if (!double.IsFinite(value) || value <= 0)
+                throw new InvalidOperationException($"FX {pair}: invalid rate at {utc:o}");
+            return value;
         }
 
         /// <summary>Ile USD jest wart 1 jednostka waluty <paramref name="ccy"/>.</summary>
@@ -121,13 +153,13 @@ namespace Apex.Backtester.Data
                 case "EUR": return Close("EURUSD", utc);
                 case "GBP": return Close("GBPUSD", utc);
                 case "AUD": return Close("AUDUSD", utc);
-                case "CAD": { double x = Close("USDCAD", utc); return x > 0 ? 1.0 / x : double.NaN; }
+                case "CAD": { double x = Close("USDCAD", utc); return ValidConversion(1.0 / x, ccy, utc); }
                 case "JPY":
                     {
                         double ej = Close("EURJPY", utc), eu = Close("EURUSD", utc);
-                        return ej > 0 && eu > 0 ? eu / ej : double.NaN;
+                        return ValidConversion(eu / ej, ccy, utc);
                     }
-                default: return double.NaN;
+                default: throw new InvalidOperationException($"FX {ccy}/USD: unsupported currency at {utc:o}");
             }
         }
     }
@@ -162,7 +194,11 @@ namespace Apex.Backtester.Data
             if (m15 != null)
             {
                 M15IndexByOpen = new Dictionary<DateTime, int>(m15.Count);
-                for (int i = 0; i < m15.Count; i++) M15IndexByOpen[m15.Times[i]] = i;
+                for (int i = 0; i < m15.Count; i++) M15IndexByOpen.Add(m15.Times[i], i);
+                foreach (var t in h1.Times)
+                    for (int k = 0; k < 4; k++)
+                        if (!M15IndexByOpen.ContainsKey(t.AddMinutes(k * 15)))
+                            throw new InvalidOperationException($"{def.Symbol}: incomplete M15 coverage at {t:o}; choose explicit H1-only execution");
             }
         }
 

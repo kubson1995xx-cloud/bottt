@@ -1,5 +1,16 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Task3 — backtester v2 (lokalnie zweryfikowane; Windows/broker nadal osobno)
+
+- **Jeden końcowy integrated gate:** backtester **50/50**, Core/Desktop **569/569**, platform **126/126**, panel **16/16**, 0 skipped/failures; JS syntax PASS; pełne DEMO solution + oba SDK `.algo` **0 warnings/errors**. PowerShell package helper/verifier **8 kontrolowanych przypadków PASS** na PS7/Linux; rzeczywiste finalne TRX zaakceptowane jako 569/126/50. To nie PS5.1/Windows EXE proof. Actual CLI help i bounded smoke na jawnie syntetycznym fixture: exit0, 24 cykle/0 trades; unknown option exit2 i `success:false`. Nie wykonano badań/sweep na danych rynkowych. Source manifest SHA-256 `2b68fc978e92eafc11313c70868a49d44ee8c132da1d76b55ff4590c2bb1a3bb`; po tym gate zmieniono wyłącznie dokumentację/artefakty dowodowe.
+
+- Zakres: rzeczywisty `Apex.Backtester` + dedykowane executable xUnit przez ProjectReference do produktu, DEMO solution, Windows/package gates. Baza `1bfc57f328b78a9099f69c43e4a228f05abe8999`. Nie zmieniano Core/produkcji/default profilu, przyjętych Task2A/2B ani polskiego panelu.
+- Cashflow: entry fee w Balance, exit-only reserve w open net; Equity=Balance+sum(position net), per-operation floor $0.50 FX/metale (jawne założenie, nie potwierdzone opłaty Pepperstone), proporcjonalne przypisanie entry/swap i finalny agregat po partial/full. FX tylko finite/positive/closed/known/non-stale, bez fallback1; USD identity1. Selekcja IS wymaga exit<cutoff i odrzuca boundary liquidations; świeże silniki/world/store per IS/OOS; brakujące ujemne neighbors nie dostają nagrody0.
+- Bounded CLI/manifest, SHA-256 tego samego snapshotu bajtów, basis MID/BID/ASK + jawna modelowana konwersja, sesje odróżnione od missing intervals, sparse M15 odmawia zamiast maskować H1 SL. JSON pokazuje zakres/warmup/koszty/config/DLL/data hashes/error. `research_candidates` zawsze wyłączone; żadnego awansu/aktywacji/profit claim. Dawne wyniki/CSV i stary holdout są historyczne, nie dowody v2. Szczegóły: `docs/BACKTESTER.md`.
+- Twarde package gates wymagają backtester TRX/flag/liczników zgodnych z rzeczywistymi testami; kontrolowane fixtures w `tests/package` sprawdzają odrzucanie brakujących/zerowych/fałszywych liczników, nie udają produktu EXE. Windows CI uruchamia je przez istniejący builder.
+- Dowody: `/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task3-backtester/`; przyczyny komend, rzeczywiste RED→GREEN, source/build hashes i końcowe wyniki. Raport `.superpowers/sdd/2026-10-26-apex-autonomy/task-3-report.md` (lokalny ignored SDD). Odbiór Windows/cTrader/LocalStorage i wcześniejszy broad PhaseC nadal osobno; Task4 autentyczne badania dopiero po tej naprawie. Bez brokera/transakcji/push/dzieci/reviewera/fallback/AI Lab/treningu/LLM/updatera. 0.5/1.5/5/x5, SL/TP/Emergency/REAL refusal zachowane.
+
+
 ## Task2B fixround1 — wyłącznie finding 1: końcowa autoryzacja partial
 
 - **Naprawione lokalnie; wymagana akceptacja rodzica dla tej delty.** Produkt/testy: `da650efbad773b62f60d7efbdb2b40bb89198475`, baza `e414a3300fb6d128b50b79d8491db470840bb01e`. Bez ponownego otwierania certyfikatu Task2A, innych zaakceptowanych ścieżek Task2B ani broad Phase C.
