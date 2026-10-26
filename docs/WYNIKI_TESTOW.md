@@ -1,47 +1,46 @@
-# Wyniki weryfikacji APEX DEMO — 2026-10-26
+# Wyniki weryfikacji APEX DEMO — autonomia
 
-## Faktycznie wykonane bramki
+## Tożsamość dowodu i wydania
 
-Środowisko lokalne: Linux, .NET SDK 8.0.427, Node 26.8.1, PowerShell 7.6.9.
+Źródła dostawy: gałąź `apex-demo/autonomy`. Rozstrzygający identyfikator to **`sourceCommit` w `apex-build.json` + head SHA konkretnego przebiegu APEX Windows DEMO**, nie nazwa ZIP ani dawny zielony workflow. Pakiet `926afaa` i jego 265/75/11 testów są historyczne, nie pokrywają obecnej autonomii.
 
-- `dotnet build APEX.Trading.Demo.sln -c Release`: **0 błędów i 0 ostrzeżeń**, oba cBoty `.algo` wygenerowane.
-- `dotnet test tests/Apex.Tests -c Release`: **265/265**, failed=0, skipped=0.
-- `dotnet test src/Platforms/cTrader/Tests -c Release`: **75/75**, failed=0, skipped=0.
-- `dotnet test tests/Apex.AiLab.Tests -c Release`: **181/181**, failed=0, skipped=0. Oddzielne archiwum, nie część produktu.
-- `npm test`: **11/11**. `npm run check`: oba pliki JS poprawne.
-- Pełny skrypt publikacji Windows/ZIP wykonany na Linux. Manifest SHA-256 zgodny, kontrolowane uszkodzenie i dodatkowy plik poprawnie odrzucane.
+Final integration review przyjął Task4, MAIN PhaseC w zakresie źródeł/zachowanej lokalnej funkcjonalności oraz zgodność schema5/certyfikatu/partial. Jedyny Important blokujący Windows dotyczył dwóch założeń separatora w `ScopedHostProcessTests.cs`: wybór Release i znalezienie rodzica `stan`. Naprawiono je przy użyciu natywnego separatora oraz `Path.GetDirectoryName`/`Path.GetFileName`, bez wyłączeń testów, zmian asercji bezpieczeństwa i bez budowania Debug jako obejścia. Nie zmieniono produkcyjnych plików C#/profilu.
 
-Liczniki są oddzielne; testów AI Lab nie należy używać jako dowodu gotowości bota. TRX i logi są zapisane poza Git, finalne testy także w pakiecie/artefaktach Actions.
+## Nowe wykonanie lokalne Task5
 
-## Co sprawdzają testy
+Zmiana wejść: tylko dwa wyrażenia ścieżek w harnessie. Brakujący dowód: uruchomienie Release hosta, odmowa odtworzenia brakującego zarezerwowanego stanu i zachowanie ochronnego pełnego close.
 
-- Bezwarunkowa odmowa REAL, dokładna etykieta własności pozycji, brak kryptowalut.
-- Ryzyko domyślne 0,5% / dzienna strata 1,5% / DD 5% / dźwignia x5 / 3 pozycje; wolumen w dół i uwzględnienie faktycznie wysyłanego SL.
-- SL i TP obowiązkowe; ochronny TP 3R przy braku celu strategii. Nieprawidłowe jawne cele odrzucane, stare własne pozycje bez TP zamykane.
-- Rezerwacja i flush przed open; brak duplikatów; błędy zapisu blokują nowe ryzyko. Uszkodzony/obcy zapis nie jest nadpisywany ani cofany do starego backupu.
-- Restart/reconnect bez autostartu, trwały Emergency Stop, próby likwidacji mimo awarii dysku lub niedodatniego equity na znanym DEMO.
-- Anulowanie i wygasanie poleceń bez późnego wykonania, brak utraty już przyjętego closed przy reconnect, świeżość niezależnych migawek.
-- Rzeczywisty czas ticka, zamknięte świece, poprawna invalidacja cache i brak przyszłych danych.
-- Minimalna prowizja SDK Asset/QuoteAsset przeliczona na walutę konta. Koszt za stronę `max(stawka,minimum)`; stała podłoga uwzględniona osobno w sizingu. Ręczny override nie kasuje minimum. Nieznane koszty/FX blokują wejście.
-- Domyślny symbol testu zgodny z uniwersum; naturalne zniknięcie pozycji przed close nie daje PASS; niepotwierdzone polecenia nie certyfikują pełnej ścieżki.
-- Panel DEMO-only, potwierdzenie START, brak AI Lab, SL/TP i identyfikatory pozycji, odczyt statusu ograniczony czasowo bez ponawiania POST.
+```sh
+dotnet test tests/Apex.Tests/Apex.Tests.csproj -c Release --filter 'FullyQualifiedName~MissingScopedStateBesideReservedConfigIsNotRecreatedAsFresh|FullyQualifiedName~ProductionEntryBootstrapsCoverageUnknownScopeThenRunsOnlyExplicitTechnicalRequest|FullyQualifiedName~GeneratedLabelCorruptStartupRetainsPublicFullCloseAndForeignPosition' --logger 'trx;LogFileName=focused-paths.trx' --results-directory /home/ubuntu/.hermes/cache/scratch/apex-autonomy/task5-windows
+```
 
-## Testy działania — bez brokera
+**4/4 PASS, 0 failed/skipped**, z przebudową wymaganych projektów Release. W tym dwa warianty closeAll/Emergency, zachowanie obcych pozycji/uszkodzonych bajtów, brak odtwarzania brakującego stanu, rzeczywisty produkcyjny host + syntetyczny lokalny peer: read-only setup → explicit technical request → SL/TP/modify/full close → signed net/terminal manifest → certyfikat/START → restart/reconnect STOP bez drugiego open. To nie broker ani Windows. Pierwsza próba uruchomienia narzędzia miała exit127 (SDK poza PATH); zachowana oddzielnie, nie zaliczona jako wykonanie testów. Po dodaniu istniejącego `/home/ubuntu/.dotnet` do PATH wykonano powyższe przypadki.
 
-Prawdziwy proces ApexDesktop.dll + lokalna **syntetyczna platforma**: handshake, klucze, duplikaty, reconnect, blokada REAL, działanie WebSocket mimo awarii opcjonalnego TCP oraz domyślny test open → SL/TP → modify → close. Własna pozycja znika, pozycje obce pozostają nietknięte także po Emergency Stop.
+## Zachowana historia — bez ponownego pełnego Linux gate
 
-Prawdziwa przeglądarka na działającym serwerze: 8 polskich widoków, stan ZATRZYMANY, limity, brak AI Lab. Dane jawnie oznaczone Symulator/APEX Symulator. Wykonano także offline syntetyczny backtest: 144 cykle i 2 transakcje — to nie dowód przewagi ani wykonania u brokera.
+- Task3: jeden historyczny integrated run **569/569 Core/Desktop, 126/126 platform, 50/50 Backtester, 16/16 panel**, JS PASS, solution i oba SDK `.algo` bez warnings/errors.
+- Późniejsze zmienione wejścia Task3: **10/10 focused i 60/60 affected Backtester**; nie jest to nowy integrated wynik łączny.
+- Task4: **65/65** nowych zachowań sześciu rzeczywistych strategii oraz **4/4** ochronnego wykonania rzeczywistego DefaultProfile → Core → SimWorld (TP3R, SL, oba trafienia SL-first, adverse gap, cash reconciliation). Początkowe 4+1 błędy fixture zachowano; poprawiono kompozycję testu `IsBacktest=true` przed konstrukcją Core, bez produkcyjnego bypassu.
+- Task2A/2B i PhaseC: zachowane zaakceptowane testy migracji, trwałego certyfikatu, recovery/replay, dokładnych wolumenów, partial final fence, kompaktacji/replay barriers oraz pełnego close przy awarii zapisu. Ich liczników nie dodajemy do fikcyjnej nowej suite.
 
-Regresje były obserwowane RED przed poprawkami, potem GREEN. Niezależny przegląd wykazał istotne luki na granicach; poprawiono je i ponowiono pełne zestawy. Wczesne czerwone TRX zachowano, nie przedstawiono jako zaliczonych.
+Manifest Task4 wiąże 166 inputs (SHA256 `5dd7b96115626a8e031c216a9f61bf7fc05cb3d88888f2ef94c9b4854d88d706`). Task5 celowo zmienia harness i polską dokumentację; pozostałe źródła produktu, domyślny profil i konfiguracja bramek zachowują te same bajty. Stare binaria/uruchomienia nie są przedstawiane jako nowy test Windows.
 
-## Windows
+## Rzeczywisty gate Windows i pakiet
 
-**Wykonany dowód:** [workflow 40247935130](https://github.com/kubson1995xx-cloud/bottt/actions/runs/40247935130), SHA `d632b96`: build/test/publish/manifest/ZIP produktu i prawdziwy EXE smoke zaliczone na Windows Server 2022, PowerShell 5.1. Bot 265/265, adapter 75/75, panel 11/11. Osobne archiwum AI Lab ma na Windows 180/181 (TamperedWorktreePointer_StopsCollection, UnauthorizedAccessException); błąd zachowany w TRX, archiwum nie jest dostarczane. Kontrola archiwum jest nieblokująca z jawnym warningiem; nie oznacza to zaliczenia archiwum.
+Istniejący workflow **APEX Windows DEMO** na `windows-2022` używa **Windows PowerShell 5.1**. Buduje pełne rozwiązanie Release, uruchamia twardo wszystkie suite produktu (Core/Desktop z procesowymi recovery/certification/SL/TP/net, platform, actual-source Backtester), fixtures bramki pakietu, panel i JS check, publikuje samodzielny `win-x64` oraz zgodne oba cBoty. Następnie uruchamia **prawdziwy opublikowany EXE**: HTTP, token, polski panel, brak AI Lab/REAL, zero kont i zleceń. To wymagane odrębne target-OS acceptance, nie powtórka niezmienionego Linux baseline.
 
-Workflow **APEX Windows DEMO** uruchamia Windows Server 2022, PowerShell 5.1, build/test/publish i rzeczywisty EXE smoke (HTTP, token, panel, zero kont i transakcji). Każdy wynik jest związany z konkretnym SHA. Końcowy URL i wynik dla przekazanego pakietu są w HANDOFF/raporcie przekazania. Pierwszy przebieg 40246708589 zbudował wszystko bez ostrzeżeń, ale asercja testowa oczekiwała Unix IOException zamiast Windows UnauthorizedAccessException; przenośną asercję poprawiono, nie osłabiając kontroli stanu.
+Dokładny URL/status, head SHA, ID artefaktu i suma pobranego ZIP należą do zewnętrznego raportu dostawy Task5. W samym ZIP są rzeczywiste `Weryfikacja/{bot,platform,backtester}.trx` i zgodne z nimi liczniki `apex-build.json`, a `manifest.sha256` wiąże każdy plik. Porównaj te dane z przekazanym przebiegiem; nie uznawaj samego YAML za dowód sukcesu. `windowsRuntimeTested=false` jest celowo zapisane **przed** późniejszym smoke; odczytaj jego wynik w logu tego samego runu, nie modyfikuj oryginalnego ZIP po fakcie. `brokerTested=false` pozostaje prawdziwe.
 
-## Niewykonane — bramki odbioru
+Archiwalny AI Lab nie jest pakowany i ma odrębną nieblokującą kontrolę z jawnym warningiem/TRX. Historycznie Windows 180/181 (UnauthorizedAccessException w TamperedWorktreePointer), a Linux 181/181; nie poprawiamy tego archiwum i nie nazywamy go zielonym na podstawie testów produktu.
 
-Rzeczywisty Pepperstone cTrader DEMO, Windows 11 użytkownika, instalacja i API/LocalStorage cTrader, porównanie specyfikacji/kosztów/marginu oraz transakcja widoczna w History. **Żadnej transakcji u brokera nie wykonano.** Wymaga osobnego zatwierdzenia użytkownika po połączeniu. MetaEditor/MT5 również nie był uruchamiany.
+## Strategie i autentyczne badania
 
-Historycznej rentowności nie walidowano ponownie. Ochronny TP 3R zmienia wyjścia, więc stare raporty nie są walidacją nowych wyników. Procedura: [PROCEDURA_DEMO_PEPPERSTONE.md](PROCEDURA_DEMO_PEPPERSTONE.md).
+**Aktywny tylko IndexDipBuy / Index / Experimental, BUY-only.** D1, SMA100, RSI2<5, SMA5 exit / maks.10 barów, SL3ATR, Core protective TP3R. Pozostałe rodziny są nieaktywne/Rejected; brak automatycznej promocji i brak Validated.
+
+**64/64 autentyczne próby CLI (48 fixed +16 WF) zakończyły się exit2 / success:false w preflight brakujących przedziałów. 0 ocenionych kont/kombinacji.** Brak zweryfikowanych historycznych sesji i anomalne wielotygodniowe luki US500. Nie fabrykowano świec ani nie zalegalizowano wszystkich luk jako świąt. **n/net/WR/PF/opłaty/DD/OOS niedostępne, nie zero.** Brak dowodu przewagi, także dla nowego TP3R; stare CSV/raporty są historyczne. BID→MID, wolumen i koszty są modelowane, nie stanowią potwierdzonych kosztów/egzekucji Pepperstone. Lata 2024–2025 nie są certified untouched holdout. Szczegóły w repo: `reports/autonomy/task4-summary.md` i `reports/autonomy/task4/attempts.csv`.
+
+## Nadal niewykonane — broker i komputer użytkownika
+
+Windows11 użytkownika, instalacja cTrader, rzeczywiste SDK events/history retention/LocalStorage crash durability, hidden writers/rollback, specyfikacja instrumentów, prowizje/FX/margin i świeżość danych wymagają odbioru. MAIN wymaga dedykowanego pustego DEMO hedging, read-only setup i dokładnej etykiety; ScopedReady przy CoverageUnknown nie dowodzi całej historii brokera. Native produkcyjnie odczyt/redukcja, START/TEST nowych wejść odmawiają; MT5 bez MetaEditora/odbioru.
+
+**Bez połączenia z brokerem i bez transakcji DEMO/REAL w Task5.** Rzeczywisty test DEMO wymaga osobnej zgody na konkretne konto; PASS tylko z rzeczywistego fill/protection/modify/requested close i trwałego terminalnego rozliczenia, nigdy z importu syntetycznej próby. Dopiero PASS + fresh scope umożliwia jawny START, restart/reconnect pozostawia STOP. Emergency i pełne close własnego ID pozostają osobne, bez certyfikatu, ale wymagają bezpiecznej tożsamości DEMO i działającego mostu. Limity 0,5%/1,5%/DD5%/x5, obowiązkowe SL/TP; REAL bezwarunkowo zablokowany. Procedura: [PROCEDURA_DEMO_PEPPERSTONE.md](PROCEDURA_DEMO_PEPPERSTONE.md).

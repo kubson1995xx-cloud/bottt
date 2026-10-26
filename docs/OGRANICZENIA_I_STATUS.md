@@ -27,9 +27,17 @@ Klasyfikacja instrumentów jest zachowawcza i może pomijać poprawne symbole. B
 
 MT5: opcjonalny, nieskompilowany w MetaEditorze; nie-USD blokowane zamiast udawania poprawnej konwersji. Brak odbioru i pełnej równoważności cTrader. Nie blokuje głównej ścieżki WebSocket.
 
-## Badania
+## Strategie i badania
 
-Brak potwierdzonej przewagi. Stare dane 2005–2020 są MID i nie odtwarzają wszystkich kosztów/kalendarza. Backtester nie jest brokerem: ograniczone pokrycie M15, modelowane koszty i historyczny fallback FX=1 przy brakach danych. Nie używaj starego raportu jako dowodu rzeczywistej egzekucji ani walidacji nowego TP 3R. Bieżące FX live są sprawdzane osobno.
+Aktywna jest wyłącznie **IndexDipBuy / Index / Experimental**, BUY-only: D1, SMA100, RSI2<5, wyjście SMA5 / 10 barów, SL3ATR oraz ochronny TP3R z Core. Pozostałe pięć rodzin istnieje i ma lokalne testy BUY/SELL, ale jest nieaktywne/Rejected. Brak strategii Validated i brak automatycznej promocji.
+
+Nowe badania na autentycznych BID H1 EURUSD/XAUUSD/US500: **64/64 próby exit2 / success:false w preflight; 0 ocenionych kont i kombinacji**. Brakuje zweryfikowanych historycznych sesji, a US500 ma także wielotygodniowe braki. Nie wypełniano świec ani nie uznawano każdej luki za święto. n/net/WR/PF/opłaty/DD/OOS są **niedostępne**, nie zerowe; nie ma wyników rentowności ani udanych zero-trade runs. BID→modelowany MID, prowizje/spready/finansowanie i wolumen dostawcy nie są dowodem kosztów ani egzekucji Pepperstone. Lata 2024–2025 nie są certyfikowanym nietkniętym holdoutem.
+
+Backtester v2 rozlicza pełne entry/partial/final cashflows, koszty i equity; izoluje/purguje WF oraz zachowuje wymuszone zamknięcia w pełnych wynikach kont, choć nie używa ich do naturalnej selekcji IS. Brakujące/stare FX odmawiają zamiast fallback1. Testy syntetyczne tych reguł nie są wynikami rynku. Stary raport 2005–2020 i jego fallback FX/koszty to wyłącznie historia, nie walidacja obecnego produktu ani TP3R. Surowe dane nie są redystrybuowane w pakiecie. Limity produkcji bez zmian: 0,5% ryzyka / 1,5% dziennie / DD5% / x5.
+
+## Zakres dowodów technicznych
+
+Niezależny final integration review przyjął Task4, MAIN PhaseC w zakresie źródeł/zachowanych testów lokalnych i zgodność schema5/certyfikatu/partial. Dwie zależne od separatora ścieżek pomyłki harnessu ScopedHostProcessTests naprawiono bez usuwania przypadków/asercji ani budowania Debug jako obejścia. Rzeczywisty Windows Release/PowerShell5.1, pełne bramki produktu, opublikowany EXE i ZIP wymagają dowodu konkretnego SHA z Actions oraz manifestu; same Linux/YAML/stare wyniki nie wystarczają. `windowsRuntimeTested=false` jest celowo zapisane przed późniejszym smoke — wynik smoke odczytaj w przebiegu, nie zmieniaj po fakcie bajtów ZIP. `brokerTested=false` pozostaje prawdziwe.
 
 ## Otwarte warunki końcowe
 

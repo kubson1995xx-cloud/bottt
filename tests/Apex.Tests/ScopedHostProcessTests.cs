@@ -111,7 +111,7 @@ public sealed class ScopedHostProcessTests
         string label = status.GetProperty("scope").GetProperty("label").GetString()!;
         await h.Connect(label); await h.Status(a => a.GetProperty("scope").GetProperty("eligibleTechnicalTest").GetBoolean());
         await h.Stop();
-        string path = Directory.GetFiles(h.Dir, "*.json", SearchOption.AllDirectories).Single(p => p.Contains("/stan/") && Path.GetFileName(p).Contains(label));
+        string path = Directory.GetFiles(h.Dir, "*.json", SearchOption.AllDirectories).Single(p => Path.GetFileName(Path.GetDirectoryName(p)) == "stan" && Path.GetFileName(p).Contains(label));
         File.Delete(path); await h.Start(); await h.Connect(label, withHistory: false);
         status = await h.Status(a => a.GetProperty("buildError").GetString()!.Length > 0);
         Assert.False(status.GetProperty("engineReady").GetBoolean());
@@ -196,7 +196,7 @@ public sealed class ScopedHostProcessTests
         internal async Task Start()
         {
             var root = new DirectoryInfo(AppContext.BaseDirectory); while (root != null && !File.Exists(Path.Combine(root.FullName, "APEX.Trading.Demo.sln"))) root = root.Parent;
-            string cfg = AppContext.BaseDirectory.Contains("/Release/") ? "Release" : "Debug";
+            string cfg = AppContext.BaseDirectory.Contains(Path.DirectorySeparatorChar + "Release" + Path.DirectorySeparatorChar) ? "Release" : "Debug";
             var psi = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
             psi.ArgumentList.Add(Path.Combine(root!.FullName, "src/Apex.Desktop/bin", cfg, "net8.0/ApexDesktop.dll")); psi.ArgumentList.Add("--data"); psi.ArgumentList.Add(Dir); psi.ArgumentList.Add("--no-browser");
             process = Process.Start(psi)!; stdout = process.StandardOutput.ReadToEndAsync(); stderr = process.StandardError.ReadToEndAsync();

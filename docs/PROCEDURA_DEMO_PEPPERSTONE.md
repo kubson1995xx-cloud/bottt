@@ -42,7 +42,7 @@ Po potwierdzeniu połączenia użytkownik zatwierdza **konkretny test otwarcia i
 
 Dopiero przy ważnym trwałym PASS i aktualnej gotowości synchronizacji/ryzyka naciśnij **START** i **osobno zatwierdź** automatyczny handel DEMO. Po restarcie/reconnect zawsze STOP: pasujący certyfikat pozostaje, lecz potrzebne są świeże uzgodnienie i nowe jawne START. Zmiana konta, waluty, brokera, platformy, etykiety, BaselineId, ścieżki lub wersji unieważnia certyfikat. Nie ma przycisku/API „ustaw PASS”. Native nadal tylko odczyt/redukcja; nie jest alternatywną drogą wejścia.
 
-Strategie mają prawo czekać bez zleceń — domyślny profil jest selektywny. Centrum decyzji pokazuje rzeczywiste przyczyny WAIT/BUY/SELL; nie generuje dodatkowych sygnałów AI. Emergency i pełne zamknięcie własnej pozycji nie wymagają certyfikatu, ale nadal potrzebują bezpiecznej tożsamości DEMO i działającego mostu.
+Aktywny jest tylko **IndexDipBuy / indeksy / Experimental / BUY-only**; inne rodziny/klasy nie są dopuszczone. Wszystkie 64 nowe autentyczne próby badań zatrzymał preflight (0 ocenionych kont; n/net/koszty/PF/DD niedostępne). Brak przewagi i brak promocji Validated. Strategie mają prawo czekać bez zleceń — domyślny profil jest selektywny. Centrum decyzji pokazuje rzeczywiste przyczyny WAIT/BUY/SELL; nie generuje dodatkowych sygnałów AI. Emergency i pełne zamknięcie własnej pozycji nie wymagają certyfikatu, ale nadal potrzebują bezpiecznej tożsamości DEMO i działającego mostu.
 
 W Windows muszą działać APEX, cTrader i most. Po wyłączeniu pozostają tylko SL/TP u brokera; trailing i decyzje strategii nie działają. STOP wstrzymuje także zwykłe zarządzanie, natomiast „Wstrzymaj nowe” pozostawia je aktywne.
 
