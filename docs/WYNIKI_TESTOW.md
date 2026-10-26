@@ -36,6 +36,8 @@ Regresje były obserwowane RED przed poprawkami, potem GREEN. Niezależny przegl
 
 ## Windows
 
+**Wykonany dowód:** [workflow 40247935130](https://github.com/kubson1995xx-cloud/bottt/actions/runs/40247935130), SHA `d632b96`: build/test/publish/manifest/ZIP produktu i prawdziwy EXE smoke zaliczone na Windows Server 2022, PowerShell 5.1. Bot 265/265, adapter 75/75, panel 11/11. Osobne archiwum AI Lab ma na Windows 180/181 (TamperedWorktreePointer_StopsCollection, UnauthorizedAccessException); błąd zachowany w TRX, archiwum nie jest dostarczane. Kontrola archiwum jest nieblokująca z jawnym warningiem; nie oznacza to zaliczenia archiwum.
+
 Workflow **APEX Windows DEMO** uruchamia Windows Server 2022, PowerShell 5.1, build/test/publish i rzeczywisty EXE smoke (HTTP, token, panel, zero kont i transakcji). Każdy wynik jest związany z konkretnym SHA. Końcowy URL i wynik dla przekazanego pakietu są w HANDOFF/raporcie przekazania. Pierwszy przebieg 40246708589 zbudował wszystko bez ostrzeżeń, ale asercja testowa oczekiwała Unix IOException zamiast Windows UnauthorizedAccessException; przenośną asercję poprawiono, nie osłabiając kontroli stanu.
 
 ## Niewykonane — bramki odbioru

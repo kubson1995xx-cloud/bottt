@@ -50,6 +50,12 @@
 - Zaktualizowano README i dokumenty instalacji, panelu, połączenia, konfiguracji, bezpieczeństwa, statusu i wyników. Nie kopiujemy AI Lab do pakietu. Dodatkowe ryzyka i decyzje są jawne w `docs/OGRANICZENIA_I_STATUS.md`.
 - Odbiór docelowy nadal otwarty: Windows 11 użytkownika, cTrader API/LocalStorage i prawdziwe konto Pepperstone DEMO. Transakcja DEMO tylko po osobnej zgodzie; nie wykonano jej. Wynik Windows Actions dla konkretnego pakietu dopisać po realnym zakończeniu workflow, nie na podstawie samego YAML.
 
+## Weryfikacja Windows — dowód z wykonania
+
+- Workflow [40247935130](https://github.com/kubson1995xx-cloud/bottt/actions/runs/40247935130), commit `d632b96b324b8ad1f785d8cdb13b7b5cb236fadf`: Windows Server 2022 / PowerShell 5.1, build produktu, bot **265/265**, adapter **75/75**, panel **11/11**, samodzielny win-x64 publish/manifest/ZIP oraz **prawdziwy EXE smoke: PASS** (HTTP, token, panel, zero kont/zleceń). To nie dowód Windows 11/cTrader/Pepperstone.
+- Osobne archiwum AI Lab Windows: **180/181**, `AiLabAuditTests.TamperedWorktreePointer_StopsCollection` zawiódł na UnauthorizedAccessException przy testowym nadpisaniu `.git`. Linux archiwum nadal 181/181. Nie poprawiamy/nie przywracamy odłożonego modułu w ramach produktu DEMO.
+- Ruling: archiwalne sprawdzenie ma `continue-on-error` z jawnym warningiem i TRX; nie blokuje wydania działającego produktu, ale jego błędu nie nazywamy zielonym. Testy i smoke produktu nadal twardo blokują wydanie. Kolejny przebieg służy opublikowaniu artefaktu po tej korekcie rozdziału.
+
 ## Archiwalny opis poprzedniego wykonawcy (może być nieaktualny)
 
 Plik przekazania pracy dla kolejnego wykonawcy (np. Codex). Opisuje stan projektu, wykonane zmiany, zadania niedokończone i zasady pracy.

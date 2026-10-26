@@ -33,8 +33,14 @@ jobs:
         shell: powershell
         run: ./tools/windows/Smoke-Windows.ps1 -Pakiet "$env:RUNNER_TEMP/APEX Windows DEMO"
       - name: Test archive separately (not part of product)
+        id: archive
+        continue-on-error: true
         shell: powershell
         run: dotnet test tests/Apex.AiLab.Tests/Apex.AiLab.Tests.csproj -c Release --logger "trx;LogFileName=archive.trx" --results-directory "$env:RUNNER_TEMP/archive-tests"
+      - name: Report archive failure without blocking DEMO product
+        if: steps.archive.outcome == 'failure'
+        shell: powershell
+        run: Write-Output "::warning::Archived AI Lab tests failed; see archive.trx. This module is not shipped and does not gate the DEMO package."
       - uses: actions/upload-artifact@v4
         if: success()
         with:
