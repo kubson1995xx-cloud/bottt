@@ -91,6 +91,7 @@ namespace Apex.Desktop.Bridge
                 _historyLabel = label;
                 _historyRows.Clear(); _historyPages.Clear(); _historyFirst = null; _historyFailed = false;
                 _historyStarted = DateTime.UtcNow;
+                _historyCaptureRequestedUtc = _historyStarted; // immutable deadline, separate from refresh scheduling
                 _historyRequestTick = MonotonicNow();
                 _historyRevision = _positionsRevision; // fence before capture/page 0, not on its receipt
                 _requestPendingRevision = _pendingRevision;
@@ -120,7 +121,7 @@ namespace Apex.Desktop.Bridge
                     || m.Deals == null || m.Deals.Count > 500 || m.CapturedAt <= 0
                     || BridgeProtocol.FromUnixMs(m.CapturedAt) > DateTime.UtcNow
                     || DateTime.UtcNow - BridgeProtocol.FromUnixMs(m.CapturedAt) > TimeSpan.FromSeconds(30)
-                    || DateTime.UtcNow - _historyStarted > TimeSpan.FromSeconds(30))
+                    || DateTime.UtcNow - _historyCaptureRequestedUtc > TimeSpan.FromSeconds(30))
                 { Fail(); return; }
                 if (MonotonicNow() - _historyRequestTick >= TimeSpan.FromSeconds(30)) { Fail(); return; }
                 if (_historyFirst == null) _historyFirst = m;

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Apex.Core.Bridge;
@@ -45,6 +46,20 @@ public sealed class ScopedRuntimeTests
         if (fault == "missing-safety") json = json.Replace("\"safetyVersion\":\"scoped-demo-v1\",", "");
         s.Handle(json); Assert.Equal(0, receipts); Assert.False(s.History.Complete);
     }
+    [Theory]
+    [InlineData("closed")][InlineData("positions")]
+    public async Task ExpectedMutationDuringHistoryCaptureDiscardsWithoutPermanentProtocolFault(string mutation)
+    {
+        var (s, _, frame) = Scoped(); await s.RequestHistoryAsync("APEX");
+        var pending = ScopedPage(s, frame);
+        if (mutation == "closed") s.Handle(BridgeProtocol.Serialize(new ClosedMsg { Position = new ClosedDto { Id = 42 } }));
+        else s.Handle(BridgeProtocol.Serialize(new PositionsMsg { Items = new() { new PositionDto { Id = 42, Label = "APEX", Units = 0.1 } }, PendingOrders = new(), Scoped = frame with { PositionRevision = 2 } }));
+        s.Handle(BridgeProtocol.Serialize(pending)); Assert.False(s.ProtocolFault); Assert.False(s.History.Complete);
+        await s.RequestHistoryAsync("APEX"); var next = ScopedPage(s, frame with { PositionRevision = mutation == "closed" ? 1 : 2, SnapshotId = "after-mutation" });
+        next.Positions = s.Positions.ToList();
+        s.Handle(BridgeProtocol.Serialize(next)); Assert.True(s.History.Complete); Assert.False(s.ProtocolFault);
+    }
+
     [Fact]
     public async Task CurrentReceiptIsValueBasedAndRoutineRefreshDoesNotRenewOrRetireLastGood()
     {

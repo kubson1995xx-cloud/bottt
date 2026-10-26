@@ -24,6 +24,7 @@ public sealed partial class BridgeSession
     private ScopeFrame? _liveScope;
     private List<PendingOrderDto> _pendingOrders = new();
     private DateTime _pendingReceivedUtc;
+    private DateTime _historyCaptureRequestedUtc;
     internal bool ProtocolFault { get; private set; }
     private void FaultProtocol()
     { lock (_lock) { _historyFailed = true; _history = new(); _acceptedScope = null; if (ScopedCapable) ProtocolFault = true; } }
