@@ -72,7 +72,7 @@ try {
     Copy-Item (Join-Path $PSScriptRoot "Smoke-Windows.ps1") $evidence
     $cmd = "@echo off`r`nrem APEX DEMO - cTrader Desktop musi dzialac na tym samym komputerze.`r`nstart `"`" `"%~dp0APEX-Desktop\ApexDesktop.exe`"`r`n"
     [IO.File]::WriteAllText((Join-Path $Wyjscie "Uruchom APEX.cmd"), $cmd, [Text.Encoding]::ASCII)
-    $info = [ordered]@{ product = "APEX Trading AI DEMO"; sourceCommit = "$commit".Trim(); sourceDirty = $dirty; builtUtc = [DateTime]::UtcNow.ToString("o"); target = "win-x64"; demoOnly = $true; botTestsRun = $true; panelTestsRun = $true; brokerTested = $false; windowsRuntimeTested = $false }
+    $info = [ordered]@{ product = "APEX Trading AI DEMO"; sourceCommit = "$commit".Trim(); sourceDirty = $dirty; builtUtc = [DateTime]::UtcNow.ToString("o"); target = "win-x64"; demoOnly = $true; botTestsRun = $true; platformTestsRun = $true; panelTestsRun = $true; brokerTested = $false; windowsRuntimeTested = $false }
     [IO.File]::WriteAllText((Join-Path $Wyjscie "apex-build.json"), ($info | ConvertTo-Json), [Text.Encoding]::UTF8)
     $base = $Wyjscie.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
     $hashes = @(Get-ChildItem -LiteralPath $Wyjscie -Recurse -File | Sort-Object FullName | ForEach-Object {

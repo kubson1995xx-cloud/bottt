@@ -1,50 +1,31 @@
-# Przegląd bezpieczeństwa i jakości (2026-10-15)
+# Przegląd bezpieczeństwa APEX DEMO — 2026-10-26
 
-Zakres: APEX Desktop (serwer HTTP, mosty), silnik i RiskEngine, mosty cTrader/MT5, konfiguracja, skrypt budowy. Metoda: przegląd kodu i testy automatyczne (w tym integracyjne na prawdziwym procesie).
+Wykonano niezależny przegląd Core/Desktop/platform/pakowania, a istotne ustalenia poprawiono regresjami RED→GREEN. Szczegóły wykonanych testów: [WYNIKI_TESTOW.md](WYNIKI_TESTOW.md). Nie jest to certyfikat bezpieczeństwa ani odbiór brokerski.
 
-## Bezpieczeństwo handlu
+## Kontrole
 
-| Wymaganie | Realizacja | Weryfikacja |
-|---|---|---|
-| Brak handlu na REAL podczas tworzenia i testów | Testy wyłącznie na atrapie brokera, symulatorze i koncie DEMO; LIVE blokowane na 3 poziomach (most, strażnik konta, globalny wyłącznik w pliku) + brak autostartu LIVE | `LiveAccount_*`, `Live_*` (testy), integracyjny `LiveAccount_IsBlocked_NoOrdersPossible` |
-| Każda pozycja z SL | Silnik odrzuca zlecenie bez SL; most odrzuca `slPips ≤ 0`; pozycja bota bez SL jest natychmiast zabezpieczana lub zamykana; nowe wejścia blokowane, dopóki istnieje pozycja bez SL | `PositionOpenedWithoutStopLoss_IsProtectedImmediately`, `PositionWithoutStopLoss_BlocksNewTrades` |
-| Brak martingale, gridu, uśredniania, zwiększania po stracie | Jedna pozycja na instrument; wielkość wyłącznie z budżetu ryzyka (stały % kapitału, zaokrąglanie w dół); brak logiki dokładania pozycji | przegląd kodu `PositionSizer`, `RiskManager`, `TradingEngine.Prequalify`; testy limitów |
-| Brak ukrytej dźwigni | Limit dźwigni efektywnej (suma wartości nominalnych / kapitał ≤ 5), limit depozytu i poziomu marginu | `Leverage_Enforced`, `Margin_Enforced` |
-| Duplikaty zleceń | Deterministyczny identyfikator sygnału; rejestr zapisywany **przed** wysłaniem; niepewna odpowiedź = weryfikacja, nigdy ponowienie | `RepeatedCycles_*`, `Restart_*`, `Uncertain*`, `RejectedOrder_*` |
-| Pozycje ręczne i innych botów | Silnik zarządza wyłącznie pozycjami z dokładnie swoją etykietą; mosty modyfikują/zamykają tylko pozycje APEX | `ManualAndForeignPositions_AreNeverTouched`, integracyjny test z awaryjnym stopem |
-| Kryptowaluty wykluczone | Wielowarstwowa klasyfikacja „fail-closed” + kontrola przed każdym wejściem (także gdy broker błędnie oznaczy symbol) | `Crypto_*`, `CryptoInstrument_MisclassifiedByBroker_IsNeverTraded`, integracyjny `Connect_ExcludesCrypto_*` |
-| AI Decision Center nie wpływa na handel | Rejestrator pasywny (wyjątki przechwytywane), punkty końcowe tylko GET | `Recorder_DoesNotChangeTradingDecisions` (5 scenariuszy) |
+- REAL zablokowany bezwarunkowo pomimo dawnych flag/fraz; brak odblokowania w panelu.
+- Domyślne 0,5% ryzyka, 1,5% straty dziennej, DD 5%, x5 i 3 pozycje. Wolumen w dół; koszt obejmuje poprawny FX, prowizję i minimum brokera. SL i TP obowiązkowe.
+- Trwała rezerwacja przed open, dziennik idempotencji cTrader, niepewna odpowiedź bez ślepego ponawiania.
+- Brak autostartu/reconnect-startu, trwały Emergency Stop, uszkodzony zapis zachowany bez cofania do starego backupu.
+- Pełne zamknięcie własnego ID na znanym DEMO nie zależy od dodatniego equity lub sprawnego dysku. Nadal wymaga połączenia i dokładnej etykiety; partial-close/open nie dostają wyjątku.
+- Pozycje obce nietykane; brak kryptowalut/martingale/gridu/uśredniania.
+- Czas ticka z SDK, zamknięte świece, brak przyszłych danych, przypięta tożsamość konta.
+- Kolejka/transport: anulowanie i deadline przed wykonaniem, brak późnego open, zachowanie ważnego odebranego closed podczas reconnect.
+- Test wykonania nie certyfikuje close, jeżeli pozycja zniknęła wcześniej naturalnie; wymagane potwierdzenia poleceń.
 
-## Bezpieczeństwo aplikacji
+## Aplikacja
 
-| Obszar | Stan |
-|---|---|
-| Ekspozycja sieciowa | Kestrel i serwer TCP nasłuchują tylko na 127.0.0.1; połączenia spoza pętli zwrotnej odrzucane. |
-| DNS rebinding | Lista dozwolonych nagłówków `Host` (127.0.0.1/localhost z portem) – inne → 403. |
-| API panelu | Token 256-bit (`RandomNumberGenerator`), porównanie w stałym czasie, wymagany dla `/api/*`; POST tylko z `application/json` (utrudnia CSRF). |
-| XSS | Brak `innerHTML`/`eval`; DOM budowany przez `textContent`; CSP `default-src 'self'`, bez skryptów i stylów inline. Dane z mostów (nazwy platform) są dodatkowo przycinane i oczyszczane. |
-| Mosty | Klucz parowania (porównanie w stałym czasie); limit 8 MB na komunikat; 15 s na `hello`; odrzucanie WebSocket z nagłówkiem `Origin` (strony WWW w przeglądarce); jeden most na konto. |
-| Ścieżki plików | Klucz konta zamieniany na bezpieczną nazwę katalogu (tylko litery/cyfry/`_`). |
-| Pliki stanu i konfiguracji | Zapis atomowy (plik tymczasowy + zamiana) z kopią `.bak`; uszkodzony stan → start z wstrzymanymi wejściami. |
-| Sekrety w repozytorium | Brak kluczy API, haseł i tokenów (przeszukanie kodu). Klucz i token generowane lokalnie przy pierwszym starcie. |
-| Uprawnienia cBotów | `AccessRights.None` (bez pełnego dostępu do systemu). |
-| Jedna instancja | Blokada pliku `apex.lock` na katalog danych. |
+Loopback HTTP/WebSocket/TCP, lista Host przeciw DNS rebinding, token API w stałym czasie, POST JSON, CSP, bez CDN. Most wymaga klucza i odrzuca Origin przeglądarki; jeden most na konto. Nie uruchamiaj równocześnie natywnego bota i mostu na tym samym koncie.
 
-## Moduł AI & Auto-Updates (APEX AI Lab)
+Atomowe pliki z flush, widoczne błędy; jedna instancja na katalog danych. Flush nie zastępuje testów utraty zasilania konkretnego dysku. Brak sekretów brokera w Git; lokalną konfigurację chroni użytkownik Windows.
 
-Moduł jest **odłożony**: nie jest budowany w pakiecie, APEX Desktop go nie uruchamia i nie udostępnia do niego żadnych tras. Opis zabezpieczeń zaprojektowanych dla modułu: [`AI_AUTO_UPDATES.md`](AI_AUTO_UPDATES.md), zaległości: [`AI_LAB_ZALEGLOSCI.md`](AI_LAB_ZALEGLOSCI.md).
+Pakiet po testach, nowy/pusty folder docelowy, manifest SHA-256 sprawdzający zmiany/dodatkowe pliki; bez danych użytkownika i AI Lab. Moduł uczenia/auto-updates nie uruchamia się i nie ma endpointów w produkcie. Aktualizacje ręczne.
 
-## Ryzyka rezydualne (świadomie zaakceptowane lub do decyzji użytkownika)
+## Ryzyka pozostające
 
-1. **Lokalne procesy** tego samego użytkownika Windows mogą odczytać `apex.config.json` (token, klucz parowania). Ochrona przed złośliwym oprogramowaniem na komputerze jest poza zakresem aplikacji.
-2. **Brak podpisu cyfrowego** plików wykonywalnych – zalecane budowanie pakietu samodzielnie ze źródeł.
-3. **Most MT5 nieskompilowany** – przed użyciem kompilacja i test wykonania na DEMO.
-4. **Heurystyczna klasyfikacja instrumentów** – nowa egzotyczna kryptowaluta o nieznanym tickerze i neutralnym opisie mogłaby nie zostać rozpoznana. Ograniczenie: tylko klasy z ważną strategią są skanowane (domyślnie indeksy), a symbol musi przejść klasyfikację jako indeks.
-5. **Brak przewagi strategii** – największe ryzyko finansowe nie jest techniczne. Patrz [`RAPORT_BADAN.md`](../reports/RAPORT_BADAN.md).
+Brak sieci/platformy/zasilania uniemożliwia gwarancję zamknięcia; operator musi mieć cTrader. Luki i poślizgi mogą przekroczyć planowane ryzyko. Pełne close przy awarii rejestru może nie mieć trwałego lokalnego audytu — sprawdź broker History. Niepewnego opóźnionego wykonania nie rozstrzyga sam timeout.
 
-## Jakość kodu
+Procesy tego samego użytkownika mogą odczytać token/klucz. Nie wystawiaj panelu w sieci i nie publikuj apex.config.json. EXE nie ma podpisu cyfrowego; hash nie potwierdza wydawcy.
 
-- Silnik niezależny od platformy (te same klasy w handlu, backteście i testach) – brak rozbieżności „backtest vs. live” w logice.
-- Kompilacja cBotów bez ostrzeżeń; zastąpione przestarzałe wywołania API cTrader.
-- Wyjątki w cyklu silnika są przechwytywane; 5 kolejnych błędów → wstrzymanie nowych wejść.
-- 120 testów automatycznych uruchamianych przy każdej budowie pakietu (`Zbuduj-APEX.ps1` przerywa budowę przy błędzie).
+MT5 nie był kompilowany ani odbierany; klasyfikacja instrumentów jest heurystyczna. Rzeczywiste API/LocalStorage cTrader, koszty Pepperstone i Windows 11 wymagają odbioru docelowego. **Nie wykonano żadnej transakcji brokerskiej.** Rentowność nie jest gwarantowana; ochronny TP 3R zmienia wyjścia względem starych badań.

@@ -25,10 +25,10 @@ public sealed class ReviewBoundaryTests : IDisposable
         public string Kind => "synthetic-test";
         public string Remote => "memory";
         public BridgeSession Session = null!;
-        public readonly List<string> Sent = new();
+        public readonly System.Collections.Concurrent.ConcurrentQueue<string> Sent = new();
         public Task SendAsync(string json, CancellationToken ct)
         {
-            lock (Sent) Sent.Add(json);
+            Sent.Enqueue(json);
             using var d = JsonDocument.Parse(json);
             if (BridgeProtocol.ReadType(json) == "close")
                 Session.Handle(BridgeProtocol.Serialize(new ResultMsg { Id = d.RootElement.GetProperty("id").GetString()!, Status = "filled", PositionId = 77 }));

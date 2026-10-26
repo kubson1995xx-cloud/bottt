@@ -42,6 +42,14 @@
 - Dowody: `review-fix-red.trx` (5 faktycznych niezaliczonych regresji przed poprawką), `liquidation-red.trx` (2), `platform-wiring-red.trx` (2), `status-timeout-red.log` (1). Po poprawkach pełny bot **244/244**, adapter **63/63**, panel **11/11**, oba cBoty zbudowane bez ostrzeżeń.
 - Pierwszy rzeczywisty workflow Windows `40246708589` zbudował wszystkie projekty (0 błędów/ostrzeżeń), lecz zatrzymał się na teście oczekującym IOException zamiast Windows UnauthorizedAccessException. Poprawiono wyłącznie przenośną asercję, zachowując kontrolę braku nieutrwalonych zmian konfiguracji. EXE smoke jeszcze nie wykonany w tym przebiegu.
 
+## Końcowy kandydat do odbioru DEMO — 2026-10-26
+
+- Zintegrowano minimum prowizji z SDK (`minCommissionAccount`, `minCommissionKnown`) bez zmiany wersji protokołu, ale wymagany nowy host i most razem. Minimum za stronę jest stałą podłogą kosztu, a sizing rozwiązuje osobno ograniczenie liniowe i stałe. Nieznane minimum i FX blokują wejście; override nie kasuje podłogi.
+- Końcowe lokalne wyniki po integracji: **265/265 bot**, **75/75 adapter cTrader**, **181/181 archiwum AI Lab**, **11/11 panel/pakiet**. `final-bot.trx`, `final-platform.trx`, `final-archive.trx` w lokalnym `apex-evidence`. Build całego rozwiązania i obu `.algo`: 0 błędów/ostrzeżeń.
+- Początkowy końcowy run ujawnił wyścig wyłącznie w nowej testowej liście Sent (`Collection was modified`); zastąpiono ją ConcurrentQueue, bez zmiany zachowania produktu. Wynik zachowano jako `pre-final-bot-test-race.trx`, po poprawce pełne 265/265.
+- Zaktualizowano README i dokumenty instalacji, panelu, połączenia, konfiguracji, bezpieczeństwa, statusu i wyników. Nie kopiujemy AI Lab do pakietu. Dodatkowe ryzyka i decyzje są jawne w `docs/OGRANICZENIA_I_STATUS.md`.
+- Odbiór docelowy nadal otwarty: Windows 11 użytkownika, cTrader API/LocalStorage i prawdziwe konto Pepperstone DEMO. Transakcja DEMO tylko po osobnej zgodzie; nie wykonano jej. Wynik Windows Actions dla konkretnego pakietu dopisać po realnym zakończeniu workflow, nie na podstawie samego YAML.
+
 ## Archiwalny opis poprzedniego wykonawcy (może być nieaktualny)
 
 Plik przekazania pracy dla kolejnego wykonawcy (np. Codex). Opisuje stan projektu, wykonane zmiany, zadania niedokończone i zasady pracy.

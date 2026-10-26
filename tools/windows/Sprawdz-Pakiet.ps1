@@ -6,7 +6,7 @@ foreach ($required in @("APEX-Desktop/ApexDesktop.exe", "APEX-Desktop/wwwroot/in
     if (-not (Test-Path -LiteralPath (Join-Path $base $required) -PathType Leaf)) { throw "Brak pliku: $required" }
 }
 $meta = Get-Content -LiteralPath (Join-Path $base "apex-build.json") -Raw | ConvertFrom-Json
-if (-not $meta.demoOnly -or -not $meta.botTestsRun -or -not $meta.panelTestsRun) { throw "Pakiet bez potwierdzonych testow DEMO." }
+if (-not $meta.demoOnly -or -not $meta.botTestsRun -or -not $meta.platformTestsRun -or -not $meta.panelTestsRun) { throw "Pakiet bez potwierdzonych testow DEMO." }
 $listed = @{}
 foreach ($line in [IO.File]::ReadAllLines((Join-Path $base "manifest.sha256"))) {
     if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "Nieprawidlowa linia manifestu." }

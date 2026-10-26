@@ -1,39 +1,33 @@
-# Znane ograniczenia i status gotowości
+# Ograniczenia i status APEX DEMO
 
-## Status gotowości (2026-10-15)
+Kod jest zintegrowany i testowany; aktualne liczby podaje [WYNIKI_TESTOW.md](WYNIKI_TESTOW.md). Pakiet Windows jest przeznaczony do odbioru **Pepperstone cTrader DEMO**, nie REAL. Dopóki nie sprawdzono połączenia i zatwierdzonej transakcji u brokera, nie jest to w pełni odebrany system brokerski.
 
-| Obszar | Status |
-|---|---|
-| Silnik, RiskEngine, zabezpieczenia wykonania | **Gotowe do testów DEMO.** 154 testy automatyczne, w tym integracyjne na prawdziwym procesie. |
-| APEX Desktop (panel, mosty, AI Decision Center) | **Gotowe do testów DEMO.** Zbudowany pakiet win-x64; uruchomienia na Windows nie sprawdzono w tym środowisku. |
-| Most cTrader | **Gotowe do testów DEMO.** Kompilacja 0 ostrzeżeń; protokół sprawdzony symulatorem; brak testu z prawdziwym serwerem cTrader. |
-| Most MetaTrader 5 | **Eksperymentalny** – nieskompilowany; wymaga kompilacji i testu na DEMO. |
-| Strategie | **Brak strategii o potwierdzonej przewadze.** Jedna eksperymentalna (tylko DEMO), reszta odrzucona przez testy. |
-| Konto LIVE | **Zablokowane** i niezalecane. Odblokowanie wymaga osobnej, świadomej decyzji (3 kroki + START). |
-| AI & Auto-Updates (AI Lab) | **Odłożone** decyzją użytkownika – moduł nie wchodzi w skład pakietu ani panelu. Kod i testy zostają w repozytorium do późniejszego wznowienia ([`HANDOFF.md`](../HANDOFF.md), [`AI_LAB_ZALEGLOSCI.md`](AI_LAB_ZALEGLOSCI.md)). |
+## Ważne decyzje
 
-**Wniosek: system jest gotowy do uruchomienia i obserwacji na koncie DEMO, a nie do handlu na koncie rzeczywistym.**
+- Brak AI Lab, uczenia i automatycznych aktualizacji w produkcie. Archiwalny kod/testy pozostają osobno. Centrum decyzji jest pasywną wizualizacją reguł.
+- Restart/reconnect bez nowych wejść do ręcznego START. Stare flagi/frazy nie odblokują REAL.
+- Wymagane SL i TP. Strategia bez stałego celu dostaje ochronny **TP 3R**; reguły wejścia zachowane, ale zmieniony limit wyjścia wymaga ponownych badań wyników. Stare własne pozycje bez poprawnego TP są likwidowane, bo interfejs nie ma ModifyTP.
+- Dokładna etykieta chroni pozycje obce; nie nadawaj ręcznej pozycji etykiety APEX.
+- Niepewny/corrupt zapis nie jest kasowany ani przywracany ze starego backupu. Operator uzgadnia stan z brokerem; nie usuwaj rejestru w celu ominięcia limitów.
+- Awaria dysku blokuje nowe ryzyko. Pełne close konkretnego własnego ID jest niezależne od rejestru i idempotentne; partial-close/open nie omijają rejestru. Przy awarii dysku może zabraknąć trwałego audytu zamknięcia.
+- Rejestr cTrader nie usuwa niepewnych rezerwacji i ma limit 20 000 wpisów. Zapełnienie wymaga operatora; pełne close nadal może być wysłane.
+- Brak pozycji po lokalnym timeout nie jest gwarancją braku opóźnionego wykonania. Sprawdź pozycje i History przed jakimkolwiek ręcznym ponowieniem.
+- Nowe pola minimum prowizji są opcjonalnym rozszerzeniem v1. Aktualizuj **host i most razem** — stary host może je zignorować. Nieznana prowizja/FX nie jest zastępowana udawaną poprawną stawką.
 
-## Ograniczenia strategii i badań
+## Ograniczenia operacyjne
 
-- Na danych 2005–2020 nie znaleziono strategii z przewagą potwierdzoną na okresie odłożonym (szczegóły: [`RAPORT_BADAN.md`](../reports/RAPORT_BADAN.md)).
-- Dane historyczne: ceny MID bez rzeczywistego spreadu, brak akcji i ETF, brak danych po 2020-05, brak historycznego kalendarza wiadomości. Wyniki na DEMO mogą się różnić od backtestu.
-- Ocena okazji 0–100 to ranking, nie prawdopodobieństwo. Na tych danych nie wykazano, że wyższa ocena daje lepszy wynik.
-- Filtr wiadomości obejmuje zaplanowane publikacje makro (kalendarz). Wydarzeń nieplanowanych nie przewiduje – przed nimi chronią filtry spreadu i zmienności oraz SL u brokera.
+Windows, APEX, cTrader i lokalny most muszą działać. cTrader Cloud nie zastępuje lokalnego Desktop. Bez sieci/brokera/zasilania nie ma gwarancji wykonania Emergency Stop. SL/TP pozostają u brokera, lecz nie gwarantują ceny przy luce/poślizgu. STOP zatrzymuje także zwykłe zarządzanie; „Wstrzymaj nowe” je zachowuje.
 
-## Ograniczenia techniczne
+Panel jest tylko lokalny. Nie wystawiaj portów w sieci. Procesy tego samego użytkownika mogą odczytać token/klucz z LocalAppData; nie publikuj konfiguracji. EXE nie ma podpisu certyfikatem — hash potwierdza integralność, nie tożsamość wydawcy.
 
-- Most cTrader działa tylko w **cTrader Desktop na tym samym komputerze**. W cTrader Cloud połączenia sieciowe cBotów są ograniczone.
-- Komputer, cTrader i APEX Desktop muszą działać, aby bot zarządzał pozycjami (trailing, break-even, wyjścia). Gdy nie działają, pozycje chroni wyłącznie SL/TP po stronie brokera.
-- Klasyfikacja instrumentów jest heurystyczna (API cTrader nie udostępnia kategorii symbolu). Działa według zasady „w razie wątpliwości – nie handluj”, więc czasem pominie poprawny instrument.
-- MT5 nie udostępnia prowizji przez API – trzeba ją ustawić ręcznie.
-- Pliki wykonywalne nie są podpisane cyfrowo (ostrzeżenie SmartScreen).
-- Wersja natywna cTrader (`ApexTradingAI.algo`) nie ma panelu premium ani AI Decision Center.
-- Panel jest jednoużytkownikowy i lokalny. Nie jest przeznaczony do wystawiania w sieci.
+Klasyfikacja instrumentów jest zachowawcza i może pomijać poprawne symbole. Brak sygnału nie musi oznaczać awarii. Nie luzuj limitów, aby wymusić transakcję.
 
-## Co trzeba zrobić na Twoim komputerze
+MT5: opcjonalny, nieskompilowany w MetaEditorze; nie-USD blokowane zamiast udawania poprawnej konwersji. Brak odbioru i pełnej równoważności cTrader. Nie blokuje głównej ścieżki WebSocket.
 
-1. Zbudować pakiet (`tools\windows\Zbuduj-APEX.ps1`) – testy uruchomią się automatycznie.
-2. Przeprowadzić [procedurę DEMO](PROCEDURA_DEMO_PEPPERSTONE.md), zaczynając od testu wykonania.
-3. (Opcjonalnie) skompilować most MT5 i powtórzyć test wykonania na koncie DEMO MT5.
-4. Obserwować wyniki na DEMO przez co najmniej kilka miesięcy przed jakąkolwiek decyzją o LIVE.
+## Badania
+
+Brak potwierdzonej przewagi. Stare dane 2005–2020 są MID i nie odtwarzają wszystkich kosztów/kalendarza. Backtester nie jest brokerem: ograniczone pokrycie M15, modelowane koszty i historyczny fallback FX=1 przy brakach danych. Nie używaj starego raportu jako dowodu rzeczywistej egzekucji ani walidacji nowego TP 3R. Bieżące FX live są sprawdzane osobno.
+
+## Otwarte warunki końcowe
+
+Windows 11 użytkownika → prawdziwy lokalny cTrader DEMO → porównanie konta, danych, specyfikacji, prowizji i marginu → osobna zgoda na test → pozycja i History potwierdzające open/SL/TP/modify/close → restart/reconnect/Emergency Stop. Procedura w pakiecie. **Nie ma etapu przejścia na REAL.**

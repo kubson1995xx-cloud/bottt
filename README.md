@@ -18,13 +18,13 @@ Handluje FX, metalami, energią, indeksami, obligacjami i towarami. **Kryptowalu
                                                          ├─ RiskEngine (0,5%/transakcję, 1,5%/dzień, DD 5%, 3 pozycje, dźwignia ≤ 5)
                                                          ├─ ochrona wykonania (rejestr sygnałów, weryfikacja niepewnych odpowiedzi)
                                                          ├─ filtr wiadomości makro (kalendarz)
-                                                         └─ dziennik, statystyki, AI Decision Center
+                                                         └─ dziennik, statystyki, Centrum decyzji
 ```
 
 | Katalog | Zawartość |
 |---|---|
 | `src/Apex.Core` | Silnik niezależny od platformy: wskaźniki, reżim, strategie, ranking, ryzyko, zarządzanie pozycją, rejestr wykonania, protokół mostu. |
-| `src/Apex.Desktop` | APEX Desktop: serwer mostów, panel WWW (PL), AI Decision Center. |
+| `src/Apex.Desktop` | APEX Desktop: serwer mostów, panel WWW (PL), Centrum decyzji. |
 | `src/Apex.AiLab` | Moduł automatycznych analiz i aktualizacji przez AI (APEX AI Lab) – **odłożony**, nie wchodzi w skład pakietu ani panelu (stan: [`HANDOFF.md`](HANDOFF.md)). |
 | `src/Platforms/cTrader` | `ApexBridge` (most) i `ApexTradingAI` (wersja natywna „wszystko w jednym”). |
 | `src/Platforms/MT5` | Most MetaTrader 5 (MQL5). |
@@ -55,7 +55,7 @@ Następnie podłącz cTrader (konto **DEMO**) i wykonaj test wykonania. Szczegó
 1. [Instalacja na Windows 11](docs/INSTALACJA_WINDOWS.md)
 2. [Podłączanie platform (cTrader, MT5, inne)](docs/PODLACZENIE_PLATFORM.md)
 3. [Procedura DEMO – Pepperstone](docs/PROCEDURA_DEMO_PEPPERSTONE.md)
-4. [Instrukcja panelu (w tym AI Decision Center)](docs/INSTRUKCJA_PANELU.md)
+4. [Instrukcja panelu (w tym Centrum decyzji)](docs/INSTRUKCJA_PANELU.md)
 5. [Konfiguracja: instrumenty, prowizje, profil, blokada REAL](docs/KONFIGURACJA.md)
 6. [Stan projektu i przekazanie pracy (HANDOFF)](HANDOFF.md)
 7. [Protokół mostu APEX Bridge v1](docs/PROTOKOL_MOSTU.md)
