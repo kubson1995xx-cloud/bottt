@@ -233,20 +233,26 @@ namespace Apex.Core.Engine
         {
             try
             {
-                if (!_projectionReconciled && _journal is IRecoveryJournal recovery)
+                // Projection health is independent of engine-state durability. Validate the
+                // current authority even with an empty outbox, and never cache a failed attempt.
+                _projectionReconciled = false;
+                if (_journal is IRecoveryJournal recovery)
                 {
+                    if (!recovery.IsHealthy) throw new InvalidOperationException("journal recovery blocked");
                     recovery.Reconcile(_state.ClosedRecords);
+                    if (!recovery.IsHealthy) throw new InvalidOperationException("journal recovery blocked");
                     _projectionReconciled = true;
                 }
                 if (_state.ClosedOutbox.Count == 0) return true;
                 foreach (var record in _state.ClosedOutbox) _journal.TradeClosed(record);
+                if (_journal is IRecoveryJournal current && !current.IsHealthy) throw new InvalidOperationException("journal recovery blocked");
                 // If clearing the outbox fails, the durable old outbox safely retries a keyed sink.
                 _state.ClosedOutbox.Clear(); _dirty = true;
                 return TrySaveState(utc, true);
             }
             catch (Exception ex)
             {
-                _persistenceHealthy = false;
+                _projectionReconciled = false;
                 BlockHistory("eksport dziennika oczekuje na ponowienie: " + ex.Message);
                 return false;
             }

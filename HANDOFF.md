@@ -1,5 +1,12 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Autonomia Phase B — poprawki review B1/B2 (lokalne, Phase C nadal OTWARTA)
+
+- **B1:** deadline monotonic ustalany przed blokującą walidacją/zapisem/księgowaniem/eksportem; publikacja nie odnawia czasu ze starego `utc`. Admission zachowuje oryginalny deadline konsumowanego permitu i sprawdza go wraz z live fence bezpośrednio przed gateway. +31 s ze stabilnymi tokenami nie daje permitu/open; +1 s działa i nie przedłuża początkowego okna 30 s. Zapisane księgowanie/CSV nadal dochodzi mimo wygaśnięcia, ale bez nowej zgody na ryzyko.
+- **B2:** niezależne `_projectionReconciled` + aktualne zdrowie `IRecoveryJournal`, nie resetowane sukcesem zapisu stanu. Reconcile pełnej authority także przy pustym outbox; scope reserve/establish/publish/consume/send wymagają zdrowej uzgodnionej projekcji. Rezerwacja recheck po commit; błąd projekcji podczas admission blokuje gateway. Rzeczywisty malformed `FileJournal`/`FileStore` po restarcie nie daje nowego baseline/permitu/open, plik pozostaje nietknięty; dokładny własny full-close działa, obca pozycja pozostaje.
+- RED→GREEN na rzeczywistych metodach Core i plikach, ordinary gateway **bez** `ITrustedSimulationGateway`; 20 nowych przypadków. Początkowy RED 16/79 failed, uzupełniający reserve-commit RED 1/6 failed. Końcowy pełny kandydat: **443/443 Core/Desktop (80 scoped)**, **100/100 platform**, **11/11 panel**, npm check PASS; pełne DEMO solution i oba rzeczywiste SDK solution/.algo **0 ostrzeżeń/błędów**. Dowody: `/home/ubuntu/.hermes/cache/scratch/apex-autonomy/phase-b-fix1/` (`red`, `reserve-commit-red`, `final-*`, `verified-test-summary.json`, `verify.py`).
+- Raport `.superpowers/sdd/2026-10-26-apex-autonomy/task-1-scope-core-fix1-report.md`; append core-report. Tylko B1/B2, bez produkcyjnej integracji Phase C, nowych funkcji, brokera, rzeczywistej transakcji DEMO/REAL, dzieci i push. Domyślne 0.5/1.5/5/x5, SL/TP i REAL block bez zmian. **Overall Task1/finding1 nadal OPEN / NOT ACCEPTED; niezależny rereview rodzica oczekiwany.**
+
 ## Autonomia Phase B — Core scope/admission/conservation (lokalnie; Task1 nadal PARTIAL)
 
 - Stan **v3**: trwały full-identity Proposed/Established baseline z losowym ID/etykietą, permanentne OpenAdmissions (pełne żądanie/opID/fingerprint, risk/plan/context, generacje), niezmienny actual OpeningFill i terminal manifest. Migracja v2 zachowuje wszystkie dowody/latches, ale pozostaje Unestablished/quarantine. Braki pól także zagnieżdżonych blokują odczyt bez nadpisania.

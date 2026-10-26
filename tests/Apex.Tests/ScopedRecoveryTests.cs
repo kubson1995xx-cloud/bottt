@@ -19,6 +19,38 @@ public sealed class ScopedRecoveryTests
         public override OrderOutcome OpenMarket(OrderRequest r) { Orders.Add(r); return OnOpen!(r); }
         public override BrokerHistorySnapshot GetHistory() => new() { AccountNumber = AccountNumber, Generation = "transport", Complete = true, Positions = GetPositions(), Closed = ClosedDeals.ToArray() };
     }
+    // Retain fixture data without exposing FakeBroker's trusted-simulation capability.
+    sealed class OrdinaryGateway(Broker broker) : IBrokerGateway, IBrokerHistory
+    {
+        public bool IsConnected => broker.IsConnected;
+        public AccountSnapshot GetAccount() => broker.GetAccount();
+        public System.Collections.Generic.IReadOnlyList<PositionInfo> GetPositions() => broker.GetPositions();
+        public BrokerHistorySnapshot GetHistory() => broker.GetHistory();
+        public OrderOutcome OpenMarket(OrderRequest request) => broker.OpenMarket(request);
+        public OrderOutcome ModifyStopLoss(long id, double sl) => broker.ModifyStopLoss(id, sl);
+        public OrderOutcome ClosePosition(long id, double? units) => broker.ClosePosition(id, units);
+        public double EstimateMargin(string symbol, TradeDirection direction, double units) => broker.EstimateMargin(symbol, direction, units);
+    }
+    sealed class FileProjection(string dir) : IRecoveryJournal
+    {
+        internal readonly Apex.Desktop.Services.FileJournal Inner = new(dir);
+        internal Action? DuringReconcile;
+        internal Action? DuringExport;
+        internal bool FailReconcile;
+        internal bool Healthy = true;
+        public bool IsHealthy => Healthy && Inner.IsHealthy;
+        public System.Collections.Generic.IReadOnlyList<Apex.Core.Performance.TradeRecord> ClosedRecords => Inner.ClosedRecords;
+        public void Reconcile(System.Collections.Generic.IReadOnlyList<Apex.Core.Performance.TradeRecord> authority)
+        {
+            DuringReconcile?.Invoke();
+            if (FailReconcile) throw new IOException("projection reconcile failed");
+            Inner.Reconcile(authority);
+        }
+        public void TradeClosed(Apex.Core.Performance.TradeRecord record) { DuringExport?.Invoke(); Inner.TradeClosed(record); }
+        public void TradeOpened(Apex.Core.Management.TradePlan plan, double units, string details) => Inner.TradeOpened(plan, units, details);
+        public void Signal(string line) => Inner.Signal(line);
+        public void Event(string line) => Inner.Event(line);
+    }
     sealed class FaultStore : IKeyValueStore
     {
         internal IKeyValueStore Inner = new MemoryStore();
@@ -40,7 +72,7 @@ public sealed class ScopedRecoveryTests
         internal long Sequence;
         internal string Key => $"APEX {Proposal.Identity.Label} 123456";
         internal EngineState State => JsonSerializer.Deserialize<EngineState>(Store.Get(Key)!, Json)!;
-        internal readonly ITradeJournal Journal;
+        internal ITradeJournal Journal;
         internal Fixture(IKeyValueStore? store = null, ITradeJournal? journal = null)
         {
             if (store != null) Store.Inner = store;
@@ -52,7 +84,7 @@ public sealed class ScopedRecoveryTests
         }
         internal void Restart()
         {
-            Engine = new TradingEngine(new EngineConfig { Label = Proposal.Identity.Label }, new Apex.Core.Adaptive.StrategyBook(Scenarios.DipOnlyProfile()), Broker, Broker, new Apex.Core.Bridge.BarStore(), Store, new NullLog(), Journal);
+            Engine = new TradingEngine(new EngineConfig { Label = Proposal.Identity.Label }, new Apex.Core.Adaptive.StrategyBook(Scenarios.DipOnlyProfile()), new OrdinaryGateway(Broker), Broker, new Apex.Core.Bridge.BarStore(), Store, new NullLog(), Journal);
             Engine.SetGuard(new Apex.Core.Safety.AccountGuardResult { Allowed = true }); Engine.Initialize(Now);
             Authority = new ScopedReceiptAuthority(Engine, _ => Current, () => Tick);
         }
@@ -88,6 +120,148 @@ public sealed class ScopedRecoveryTests
                 return OrderOutcome.Filled(42, 4000, Fill(r, actual)); };
             return Engine.SendAdmittedOpen(Request, new Apex.Core.Management.TradePlan { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now);
         }
+    }
+
+    [Theory]
+    [InlineData("establish", 31, false)][InlineData("establish", 1, true)]
+    [InlineData("admit", 31, false)][InlineData("admit", 1, true)]
+    [InlineData("account", 31, false)][InlineData("account", 1, true)]
+    [InlineData("export", 31, false)][InlineData("export", 1, true)]
+    [InlineData("reconcile", 31, false)][InlineData("reconcile", 1, true)]
+    public void BlockingScopeWorkCannotRenewOriginalReceiptDeadline(string stage, int seconds, bool allowed)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "scope-deadline-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var projection = new FileProjection(Path.Combine(dir, "csv"));
+            var f = new Fixture(new Apex.Desktop.Services.FileStore(Path.Combine(dir, "state")), projection);
+            Assert.True(f.Engine.ReserveBaseline(f.Proposal, Now));
+            Action delay = () => f.Tick = TimeSpan.FromSeconds(seconds); // stable broker, generations and revisions
+            bool result;
+            if (stage == "establish")
+            {
+                f.Store.AfterWrite = delay;
+                result = f.Engine.EstablishBaseline(f.Receipt(), f.Authority, Now);
+                Assert.Equal(BaselineStage.Established, f.State.Baseline!.Stage);
+            }
+            else
+            {
+                Assert.True(f.Engine.EstablishBaseline(f.Receipt(), f.Authority, Now));
+                if (stage == "admit")
+                {
+                    f.Store.AfterWrite = delay;
+                    Assert.Equal(allowed ? OrderStatus.Filled : OrderStatus.Rejected, f.Send().Status);
+                    Assert.Equal(allowed ? AdmissionStage.Bound : AdmissionStage.Rejected, Assert.Single(f.State.OpenAdmissions).Stage);
+                    Assert.Equal(allowed ? 1 : 0, f.Broker.Orders.Count);
+                    Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));
+                    return;
+                }
+                if (stage != "reconcile")
+                {
+                    Assert.Equal(OrderStatus.Filled, f.Send().Status);
+                    f.Broker.Orders.Clear(); f.Broker.ClosedDeals.Add(f.Deal(1, 2));
+                }
+                if (stage == "account") f.Store.AfterWrite = delay;
+                if (stage == "export") projection.DuringExport = delay;
+                if (stage == "reconcile") projection.DuringReconcile = delay;
+                result = f.Engine.ReconcileScoped(f.Receipt(), f.Authority, Now);
+                if (stage != "reconcile")
+                {
+                    Assert.Equal(1, f.State.TradesTotal); Assert.Equal(5, f.State.RealizedTotal);
+                    Assert.Empty(f.State.ClosedOutbox);
+                    Assert.Equal(2, File.ReadAllLines(Path.Combine(dir, "csv", "transakcje.csv")).Length);
+                }
+            }
+            Assert.Equal(allowed, result);
+            Assert.Equal(allowed, f.Engine.GetScopedPermit(f.Authority, Now) != null);
+            Assert.Empty(f.Broker.Orders);
+            if (allowed)
+            {
+                f.Tick = TimeSpan.FromSeconds(30); // even a short commit must not extend the original 30-second window
+                Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));
+            }
+            else
+            {
+                Assert.Equal(OrderStatus.Rejected, f.Send().Status); Assert.Empty(f.Broker.Orders);
+            }
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Theory][InlineData("reserve")][InlineData("establish")][InlineData("established")]
+    public void RealMalformedFileJournalCannotGrantScopedAuthorityWithEmptyOutbox(string stage)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "scope-corrupt-projection-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string csv = Path.Combine(dir, "csv"); Directory.CreateDirectory(csv);
+            var store = new Apex.Desktop.Services.FileStore(Path.Combine(dir, "state"));
+            var f = new Fixture(store, new Apex.Desktop.Services.FileJournal(csv));
+            if (stage != "reserve") Assert.True(f.Engine.ReserveBaseline(f.Proposal, Now));
+            if (stage == "established") Assert.True(f.Engine.EstablishBaseline(f.Receipt(), f.Authority, Now));
+            string path = Path.Combine(csv, "transakcje.csv"), bad = "malformed header\noriginal evidence\n";
+            File.WriteAllText(path, bad);
+            var journal = new Apex.Desktop.Services.FileJournal(csv);
+            Assert.False(journal.IsHealthy);
+            // Same generated identity and durable state; restart through actual initialization and its successful save.
+            f.Journal = journal; f.Restart(); f.Engine.SaveState(Now, true);
+            Assert.Empty(f.State.ClosedOutbox);
+            bool granted = stage switch {
+                "reserve" => f.Engine.ReserveBaseline(f.Proposal, Now),
+                "establish" => f.Engine.EstablishBaseline(f.Receipt(), f.Authority, Now),
+                _ => f.Engine.ReconcileScoped(f.Receipt(), f.Authority, Now) };
+            Assert.False(granted);
+            Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));
+            Assert.Equal(OrderStatus.Rejected, f.Send().Status); Assert.Empty(f.State.OpenAdmissions); Assert.Empty(f.Broker.Orders);
+            Assert.Equal(stage == "reserve" ? null : stage == "establish" ? BaselineStage.Proposed : BaselineStage.Established, f.State.Baseline?.Stage);
+            f.Broker.Positions.Add(f.Position(2)); f.Broker.Positions.Add(RecoveryTests.Open(99, "foreign"));
+            f.Engine.CmdCloseAllOwn(Now);
+            Assert.Equal(new long[] { 42 }, f.Broker.Closes);
+            Assert.Equal(99, Assert.Single(f.Broker.Positions).Id);
+            Assert.Equal(bad, File.ReadAllText(path)); Assert.False(journal.IsHealthy);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Theory][InlineData("reserve")][InlineData("reserve-commit")][InlineData("establish")][InlineData("consume")][InlineData("send")][InlineData("publish")]
+    public void CurrentProjectionHealthIsRequiredAtEveryScopedRiskBoundary(string stage)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "scope-live-projection-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var journal = new FileProjection(Path.Combine(dir, "csv"));
+            var f = new Fixture(new Apex.Desktop.Services.FileStore(Path.Combine(dir, "state")), journal);
+            if (stage is not ("reserve" or "reserve-commit")) Assert.True(f.Engine.ReserveBaseline(f.Proposal, Now));
+            if (stage is "consume" or "send" or "publish") Assert.True(f.Engine.EstablishBaseline(f.Receipt(), f.Authority, Now));
+            if (stage is "send" or "reserve-commit") f.Store.AfterWrite = () => journal.Healthy = false;
+            else if (stage == "publish") journal.DuringReconcile = () => journal.Healthy = false;
+            else journal.Healthy = false;
+            if (stage is "reserve" or "reserve-commit") Assert.False(f.Engine.ReserveBaseline(f.Proposal, Now));
+            if (stage == "establish") Assert.False(f.Engine.EstablishBaseline(f.Receipt(), f.Authority, Now));
+            if (stage == "publish") Assert.False(f.Engine.ReconcileScoped(f.Receipt(), f.Authority, Now));
+            var result = f.Send();
+            Assert.Equal(OrderStatus.Rejected, result.Status); Assert.Empty(f.Broker.Orders);
+            Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));
+            f.Engine.SaveState(Now, true); // state durability cannot repair the independent projection fault
+            Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void SuccessfulStateSaveCannotClearFailedAuthorityProjectionReconciliation()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "scope-unreconciled-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var journal = new FileProjection(Path.Combine(dir, "csv")) { FailReconcile = true };
+            var f = new Fixture(new Apex.Desktop.Services.FileStore(Path.Combine(dir, "state")), journal);
+            Assert.True(journal.IsHealthy); Assert.Empty(f.State.ClosedOutbox);
+            f.Engine.SaveState(Now, true);
+            Assert.False(f.Engine.ReserveBaseline(f.Proposal, Now));
+            Assert.Null(f.State.Baseline); Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now)); Assert.Empty(f.Broker.Orders);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
 
     [Fact]

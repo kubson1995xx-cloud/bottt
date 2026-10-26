@@ -16,6 +16,7 @@ public sealed partial class TradingEngine
     private static readonly ConditionalWeakTable<RecoveryBaseline, object> GeneratedProposals = new();
     private ScopedOpenPermit? _scopedPermit;
     private ScopedReceiptAuthority? _scopedAuthority;
+    private bool ScopedProjectionHealthy => _projectionReconciled && _journal is IRecoveryJournal { IsHealthy: true };
     internal RecoveryBaseline? ScopedBaseline => _state.Baseline;
     internal IReadOnlyList<OpenAdmission> ScopedAdmissions => _state.OpenAdmissions.AsReadOnly();
     internal long LastScopedObservationSequence => _state.OpenAdmissions.Select(x => x.LastObservationSequence).DefaultIfEmpty(-1).Max();
@@ -57,6 +58,7 @@ public sealed partial class TradingEngine
             ValidateFinancialState(next); ValidateScopeState(next);
             next.DurableRevision = checked(_state.DurableRevision + 1); next.SavedUtc = utc;
             _store.Set(StoreKey(next.AccountNumber), JsonSerializer.Serialize(next, StateJson)); _store.Flush();
+            if (next.ClosedRecords.Count != _state.ClosedRecords.Count) _projectionReconciled = false;
             _state = next; _ledger.Restore(next.Ledger);
             _plans.Clear(); foreach (var p in next.Plans) _plans.Add(p.PositionId, p);
             _risk = new RiskManager(_cfg.Risk, next.Risk);
@@ -76,11 +78,11 @@ public sealed partial class TradingEngine
     internal bool ReserveBaseline(RecoveryBaseline proposal, DateTime utc)
     {
         if (!GeneratedProposals.TryGetValue(proposal, out _) || !MatchesAccount(proposal.Identity) || proposal.Stage != BaselineStage.Proposed
-            || _state.Baseline != null || _state.LegacyScopeQuarantine || _stateReadFault || !_persistenceHealthy
+            || _state.Baseline != null || _state.LegacyScopeQuarantine || _stateReadFault || !_persistenceHealthy || !ScopedProjectionHealthy
             || _plans.Count != 0 || _ledger.Entries.Count != 0 || _pendingCloses.Count != 0 || _state.ClosingDeals.Count != 0
             || _state.OpenAdmissions.Count != 0 || _state.ClosedRecords.Count != 0 || _state.ClosedOutbox.Count != 0) return false;
         var next = ScopeCandidate(); next.Baseline = proposal;
-        return CommitScope(next, utc);
+        return CommitScope(next, utc) && ScopedProjectionHealthy;
     }
 
     private bool ReceiptValid(ScopedReceipt r, ScopedReceiptAuthority a, DateTime utc, bool current)
@@ -99,28 +101,38 @@ public sealed partial class TradingEngine
 
     internal bool EstablishBaseline(ScopedReceipt receipt, ScopedReceiptAuthority authority, DateTime utc)
     {
+        // Pin before account/fence reads, candidate serialization or durable work. Publication
+        // must never grant a fresh lifetime from the unchanged entry-time UTC after a stall.
+        var expires = ReceiptDeadline(receipt, authority, utc);
         _scopedPermit = null;
         if (_state.Baseline?.Stage != BaselineStage.Proposed || _stateReadFault || _state.LegacyScopeQuarantine
+            || !ScopedProjectionHealthy
             || !ReceiptValid(receipt, authority, utc, true) || receipt.Positions!.Count != 0 || receipt.PendingOrders!.Count != 0
             || receipt.Closed!.Any(x => x.Label == _cfg.Label) || receipt.OpeningObservations!.Any(x => x.Label == _cfg.Label)) return false;
         var next = ScopeCandidate(); next.Baseline = next.Baseline! with { Stage = BaselineStage.Established, EstablishedUtc = utc,
             EstablishingReceiptId = receipt.ReceiptId, EstablishingRevision = checked(next.DurableRevision + 1) };
         if (!CommitScope(next, utc)) return false;
-        return PublishScoped(receipt, authority, utc, true);
+        return PublishScoped(receipt, authority, utc, true, expires);
     }
 
-    private bool PublishScoped(ScopedReceipt receipt, ScopedReceiptAuthority authority, DateTime utc, bool balanced)
+    private static TimeSpan ReceiptDeadline(ScopedReceipt receipt, ScopedReceiptAuthority authority, DateTime utc) =>
+        authority.MonotonicNow() + TimeSpan.FromSeconds(30) - (utc - receipt.CapturedUtc);
+
+    private bool CurrentScopedReceipt(ScopedReceipt receipt, ScopedReceiptAuthority authority, DateTime utc, TimeSpan expires) =>
+        ReceiptValid(receipt, authority, utc, true) && ScopedProjectionHealthy && authority.MonotonicNow() < expires;
+
+    private bool PublishScoped(ScopedReceipt receipt, ScopedReceiptAuthority authority, DateTime utc, bool balanced, TimeSpan expires)
     {
         _scopedPermit = null;
         if (_state.ScopeConflict.Length != 0) { ScopedStatus = ScopedRecoveryStatus.Conflict; ScopedMessage = _state.ScopeConflict; return false; }
         ScopedStatus = ScopedRecoveryStatus.AwaitingEvidence;
         ScopedMessage = "AwaitingEvidence: obligations, current receipt or durable export";
-        if (!balanced || !_persistenceHealthy || _stateReadFault || _state.ClosedOutbox.Count != 0 || !ReceiptValid(receipt, authority, utc, true)) return false;
+        if (!balanced || !_persistenceHealthy || _stateReadFault || _state.ClosedOutbox.Count != 0 || !ScopedProjectionHealthy) return false;
         // Freeze the caller's collections. Authority validates exactly this frozen receipt at use.
         var frozen = JsonSerializer.Deserialize<ScopedReceipt>(JsonSerializer.Serialize(receipt, StateJson), StateJson)!;
+        if (!CurrentScopedReceipt(frozen, authority, utc, expires)) return false;
         _scopedAuthority = authority;
-        _scopedPermit = new ScopedOpenPermit(this, frozen, _state.DurableRevision,
-            authority.MonotonicNow() + TimeSpan.FromSeconds(30) - (utc - receipt.CapturedUtc));
+        _scopedPermit = new ScopedOpenPermit(this, frozen, _state.DurableRevision, expires);
         ScopedStatus = ScopedRecoveryStatus.Ready;
         ScopedMessage = "ScopedReady: dedicated/exclusive application epoch only; broker CoverageUnknown";
         return true;
@@ -133,7 +145,7 @@ public sealed partial class TradingEngine
         permit != null && ReferenceEquals(permit, _scopedPermit) && ReferenceEquals(permit.Owner, this)
         && ReferenceEquals(authority, _scopedAuthority) && permit.DurableRevision == _state.DurableRevision
         && !_stateReadFault && _persistenceHealthy && _state.ScopeConflict.Length == 0 && _state.Baseline?.Stage == BaselineStage.Established
-        && authority.MonotonicNow() < permit.Expires && ReceiptValid(permit.Receipt, authority, utc, true);
+        && _state.ClosedOutbox.Count == 0 && CurrentScopedReceipt(permit.Receipt, authority, utc, permit.Expires);
 
     private static OpeningRequestEvidence RequestEvidence(OrderRequest r, string op) => new()
     { ExecutionId = op, SignalId = r.SignalId, Symbol = r.Symbol, Direction = r.Direction, VolumeUnits = r.VolumeUnits,
@@ -143,6 +155,10 @@ public sealed partial class TradingEngine
     // Production without Phase C cannot obtain _scopedAuthority/permit from this internal API.
     internal OrderOutcome SendAdmittedOpen(OrderRequest request, TradePlan plan, DateTime utc)
     {
+        // CommitScope consumes the issued object. Retain its ORIGINAL deadline locally for
+        // the final send fence; a durable admission is not permission to send stale evidence.
+        var permit = _scopedPermit;
+        var authority = _scopedAuthority;
         // The offline simulator owns no broker risk and preserves its isolated aggregate callback
         // contract. Its authority is structural and immutable, never EngineConfig/JSON alone.
         if (_simulation && _state.Baseline == null && CanOperate(out _)) return _broker.OpenMarket(request);
@@ -163,7 +179,7 @@ public sealed partial class TradingEngine
         try { ScopedRecoveryPolicy.Units(request.VolumeUnits, spec.VolumeStep); }
         catch (Exception) { return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "non-normalized requested volume"); }
         string op = Guid.NewGuid().ToString("N"); var evidence = RequestEvidence(request, op);
-        var receipt = _scopedPermit?.Receipt;
+        var receipt = permit?.Receipt;
         var identity = _state.Baseline?.Identity ?? new RecoveryIdentity { AccountNumber = _state.AccountNumber, Broker = _state.Broker,
             Currency = _state.Currency, Label = _cfg.Label, IsLive = false, IsHedging = _broker.GetAccount().IsHedging };
         var admission = new OpenAdmission { BaselineId = _state.Baseline?.BaselineId ?? Guid.Empty, Identity = identity, OperationId = op,
@@ -176,15 +192,15 @@ public sealed partial class TradingEngine
             PositionRevision = receipt?.PositionRevision ?? 0, PendingOrderRevision = receipt?.PendingOrderRevision ?? 0 };
         var next = ScopeCandidate(); next.OpenAdmissions.Add(admission);
         if (!CommitScope(next, utc)) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "pre-send durability failed; not sent");
-        if (receipt != null && !ReceiptValid(receipt, _scopedAuthority!, utc, true))
-        {
-            RecoverOpeningOutcome(op, OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "generation changed before send: not sent"), utc);
-            return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "generation changed before send");
-        }
         var send = new OrderRequest { ExecutionId = op, SignalId = evidence.SignalId, Symbol = evidence.Symbol, Direction = evidence.Direction,
             VolumeUnits = evidence.VolumeUnits, StopLossPips = evidence.StopLossPips, TakeProfitPips = evidence.TakeProfitPips,
             Label = evidence.Label, Comment = evidence.Comment, MaxSlippagePips = evidence.MaxSlippagePips };
         OrderOutcome result;
+        if (receipt != null && (authority == null || !CurrentScopedReceipt(receipt, authority, utc, permit!.Expires)))
+        {
+            RecoverOpeningOutcome(op, OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "scope expired or fenced before send: not sent"), utc);
+            return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "scope expired or fenced before send");
+        }
         try { result = _broker.OpenMarket(send); }
         catch (Exception ex) { result = OrderOutcome.Uncertain(BrokerErrorKind.TechnicalError, ex.Message); }
         if (!RecoverOpeningOutcome(op, result, utc))
@@ -270,6 +286,7 @@ public sealed partial class TradingEngine
 
     internal bool ReconcileScoped(ScopedReceipt receipt, ScopedReceiptAuthority authority, DateTime utc)
     {
+        var expires = ReceiptDeadline(receipt, authority, utc);
         _scopedPermit = null;
         if (_stateReadFault || _state.Baseline?.Stage != BaselineStage.Established || _state.LegacyScopeQuarantine
             || !ReceiptValid(receipt, authority, utc, false)) return false;
@@ -346,7 +363,7 @@ public sealed partial class TradingEngine
             }
             if (!CommitScope(next, utc)) return false;
             EvaluateHealth(); if (!ExportClosed(utc)) return false;
-            return PublishScoped(receipt, authority, utc, balanced);
+            return PublishScoped(receipt, authority, utc, balanced, expires);
         }
         catch (Exception ex) { return LatchScopeConflict(ex.Message, utc); }
     }
