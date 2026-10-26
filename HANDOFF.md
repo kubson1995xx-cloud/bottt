@@ -1,5 +1,12 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Autonomia Task1 — faza Core odzyskiwania (lokalna, nie wydanie)
+
+- RED: 13/15 regresji recovery zawiodło (duplikaty, offline close, brak historii, restart intent); GREEN po pierwszej fazie: 15/15. Dowody: `/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task1/recovery-expanded-red.{log,trx}` oraz `recovery-green-1.{log,trx}`.
+- Stan v2 przechowuje raw closing-deal keys, końcowe pozycje, ekonomię i eksport outbox w jednym autorytatywnym zapisie; pełny close zapisuje intent przed próbą i może działać mimo awarii zapisu tylko dla dokładnego własnego ID/DEMO. CSV atomowy i kluczowany; brak cichego gubienia błędów ekonomicznych.
+- Faza NIE jest ukończonym Task1: transport/SDK/symulator i pełne testy są w toku; nowe wymagania coverage nie są jeszcze spięte między warstwami. Nie uruchamiać do handlu.
+- Wiążące ograniczenie SDK 1.0.21: dostępna kolekcja History nie dowodzi uniwersalnej kompletności brokera. `Complete` oznacza transport dostępnej kolekcji; oddzielne `RequiredCoverage` jest wymagane do nowego ryzyka. W realnym SDK nie wolno go ustawić na podstawie samej enumeracji. Niepusty legacy v1 pozostaje blokowany bez zgadywania overlap.
+
 ## Aktywne przejęcie — 2026-10-26
 
 - Zlecenie: ukończyć technicznie wersję Windows/cTrader Pepperstone **DEMO**, bez AI Lab i bez handlu REAL. Prawdziwa transakcja DEMO dopiero po osobnym zatwierdzeniu użytkownika.

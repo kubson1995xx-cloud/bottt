@@ -21,6 +21,31 @@ namespace Apex.Core.Engine
         double EstimateMargin(string symbol, TradeDirection direction, double units);
     }
 
+    /// <summary>Optional capability. Complete means the entire AVAILABLE history collection
+    /// and matching open-position snapshot were captured on the platform thread. Generation changes
+    /// after reconnect; failure/incomplete snapshots must never authorize new risk.</summary>
+    public interface IBrokerHistory
+    {
+        BrokerHistorySnapshot GetHistory();
+    }
+
+    public sealed class BrokerHistorySnapshot
+    {
+        public long AccountNumber { get; init; }
+        public string Generation { get; init; } = "";
+        public bool Complete { get; init; }
+        public bool RequiredCoverage { get; init; }
+        public string Scope { get; init; } = "available-history-v1";
+        public IReadOnlyList<ClosedPositionInfo> Closed { get; init; } = Array.Empty<ClosedPositionInfo>();
+    }
+
+    /// <summary>TradeClosed must durably accept the per-account terminal position key, idempotently,
+    /// or throw. ClosedRecords includes all accepted keys, not merely the UI's recent window.</summary>
+    public interface IRecoveryJournal : ITradeJournal
+    {
+        IReadOnlyList<TradeRecord> ClosedRecords { get; }
+    }
+
     /// <summary>Dane rynkowe: specyfikacje, ceny, godziny handlu.</summary>
     public interface IMarketData
     {
@@ -63,8 +88,9 @@ namespace Apex.Core.Engine
         void Event(string line);
     }
 
-    public sealed class NullJournal : ITradeJournal
+    public sealed class NullJournal : IRecoveryJournal
     {
+        public IReadOnlyList<TradeRecord> ClosedRecords => Array.Empty<TradeRecord>();
         public void TradeOpened(TradePlan plan, double volume, string details) { }
         public void TradeClosed(TradeRecord record) { }
         public void Signal(string line) { }

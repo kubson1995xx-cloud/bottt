@@ -52,8 +52,11 @@ namespace Apex.Core.Engine
     /// <summary>Stan silnika zapisywany trwale (odporność na restart).</summary>
     public sealed class EngineState
     {
-        public int SchemaVersion { get; set; } = 1;
+        public int SchemaVersion { get; set; } = 2;
         public long AccountNumber { get; set; }
+        public string Broker { get; set; } = "";
+        public string Currency { get; set; } = "";
+        public string Label { get; set; } = "";
         public EngineMode Mode { get; set; } = EngineMode.Stopped;
         public string ModeReason { get; set; } = "";
         public RiskState Risk { get; set; } = new();
@@ -64,9 +67,21 @@ namespace Apex.Core.Engine
         public double? RiskPerTradeOverride { get; set; }
         public List<string> Suspended { get; set; } = new();
         public List<TradeRecord> RecentTrades { get; set; } = new();
+        public HashSet<long> AccountedPositions { get; set; } = new();
+        public List<ClosedPositionInfo> ClosingDeals { get; set; } = new();
+        public List<TradeRecord> ClosedRecords { get; set; } = new();
+        public List<TradeRecord> ClosedOutbox { get; set; } = new();
+        public Dictionary<long, CloseIntent> PendingCloses { get; set; } = new();
         public double RealizedTotal { get; set; }
         public int TradesTotal { get; set; }
         public DateTime SavedUtc { get; set; }
+    }
+
+    public sealed class CloseIntent
+    {
+        public string Reason { get; set; } = "";
+        public int Attempts { get; set; }
+        public DateTime NextTryUtc { get; set; }
     }
 
     /// <summary>Śledzenie typowego spreadu każdego instrumentu (mediana z ostatnich próbek).</summary>

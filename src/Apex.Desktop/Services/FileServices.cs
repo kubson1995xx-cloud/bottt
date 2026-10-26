@@ -62,11 +62,13 @@ namespace Apex.Desktop.Services
     }
 
     /// <summary>Dziennik transakcji i zdarzeń w plikach CSV/tekstowych (osobny katalog dla każdego konta).</summary>
-    public sealed class FileJournal : ITradeJournal
+    public sealed class FileJournal : IRecoveryJournal
     {
         private readonly string _dir;
         private readonly object _lock = new();
         private readonly List<TradeRecord> _recent = new();
+        private readonly Dictionary<long, TradeRecord> _closed = new();
+        public IReadOnlyList<TradeRecord> ClosedRecords { get { lock (_lock) return _closed.Values.ToList(); } }
         private readonly LinkedList<string> _events = new();
 
         public FileJournal(string dir)
@@ -74,21 +76,20 @@ namespace Apex.Desktop.Services
             _dir = dir;
             Directory.CreateDirectory(dir);
             string trades = Path.Combine(dir, "transakcje.csv");
-            if (!File.Exists(trades)) File.WriteAllText(trades, TradeRecord.CsvHeader + Environment.NewLine, new UTF8Encoding(true));
+            if (!File.Exists(trades)) AtomicFile.Write(trades, TradeRecord.CsvHeader + Environment.NewLine);
             LoadRecent(trades);
         }
 
         private void LoadRecent(string path)
         {
-            try
+            foreach (var line in File.ReadLines(path).Skip(1))
             {
-                foreach (var line in File.ReadLines(path).Skip(1).TakeLast(500))
-                {
-                    var r = Parse(line);
-                    if (r != null) _recent.Add(r);
-                }
+                var r = Parse(line) ?? throw new IOException("Uszkodzony dziennik transakcji: " + path);
+                if (_closed.ContainsKey(r.PositionId)) throw new IOException("Powtórzony klucz starego dziennika – wymagane uzgodnienie: " + r.PositionId);
+                _closed.Add(r.PositionId, r);
+                _recent.Add(r);
+                if (_recent.Count > 500) _recent.RemoveAt(0);
             }
-            catch (IOException) { }
         }
 
         private static TradeRecord? Parse(string line)
@@ -143,9 +144,14 @@ namespace Apex.Desktop.Services
 
         public void TradeClosed(TradeRecord record)
         {
-            Append("transakcje.csv", record.ToCsv());
             lock (_lock)
             {
+                if (_closed.ContainsKey(record.PositionId)) return;
+                // Atomic publication avoids a torn CSV tail and a separate dedupe-index crash gap.
+                // This is append semantics, not retention/compaction: every accepted row is retained.
+                string path = Path.Combine(_dir, "transakcje.csv");
+                AtomicFile.Write(path, File.ReadAllText(path) + record.ToCsv() + Environment.NewLine);
+                _closed.Add(record.PositionId, record);
                 _recent.Add(record);
                 if (_recent.Count > 500) _recent.RemoveAt(0);
             }

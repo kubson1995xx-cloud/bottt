@@ -22,6 +22,9 @@ namespace Apex.Core.Engine
     /// <summary>Informacja o zamkniętej pozycji przekazywana przez platformę.</summary>
     public sealed class ClosedPositionInfo
     {
+        /// <summary>Canonical SDK HistoricalTrade.ClosingDealId (positive Int32 widened to Int64).
+        /// Null is a legacy close hint, never an economic record.</summary>
+        public long? ClosingDealId { get; init; }
         public long PositionId { get; init; }
         public string Symbol { get; init; } = "";
         public string Label { get; init; } = "";
@@ -45,7 +48,7 @@ namespace Apex.Core.Engine
     /// Cykl (OnTimer): połączenie → konto → limity ryzyka → zabezpieczenie pozycji → weryfikacja niepewnych zleceń →
     /// zarządzanie pozycjami → skanowanie instrumentów → ranking okazji → wykonanie najlepszych → zapis stanu.
     /// </summary>
-    public sealed class TradingEngine
+    public sealed partial class TradingEngine
     {
         private readonly EngineConfig _cfg;
         private StrategyBook _book;
@@ -67,7 +70,7 @@ namespace Apex.Core.Engine
         private readonly Dictionary<string, PoolItem> _pool = new(StringComparer.Ordinal);
         private readonly Dictionary<string, PendingInfo> _pendingInfo = new(StringComparer.Ordinal);
         private readonly Dictionary<long, string> _closeReasons = new();
-        private readonly Dictionary<long, PendingClose> _pendingCloses = new();
+        private readonly Dictionary<long, CloseIntent> _pendingCloses = new();
         private readonly HashSet<string> _suspended = new(StringComparer.Ordinal);
         private readonly SpreadTracker _spreads = new();
         private readonly RingLog _recentSignals = new(12);
@@ -86,6 +89,9 @@ namespace Apex.Core.Engine
         private int _consecutiveExceptions;
         private AccountSnapshot? _lastAccount;
         private DateTime _lastPruneUtc;
+        private string _historyGeneration = "";
+        public bool HistoryReady { get; private set; }
+        public string HistoryMessage { get; private set; } = "oczekiwanie na historię";
 
         private static readonly JsonSerializerOptions StateJson = new()
         {
@@ -182,12 +188,6 @@ namespace Apex.Core.Engine
             public double Units;
         }
 
-        private sealed class PendingClose
-        {
-            public string Reason = "";
-            public int Attempts;
-            public DateTime NextTryUtc;
-        }
 
         // ------------------------------------------------------------------ konfiguracja
 
@@ -234,6 +234,9 @@ namespace Apex.Core.Engine
             _lastAccount = acc;
             if (!_cfg.IsBacktest) LoadState(acc.Number);
             _state.AccountNumber = acc.Number;
+            if (string.IsNullOrEmpty(_state.Broker)) { _state.Broker = acc.BrokerName; _state.Currency = acc.Currency; _state.Label = _cfg.Label; }
+            if (_state.Broker != acc.BrokerName || _state.Currency != acc.Currency || _state.Label != _cfg.Label)
+                BlockInvalidState(acc.Number, "zmiana tożsamości brokera/waluty/etykiety");
             if (_state.Mode != EngineMode.EmergencyStopped)
             {
                 _state.Mode = EngineMode.Stopped;
@@ -248,6 +251,7 @@ namespace Apex.Core.Engine
             foreach (var s in _state.Suspended) _suspended.Add(s);
             _initialized = true;
             Reconcile(utc, "start");
+            SynchronizeHistory(utc);
             _risk.Update(acc, utc);
             _dirty = true;
             SaveState(utc, force: true);
@@ -267,15 +271,39 @@ namespace Apex.Core.Engine
             try
             {
                 var st = JsonSerializer.Deserialize<EngineState>(json!, StateJson);
-                if (st == null || st.AccountNumber != account || st.SchemaVersion != 1 || !Enum.IsDefined(typeof(EngineMode), st.Mode)
+                if (st == null || st.AccountNumber != account || (st.SchemaVersion != 1 && st.SchemaVersion != 2) || !Enum.IsDefined(typeof(EngineMode), st.Mode)
                     || st.Risk == null || st.Ledger == null || st.Plans == null || st.Suspended == null || st.RecentTrades == null
                     || st.DisabledStrategies == null || st.DisabledClasses == null
                     || st.Plans.Any(p => p == null) || st.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId)))
                     throw new JsonException("Nieprawidłowy schemat lub tożsamość zapisanego stanu.");
                 _state = st;
+                if (st.AccountedPositions == null || st.ClosingDeals == null || st.ClosedRecords == null || st.ClosedOutbox == null || st.PendingCloses == null
+                    || st.PendingCloses.Any(x => x.Key <= 0 || x.Value == null || x.Value.Attempts < 0)
+                    || st.ClosingDeals.Any(x => !ValidDeal(x))
+                    || st.ClosingDeals.GroupBy(DealKey).Any(g => g.Count() != 1)
+                    || st.ClosedRecords.Any(x => x == null) || st.ClosedOutbox.Any(x => x == null))
+                    throw new JsonException("Uszkodzony rejestr odzyskiwania.");
+                if (st.SchemaVersion == 2)
+                {
+                    using var document = JsonDocument.Parse(json!);
+                    if (!document.RootElement.TryGetProperty("ClosingDeals", out _) || !document.RootElement.TryGetProperty("AccountedPositions", out _)
+                        || st.TradesTotal != st.AccountedPositions.Count || st.ClosedRecords.Count != st.TradesTotal
+                        || Math.Abs(st.RealizedTotal - st.ClosingDeals.Sum(x => x.NetProfit)) > 1e-7)
+                        throw new JsonException("Niespójny autorytatywny stan księgowy.");
+                }
+                else if (st.TradesTotal != 0 || st.RealizedTotal != 0 || st.RecentTrades.Count != 0
+                    || (_journal is IRecoveryJournal legacy && legacy.ClosedRecords.Count > 0))
+                {
+                    // Unknown legacy overlap must not be added to full replay. Preserve the original
+                    // state, emergency latch, reservations and plans for manual scoped migration.
+                    _stateReadFault = true; _persistenceHealthy = false;
+                    HistoryMessage = "migracja v1 z historycznymi wynikami wymaga ręcznego uzgodnienia";
+                }
+                else st.SchemaVersion = 2;
                 _ledger.Restore(st.Ledger);
                 _plans.Clear();
                 foreach (var p in st.Plans) _plans[p.PositionId] = p;
+                foreach (var p in st.PendingCloses) { _pendingCloses[p.Key] = p.Value; _closeReasons[p.Key] = p.Value.Reason; }
                 _log.Info($"Wczytano stan z {st.SavedUtc:yyyy-MM-dd HH:mm} UTC.");
             }
             catch (Exception ex)
@@ -305,6 +333,7 @@ namespace Apex.Core.Engine
             {
                 _state.Ledger = _ledger.Entries.ToList();
                 _state.Plans = _plans.Values.ToList();
+                _state.PendingCloses = _pendingCloses.ToDictionary(x => x.Key, x => x.Value);
                 _state.Risk = _risk.State;
                 _state.Suspended = _suspended.ToList();
                 _state.SavedUtc = utc;
@@ -367,11 +396,9 @@ namespace Apex.Core.Engine
             foreach (var id in _plans.Keys.ToList())
             {
                 if (ids.Contains(id)) continue;
-                var plan = _plans[id];
-                _log.Warn($"[{why}] Pozycja #{id} {plan.Symbol} nie istnieje (zamknięta podczas przerwy) – plan usunięty.");
-                _journal.Event($"Pozycja #{id} {plan.Symbol} zamknięta podczas nieobecności bota (szczegóły w historii cTrader).");
-                _plans.Remove(id);
-                _dirty = true;
+                // Absence is not economic evidence. Keep the entry plan and close intent
+                // until authoritative terminal history has been durably committed.
+                _log.Warn($"[{why}] Pozycja #{id} nieobecna – oczekiwanie na trwałe rozliczenie historii.");
             }
         }
 
@@ -443,11 +470,13 @@ namespace Apex.Core.Engine
             {
                 if (_connected) AddError("Utracono połączenie z serwerem – wstrzymano wszystkie operacje.");
                 _connected = false;
+                BlockHistory("utracono połączenie");
                 return;
             }
             if (!_connected)
             {
                 _connected = true;
+                BlockHistory("ponowne połączenie – wymagany START po uzgodnieniu");
                 _log.Info("Połączenie przywrócone – uzgadnianie stanu pozycji.");
                 Reconcile(utc, "ponowne połączenie");
             }
@@ -473,6 +502,7 @@ namespace Apex.Core.Engine
             }
             _lastAccount = acc;
             if (!GuardAllowed) return;
+            SynchronizeHistory(utc);
 
             foreach (var ev in _risk.Update(acc, utc))
             {
@@ -513,7 +543,7 @@ namespace Apex.Core.Engine
 
             SampleSpreads(utc);
 
-            if (_state.Mode == EngineMode.Running && !_risk.NewEntriesBlocked(out _))
+            if (_state.Mode == EngineMode.Running && HistoryReady && !_risk.NewEntriesBlocked(out _))
             {
                 ScanForSignals(utc);
                 ProcessPool(utc, acc);
@@ -597,16 +627,20 @@ namespace Apex.Core.Engine
         {
             if (!CanOperate(out _, requireValidEquity: false) || !OwnPositions().Any(p => p.Id == positionId)) return null;
             _closeReasons[positionId] = reason;
+            if (!_pendingCloses.TryGetValue(positionId, out var pc)) _pendingCloses[positionId] = pc = new CloseIntent { Reason = reason };
+            pc.Attempts++;
+            pc.NextTryUtc = utc.AddSeconds(Math.Min(300, 15 * pc.Attempts));
+            _dirty = true;
+            // Full reduction is the ONLY operation permitted when this write fails. Exact
+            // account/DEMO/owned-position checks above still apply on every attempt.
+            TrySaveState(utc, true);
             var res = _broker.ClosePosition(positionId, null);
             if (res.Status == OrderStatus.Filled || res.Error == BrokerErrorKind.EntityNotFound)
             {
-                _pendingCloses.Remove(positionId);
                 return res;
             }
             RegisterBrokerError(res);
-            if (!_pendingCloses.TryGetValue(positionId, out var pc)) _pendingCloses[positionId] = pc = new PendingClose { Reason = reason };
-            pc.Attempts++;
-            pc.NextTryUtc = utc.AddSeconds(Math.Min(300, 15 * pc.Attempts));
+
             AddError($"Zamknięcie #{positionId} nieudane ({res.Message}) – ponowię próbę.");
             return res;
         }
@@ -617,7 +651,7 @@ namespace Apex.Core.Engine
             var existing = new HashSet<long>(OwnPositions().Select(p => p.Id));
             foreach (var kv in _pendingCloses.ToList())
             {
-                if (!existing.Contains(kv.Key)) { _pendingCloses.Remove(kv.Key); continue; }
+                if (!existing.Contains(kv.Key)) continue;
                 if (utc < kv.Value.NextTryUtc) continue;
                 RequestClose(kv.Key, kv.Value.Reason, utc);
             }
@@ -1145,7 +1179,7 @@ namespace Apex.Core.Engine
 
         private bool Execute(Ranked r, DateTime utc)
         {
-            if (_state.Mode != EngineMode.Running || !_persistenceHealthy || _ledger.Pending.Count > 0 || !CanOperate(out _)) return false;
+            if (_state.Mode != EngineMode.Running || !HistoryReady || !_persistenceHealthy || _ledger.Pending.Count > 0 || !CanOperate(out _)) return false;
             if (_pendingCloses.Count > 0 || OwnPositions().Any(p => !HasValidTarget(p))) return false;
             var c = r.C;
             string sid = c.SignalId;
@@ -1278,11 +1312,9 @@ namespace Apex.Core.Engine
 
         // ------------------------------------------------------------------ zamknięcia pozycji
 
-        public void OnPositionClosed(ClosedPositionInfo info)
+        private TradeRecord BuildClosedRecord(ClosedPositionInfo info)
         {
-            if (!string.Equals(info.Label, _cfg.Label, StringComparison.Ordinal)) return;
             _plans.TryGetValue(info.PositionId, out var plan);
-            _pendingCloses.Remove(info.PositionId);
             string reason;
             if (_closeReasons.TryGetValue(info.PositionId, out var r)) reason = r;
             else reason = info.PlatformReason switch
@@ -1293,7 +1325,7 @@ namespace Apex.Core.Engine
                 "StopOut" => "Stop-out (brak marginu)",
                 _ => "zamknięta ręcznie lub poza botem",
             };
-            _closeReasons.Remove(info.PositionId);
+
 
             var cls = _universeBySymbol.TryGetValue(info.Symbol, out var u) ? u.AssetClass : AssetClass.Unknown;
             var rec = new TradeRecord
@@ -1311,7 +1343,7 @@ namespace Apex.Core.Engine
                 EntryPrice = info.EntryPrice,
                 ExitPrice = info.ExitPrice,
                 Volume = plan?.InitialVolume ?? info.Volume,
-                InitialRiskMoney = plan?.RiskAmount ?? 0,
+                InitialRiskMoney = plan?.Reconstructed == false ? plan.RiskAmount : 0,
                 GrossProfit = info.GrossProfit,
                 Commission = info.Commission,
                 Swap = info.Swap,
@@ -1323,22 +1355,7 @@ namespace Apex.Core.Engine
                 Parameters = plan?.Exit?.Describe() ?? "",
                 BarsHeld = plan?.BarsHeld ?? 0,
             };
-            _journal.TradeClosed(rec);
-            _state.RecentTrades.Add(rec);
-            _state.RealizedTotal += info.NetProfit;
-            _state.TradesTotal++;
-            _plans.Remove(info.PositionId);
-            _dirty = true;
-            _log.Info($"Zamknięto #{info.PositionId} {info.Symbol}: {info.NetProfit:F2} ({rec.RMultiple:F2}R) – {reason}");
-
-            if (_cfg.UseHealthMonitor)
-            {
-                foreach (var msg in _health.Evaluate(_state.RecentTrades, _suspended))
-                {
-                    _log.Warn(msg);
-                    _journal.Event(msg);
-                }
-            }
+            return rec;
         }
 
         // ------------------------------------------------------------------ polecenia panelu
@@ -1357,7 +1374,7 @@ namespace Apex.Core.Engine
         public string CmdStart()
         {
             if (!GuardAllowed) return "Nie można uruchomić: " + GuardMessage;
-            if (!_initialized || !_persistenceHealthy || !CanOperate(out _)) return "Nie można uruchomić: brak bezpiecznego konta/połączenia lub trwałego zapisu.";
+            if (!_initialized || !HistoryReady || !_persistenceHealthy || !CanOperate(out _)) return "Nie można uruchomić: brak bezpiecznego konta/połączenia, historii lub trwałego zapisu. " + HistoryMessage;
             if (_state.Mode == EngineMode.EmergencyStopped) return "Najpierw zresetuj awaryjne zatrzymanie.";
             if (_risk.State.MaxDrawdownHit) return "Najpierw zresetuj blokadę maksymalnego obsunięcia.";
             _consecutiveErrors = 0;
@@ -1473,7 +1490,7 @@ namespace Apex.Core.Engine
         {
             if (GuardIsLive) return "Test wykonania jest dostępny WYŁĄCZNIE na koncie DEMO.";
             if (!GuardAllowed) return "Test niedostępny: " + GuardMessage;
-            if (!_initialized || !_persistenceHealthy || !CanOperate(out var acc)) return "Test niedostępny: brak bezpiecznego konta/połączenia lub zapisu.";
+            if (!_initialized || !HistoryReady || !_persistenceHealthy || !CanOperate(out var acc)) return "Test niedostępny: brak bezpiecznego konta/połączenia, historii lub zapisu.";
             _risk.Update(acc, utc);
             _dirty = true;
             if (_risk.NewEntriesBlocked(out var blocked)) { TrySaveState(utc, true); return "Test zablokowany: " + blocked; }

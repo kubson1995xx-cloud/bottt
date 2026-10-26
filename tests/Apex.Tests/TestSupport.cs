@@ -11,7 +11,7 @@ using Apex.Core.Strategies;
 namespace Apex.Tests
 {
     /// <summary>Atrapa brokera i rynku z wstrzykiwaniem awarii – do testów silnika bez platformy.</summary>
-    public sealed class FakeBroker : IBrokerGateway, IMarketData
+    public class FakeBroker : IBrokerGateway, IMarketData
     {
         public readonly Dictionary<string, InstrumentSpec> Specs = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, double> Mid = new(StringComparer.OrdinalIgnoreCase);
@@ -111,7 +111,7 @@ namespace Apex.Tests
             return OrderOutcome.Filled(positionId, stopLoss);
         }
 
-        public OrderOutcome ClosePosition(long positionId, double? units)
+        public virtual OrderOutcome ClosePosition(long positionId, double? units)
         {
             int i = Positions.FindIndex(p => p.Id == positionId);
             if (i < 0) return OrderOutcome.Rejected(BrokerErrorKind.EntityNotFound, "brak");
