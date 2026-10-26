@@ -56,6 +56,15 @@
 - Osobne archiwum AI Lab Windows: **180/181**, `AiLabAuditTests.TamperedWorktreePointer_StopsCollection` zawiódł na UnauthorizedAccessException przy testowym nadpisaniu `.git`. Linux archiwum nadal 181/181. Nie poprawiamy/nie przywracamy odłożonego modułu w ramach produktu DEMO.
 - Ruling: archiwalne sprawdzenie ma `continue-on-error` z jawnym warningiem i TRX; nie blokuje wydania działającego produktu, ale jego błędu nie nazywamy zielonym. Testy i smoke produktu nadal twardo blokują wydanie. Kolejny przebieg służy opublikowaniu artefaktu po tej korekcie rozdziału.
 
+## Przekazany artefakt Windows
+
+- [Końcowy workflow 40248380140](https://github.com/kubson1995xx-cloud/bottt/actions/runs/40248380140): **success**, produkt bot 265/265 + adapter 75/75 + panel 11/11, build 0 błędów/ostrzeżeń i prawdziwy Windows EXE smoke PASS. Archiwum AI Lab jawnie **180/181**, warning nieblokujący, nie dostarczane.
+- Pakiet z czystego commita `926afaa77833e4b7d7434a5b9c3bf4ddf30ef0f8`, artefakt GitHub ID `12619862079`, nazwa `APEX Windows DEMO`. Pobrany i sprawdzony ponownie: CRC ZIP, SHA-256 i 28 pozycji manifestu PASS; żadnego AI Lab/konfiguracji użytkownika.
+- ZIP: `APEX Windows DEMO.zip`, 42 252 092 bajty. SHA-256 `05511235db67010d194981cb662752b5f59f5c8b79d4927f2639326a48d52ead`.
+- `apex-build.json` ma konserwatywne `windowsRuntimeTested=false`, bo powstaje PRZED późniejszym etapem EXE smoke. Późniejszy PASS jest w logu powyższego workflow; nie zmieniano po fakcie bajtów/manifestu pakietu. `brokerTested=false` pozostaje prawdziwe.
+- Lokalna kopia pobranego artefaktu: `/home/ubuntu/.hermes/cache/scratch/apex-windows-ci-final/APEX Windows DEMO.zip`. Archiwum utworzone przez Windows używa separatorów Windows; w lokalnej linuksowej kopii weryfikacyjnej znormalizowano wyłącznie rozpakowanie, nie zmieniono ZIP.
+- Ta aktualizacja HANDOFF jest dokumentacyjna i nie zmienia zweryfikowanych bajtów produktu. Otwarta pozostaje bramka rzeczywistego Windows 11/cTrader/Pepperstone i osobno zatwierdzonej transakcji DEMO. Nie żądano i nie używano sekretów brokerskich.
+
 ## Archiwalny opis poprzedniego wykonawcy (może być nieaktualny)
 
 Plik przekazania pracy dla kolejnego wykonawcy (np. Codex). Opisuje stan projektu, wykonane zmiany, zadania niedokończone i zasady pracy.
