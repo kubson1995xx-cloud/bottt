@@ -16,7 +16,8 @@ foreach ($values in @(@(0,0,0), @(1,0,1), @(2,2,0))) {
     if (-not $rejected) { throw 'Accepted empty/failed/inconsistent TRX fixture' }
 }
 # Controlled package fixture tests integrity/metadata enforcement only; dummy EXE is never executed.
-$package = Join-Path $Scratch 'controlled-package'
+# .NET on Windows expands TEMP's RUNNER~1 alias. Match enumerated FullName before slicing.
+$package = [IO.Path]::GetFullPath((Join-Path $Scratch 'controlled-package'))
 New-Item -ItemType Directory -Force -Path $package | Out-Null
 foreach ($required in @('APEX-Desktop/ApexDesktop.exe','APEX-Desktop/wwwroot/index.html','APEX-Desktop/wwwroot/app.js','APEX-Desktop/wwwroot/decision-center.js','cTrader/ApexBridge.algo','Uruchom APEX.cmd')) {
     $file = Join-Path $package $required

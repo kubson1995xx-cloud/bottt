@@ -3,7 +3,7 @@ param([string]$Pakiet = $PSScriptRoot)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "TestEvidence.ps1")
 $resolved = (Resolve-Path -LiteralPath $Pakiet).Path
-# Compare canonical .NET paths on both sides; PowerShell may retain mixed separators.
+# Compare canonical .NET paths on both sides; PowerShell may retain short aliases/separators.
 $canonical = [IO.Path]::GetFullPath($resolved)
 if ($resolved -cne $canonical) { Write-Host "Normalizacja sciezki pakietu: $resolved -> $canonical" }
 $base = $canonical.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
