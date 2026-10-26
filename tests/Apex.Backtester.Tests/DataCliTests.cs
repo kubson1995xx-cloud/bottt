@@ -9,8 +9,28 @@ namespace Apex.Backtester.Tests;
 
 public class DataCliTests : IDisposable
 {
-    readonly string dir = Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!, "task3-test-" + Guid.NewGuid().ToString("N"));
+    readonly string dir = CreateScratch(Environment.GetEnvironmentVariable("TMPDIR"), Path.GetTempPath);
     public DataCliTests() => Directory.CreateDirectory(dir);
+    // Explicit inputs let the absent-variable branch run without mutating process-global environment.
+    internal static string CreateScratch(string? tmpdir, Func<string> osTempPath) =>
+        Path.Combine(tmpdir ?? osTempPath(), "task3-test-" + Guid.NewGuid().ToString("N"));
+
+    [Fact] public void AbsentTmpdirCreatesUniqueScratchUnderOsFallbackWithoutGlobalEnvironmentMutation()
+    {
+        string first = CreateScratch(null, () => dir), second = CreateScratch(null, () => dir);
+        Assert.NotEqual(first, second);
+        Assert.Equal(dir, Path.GetDirectoryName(first));
+        Directory.CreateDirectory(first);
+        File.WriteAllText(Path.Combine(first, "probe"), "scratch fallback");
+        Assert.True(File.Exists(Path.Combine(first, "probe")));
+    }
+    [Fact] public void SuppliedTmpdirWinsWithoutConsultingOsFallback()
+    {
+        string scratch = CreateScratch(dir, () => throw new Exception("fallback must not be used"));
+        Assert.Equal(dir, Path.GetDirectoryName(scratch));
+        Directory.CreateDirectory(scratch);
+        Assert.True(Directory.Exists(scratch));
+    }
     public void Dispose() => Directory.Delete(dir, true);
     string Csv(string rows)
     {
