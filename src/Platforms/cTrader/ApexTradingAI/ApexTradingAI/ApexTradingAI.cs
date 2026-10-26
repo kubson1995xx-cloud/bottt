@@ -139,6 +139,7 @@ namespace cAlgo.Robots
 
             BuildUniverse(book);
             _engine.Initialize(Server.TimeInUtc);
+            if (IsBacktesting) _engine.CmdStart();
             Positions.Closed += OnPositionClosed;
             if (!IsBacktesting)
             {

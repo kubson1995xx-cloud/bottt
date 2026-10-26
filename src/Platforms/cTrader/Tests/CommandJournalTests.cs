@@ -89,6 +89,23 @@ namespace Apex.Platform.Tests
             Assert.Equal("rejected", result.Status);
         }
 
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void FullLiquidationDoesNotDependOnJournalStorageButNewRiskDoes(bool corrupt)
+        {
+            int closes = 0, opens = 0;
+            var journal = new CommandJournal(corrupt ? "broken" : null, _ => throw new IOException("disk"));
+            var method = typeof(CommandJournal).GetMethod("RunFullClose", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(method);
+            Func<ResultMsg> close = () => { closes++; return Filled("close-42"); };
+            var result = (ResultMsg)method!.Invoke(journal, new object[] { "close-42", close })!;
+            Assert.Equal("filled", result.Status);
+            Assert.Equal(1, closes);
+            journal.Run("open-42", "open", "new-signal", () => { opens++; return Filled("open-42"); });
+            Assert.Equal(0, opens);
+        }
+
         [Fact]
         public void BrokerExceptionLeavesUncertainReservationAcrossRestart()
         {

@@ -593,21 +593,22 @@ namespace Apex.Core.Engine
             }
         }
 
-        private void RequestClose(long positionId, string reason, DateTime utc)
+        private OrderOutcome? RequestClose(long positionId, string reason, DateTime utc)
         {
-            if (!CanOperate(out _, requireValidEquity: false) || !OwnPositions().Any(p => p.Id == positionId)) return;
+            if (!CanOperate(out _, requireValidEquity: false) || !OwnPositions().Any(p => p.Id == positionId)) return null;
             _closeReasons[positionId] = reason;
             var res = _broker.ClosePosition(positionId, null);
             if (res.Status == OrderStatus.Filled || res.Error == BrokerErrorKind.EntityNotFound)
             {
                 _pendingCloses.Remove(positionId);
-                return;
+                return res;
             }
             RegisterBrokerError(res);
             if (!_pendingCloses.TryGetValue(positionId, out var pc)) _pendingCloses[positionId] = pc = new PendingClose { Reason = reason };
             pc.Attempts++;
             pc.NextTryUtc = utc.AddSeconds(Math.Min(300, 15 * pc.Attempts));
             AddError($"Zamknięcie #{positionId} nieudane ({res.Message}) – ponowię próbę.");
+            return res;
         }
 
         private void ProcessPendingCloses(DateTime utc)
@@ -1628,15 +1629,16 @@ namespace Apex.Core.Engine
                     }
                     break;
                 case 4:
-                    if (pos == null) { Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono zmiany SL" : "TEST ZALICZONY – pozycja zamknięta"); return; }
+                    if (pos == null) { Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono zmiany SL" : "TEST PRZERWANY – pozycja zniknęła przed wysłaniem polecenia zamknięcia; ścieżka close niezweryfikowana"); return; }
                     if ((utc - t.StepTime).TotalSeconds < 20) return;
                     t.Log.Add($"{utc:HH:mm:ss} Krok 3: zamykanie pozycji #{pos.Id}.");
-                    RequestClose(pos.Id, "test wykonania – zamknięcie", utc);
+                    var closeResult = RequestClose(pos.Id, "test wykonania – zamknięcie", utc);
+                    if (closeResult?.Status != OrderStatus.Filled) t.Failed = true;
                     t.Step = 5;
                     t.StepTime = utc;
                     break;
                 case 5:
-                    if (pos == null) Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono zmiany SL" : "TEST ZALICZONY – otwarcie, zmiana SL i zamknięcie potwierdzone u brokera");
+                    if (pos == null) Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono wszystkich poleceń zmiany SL i zamknięcia" : "TEST ZALICZONY – otwarcie, zmiana SL i zamknięcie potwierdzone u brokera");
                     else if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds) Finish("TEST NIEZALICZONY – pozycja nadal otwarta po próbie zamknięcia (ponawiam zamykanie w tle)");
                     break;
             }

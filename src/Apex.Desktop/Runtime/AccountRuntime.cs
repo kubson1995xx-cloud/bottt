@@ -129,10 +129,15 @@ namespace Apex.Desktop.Runtime
             else { RecomputeUniverse(); Subscribe(); }
         });
 
-        public void OnClosed(BridgeSession s, ClosedDto c) => Enqueue(() =>
+        public void OnClosed(BridgeSession s, ClosedDto c)
         {
-            if (ReferenceEquals(_adapter.Session, s)) ApplyClosed(c);
-        });
+            // Uprawnienie zdarzenia oceniamy w chwili odbioru, nie po późniejszym reconnect.
+            lock (_lifecycle)
+            {
+                if (_stop || !ReferenceEquals(_adapter.Session, s)) return;
+                Enqueue(() => ApplyClosed(c));
+            }
+        }
 
         public void OnClosed(ClosedDto c) => Enqueue(() => ApplyClosed(c));
 
@@ -244,7 +249,8 @@ namespace Apex.Desktop.Runtime
             var now = DateTime.UtcNow;
             switch (action)
             {
-                case "start": return e.CmdStart();
+                case "start": return _storageFault || _store.HasFault
+                    ? "Nie można uruchomić: błąd trwałego stanu – wymagane uzgodnienie i restart." : e.CmdStart();
                 case "stop":
                     var stopped = e.CmdStop();
                     e.SaveState(now, true);
@@ -258,6 +264,7 @@ namespace Apex.Desktop.Runtime
                 case "resumeSuspended": return e.CmdResumeSuspended();
                 case "executionTest":
                     {
+                        if (_storageFault || _store.HasFault) return "Test zablokowany: błąd trwałego stanu.";
                         string? sym = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("symbol", out var s) ? s.GetString() : null;
                         return e.CmdExecutionTest(now, string.IsNullOrWhiteSpace(sym) ? _testSymbol : sym);
                     }
@@ -342,7 +349,6 @@ namespace Apex.Desktop.Runtime
         {
             var acc = _adapter.GetAccount();
             var cfg = _config.Config;
-            if (_storageFault || _store.HasFault) return new AccountGuardResult { Allowed = false, IsLive = acc.IsLive, Reason = "Błąd trwałego stanu – wymagane sprawdzenie plików i restart." };
             if (!_adapter.IsConnected) return new AccountGuardResult { Allowed = false, IsLive = acc.IsLive, Reason = "Brak świeżych migawek konta i pozycji." };
             var guardSettings = new AccountGuardSettings
             {
@@ -351,7 +357,9 @@ namespace Apex.Desktop.Runtime
                 AllowedAccounts = Array.Empty<long>(),
                 AllowedBrokers = cfg.AllowedBrokers,
             };
-            return AccountGuard.Evaluate(acc.IsValid ? acc : null, guardSettings);
+            // To uprawnienie do znanego konta DEMO, nie zgoda na nowe ryzyko.
+            // Kapitał/persistencja blokują wejścia osobno, nie awaryjne pełne zamknięcia.
+            return AccountGuard.Evaluate(acc, guardSettings, requireTradingCapital: false);
         }
 
         private StrategyProfile LoadProfile()

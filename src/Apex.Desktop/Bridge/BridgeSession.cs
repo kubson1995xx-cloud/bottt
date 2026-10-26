@@ -93,7 +93,7 @@ namespace Apex.Desktop.Bridge
         private static bool ValidAccount(string json, AccountDto? a)
         {
             if (a == null || a.Number <= 0 || string.IsNullOrWhiteSpace(a.Broker) || string.IsNullOrWhiteSpace(a.Currency)
-                || !double.IsFinite(a.Balance) || !double.IsFinite(a.Equity) || a.Balance <= 0 || a.Equity <= 0
+                || !double.IsFinite(a.Balance) || !double.IsFinite(a.Equity)
                 || !double.IsFinite(a.Margin) || a.Margin < 0 || !double.IsFinite(a.FreeMargin)
                 || (a.MarginLevel.HasValue && !double.IsFinite(a.MarginLevel.Value))) return false;
             using var doc = JsonDocument.Parse(json);

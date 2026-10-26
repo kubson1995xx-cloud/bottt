@@ -29,6 +29,14 @@ namespace Apex.Tests
             Assert.DoesNotContain("p.Label.StartsWith(LabelPrefix", Source("cTrader/ApexBridge/ApexBridge/ApexBridge.cs"));
 
         [Fact]
+        public void NativeBacktestExplicitlyStartsButRealDemoNeverAutostarts() =>
+            Assert.Contains("if (IsBacktesting) _engine.CmdStart();", Source("cTrader/ApexTradingAI/ApexTradingAI/ApexTradingAI.cs"));
+
+        [Fact]
+        public void FullCloseUsesRiskReducingJournalPath() =>
+            Assert.Contains("RunFullClose", Source("cTrader/ApexBridge/ApexBridge/ApexBridge.cs"));
+
+        [Fact]
         public void NativeDoesNotStampReadTimeOntoQuote() =>
             Assert.DoesNotContain("new Quote(s.Bid, s.Ask, _r.Server.TimeInUtc)", Source("cTrader/ApexTradingAI/ApexTradingAI/ApexTradingAI.cs"));
     }

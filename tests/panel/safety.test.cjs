@@ -12,19 +12,20 @@ function panel() {
   const { window, document } = parseHTML(fs.readFileSync(path.join(www, 'index.html'), 'utf8'));
   const calls = [];
   const storage = new Map();
+  const timers = [];
   window.matchMedia = () => ({ matches: false });
   window.scrollTo = () => {};
   const context = vm.createContext({
-    document, window, console, Intl, Date, URL, Blob,
+    document, window, console, Intl, Date, URL, Blob, AbortController,
     localStorage: { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v) },
-    setInterval: () => 1, clearInterval: () => {}, setTimeout: () => 1, clearTimeout: () => {},
+    setInterval: () => 1, clearInterval: () => {}, setTimeout: (fn, delay) => { timers.push({fn, delay}); return timers.length; }, clearTimeout: () => {},
     fetch: async (url, opts) => {
       calls.push({ url, opts });
       return { ok: true, status: 200, json: async () => ({ host: { version: 'test' }, data: { accounts: [] } }) };
     },
   });
   vm.runInContext(fs.readFileSync(path.join(www, 'app.js'), 'utf8'), context);
-  return { document, context, calls, run: source => vm.runInContext(source, context) };
+  return { document, context, calls, timers, run: source => vm.runInContext(source, context) };
 }
 
 const accountSource = `({ key: 'cTrader:Pepperstone:123', connected: true, platform: 'cTrader',
@@ -42,6 +43,22 @@ test('API HTTP error is an error, not a successful command', async () => {
   const p = panel();
   p.context.fetch = async () => ({ ok: false, status: 504, json: async () => ({ message: 'Polecenie anulowane.' }) });
   await assert.rejects(p.run(`api('/api/accounts/x/command', {action:'start'})`), /504|anulowane/);
+});
+
+test('hung status request aborts and releases polling for recovery', async () => {
+  const p = panel();
+  await new Promise(setImmediate);
+  p.timers.length = 0;
+  p.context.fetch = (_url, opts) => new Promise((_resolve, reject) => {
+    opts.signal?.addEventListener('abort', () => reject(new Error('timeout')));
+  });
+  const pending = p.run('poll()');
+  const timer = p.timers.find(t => t.delay === 5000);
+  assert.ok(timer, 'status GET must have a five-second deadline');
+  timer.fn();
+  await pending;
+  assert.equal(p.run('S.polling'), false);
+  assert.equal(p.run('S.lastOk'), 0);
 });
 
 test('risk panel offers no path to unlock REAL and explains DEMO-only', () => {

@@ -35,14 +35,16 @@ namespace Apex.Core.Safety
     {
         public static string RequiredLivePhrase(long accountNumber) => $"LIVE {accountNumber} AKCEPTUJE RYZYKO";
 
-        public static AccountGuardResult Evaluate(AccountSnapshot? account, AccountGuardSettings settings)
+        public static AccountGuardResult Evaluate(AccountSnapshot? account, AccountGuardSettings settings, bool requireTradingCapital = true)
         {
             if (account == null)
                 return Deny(false, "Brak informacji o koncie – handel zablokowany.");
             if (account.Number <= 0)
                 return Deny(account.IsLive, "Nieprawidłowy numer konta – handel zablokowany.");
-            if (!account.IsValid)
+            if (requireTradingCapital && !account.IsValid)
                 return Deny(account.IsLive, "Nieprawidłowe dane konta (saldo/kapitał) – handel zablokowany.");
+            if (!double.IsFinite(account.Balance) || !double.IsFinite(account.Equity))
+                return Deny(account.IsLive, "Nieprawidłowe dane konta – operacje zablokowane.");
 
             if (settings.AllowedBrokers.Count > 0)
             {

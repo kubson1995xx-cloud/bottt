@@ -259,7 +259,16 @@ namespace cAlgo.Robots
                     }
                 case "open": { var c = BridgeProtocol.Deserialize<OpenCmd>(json); if (c != null) ExecuteCommand(c.Id, c, c.Label + "|" + c.Comment, () => OnOpen(c)); break; }
                 case "modify": { var c = BridgeProtocol.Deserialize<ModifyCmd>(json); if (c != null) ExecuteCommand(c.Id, c, null, () => OnModify(c)); break; }
-                case "close": { var c = BridgeProtocol.Deserialize<CloseCmd>(json); if (c != null) ExecuteCommand(c.Id, c, null, () => OnClose(c)); break; }
+                case "close":
+                    {
+                        var c = BridgeProtocol.Deserialize<CloseCmd>(json);
+                        if (c != null)
+                        {
+                            if (c.Units == null && _journal != null) Send(_journal.RunFullClose(c.Id, () => OnClose(c)));
+                            else ExecuteCommand(c.Id, c, null, () => OnClose(c));
+                        }
+                        break;
+                    }
                 case "margin": { var c = BridgeProtocol.Deserialize<MarginCmd>(json); if (c != null) OnMargin(c); break; }
                 case "ping": Send(new SimpleMsg { Type = "pong" }); break;
             }

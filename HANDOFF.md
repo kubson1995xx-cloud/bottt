@@ -29,6 +29,19 @@
 - W toku: niezależny przegląd całości; uzupełnienie opłat minimalnych cTrader i walidacji FX w izolowanej gałęzi. Nie przedstawiać obecnego ZIP jako finalnej akceptacji brokerskiej.
 - Otwarte bramki: faktyczne Windows/cTrader API/LocalStorage, zgodność specyfikacji Pepperstone, realne połączenie DEMO i osobno zatwierdzona transakcja. Żadnych transakcji brokerskich nie wykonano.
 
+## Poprawki po niezależnym przeglądzie — 2026-10-26
+
+- Przegląd zewnętrzny `apex-evidence/final-review.md` wskazał 1 problem krytyczny, 5 istotnych i 1 drobny. Domknięto je regresjami; nie zastępuje to odbioru brokerskiego.
+- C1: oddzielono prawo do uwierzytelnionego konta DEMO od zgody na nowe ryzyko. Awaria persistencji nadal blokuje wejścia, ale nie pełne awaryjne zamknięcie własnego ID. Most ma osobną idempotentną ścieżkę pełnego close bez zależności od dziennika dyskowego; partial close/modify/open nadal wymagają rejestru. Ruling: pełne close konkretnego ID nie może zwiększyć ekspozycji; koszt to brak trwałego audytu tego zamknięcia podczas awarii dysku, wynik/history należy wtedy sprawdzić u brokera.
+- I1: naprawiony wcześniej domyślny symbol testu, potwierdzony testem endpointu.
+- I2: skończone zero/ujemne equity nie są błędem tożsamości i nie odcinają znanego DEMO od awaryjnego close; nowe ryzyko pozostaje zablokowane.
+- I3: zniknięcie pozycji przed wysłaniem close oznacza PRZERWANY, nie PASS; brak potwierdzonego wyniku zamknięcia nie certyfikuje pełnego testu.
+- I4: ważne zdarzenie closed przyjęte przed wymianą sesji zachowuje kolejność w kolejce; nowe zdarzenia emerytowanej sesji są odrzucane. Test odtwarza rzeczywisty Attach z wątku sieciowego, nie Attach sztucznie kolejkowany za closed.
+- I5: natywny cBot jawnie uruchamia silnik tylko w `IsBacktesting`. Rzeczywiste DEMO nadal wymaga ręcznego START.
+- M1: żądanie statusu panelu ma deadline 5 s, zwalnia blokadę i umożliwia ponowny odczyt. Polecenia handlowe POST nie są automatycznie ponawiane.
+- Dowody: `review-fix-red.trx` (5 faktycznych niezaliczonych regresji przed poprawką), `liquidation-red.trx` (2), `platform-wiring-red.trx` (2), `status-timeout-red.log` (1). Po poprawkach pełny bot **244/244**, adapter **63/63**, panel **11/11**, oba cBoty zbudowane bez ostrzeżeń.
+- Pierwszy rzeczywisty workflow Windows `40246708589` zbudował wszystkie projekty (0 błędów/ostrzeżeń), lecz zatrzymał się na teście oczekującym IOException zamiast Windows UnauthorizedAccessException. Poprawiono wyłącznie przenośną asercję, zachowując kontrolę braku nieutrwalonych zmian konfiguracji. EXE smoke jeszcze nie wykonany w tym przebiegu.
+
 ## Archiwalny opis poprzedniego wykonawcy (może być nieaktualny)
 
 Plik przekazania pracy dla kolejnego wykonawcy (np. Codex). Opisuje stan projektu, wykonane zmiany, zadania niedokończone i zasady pracy.

@@ -62,6 +62,15 @@ namespace Apex.Platforms.CTrader
             }
             return Copy(entry.Result, id);
         }
+        // Pełne zamknięcie konkretnego ID pozycji nie dodaje ryzyka i jest idempotentne po stronie brokera.
+        // Wywołujący MUSI ponownie sprawdzić DEMO i dokładną etykietę. Nie używać do partial close/modify/open.
+        internal ResultMsg RunFullClose(string id, Func<ResultMsg> execute)
+        {
+            if (string.IsNullOrWhiteSpace(id) || id.Length > 160) return Reject(id, "InvalidRequest", "brak identyfikatora polecenia");
+            try { return Copy(execute(), id); }
+            catch (Exception ex) { return Uncertain(id, "niepewne pełne zamknięcie: " + ex.Message); }
+        }
+
         private void Save() => _persist(JsonSerializer.Serialize(_entries, BridgeProtocol.Json));
         private static ResultMsg Copy(ResultMsg r, string id) => new() { Id = id, Status = r.Status, PositionId = r.PositionId, Price = r.Price, Error = r.Error, Message = r.Message };
         private static ResultMsg Uncertain(string id, string message) => new() { Id = id, Status = "uncertain", Error = "TechnicalError", Message = message };

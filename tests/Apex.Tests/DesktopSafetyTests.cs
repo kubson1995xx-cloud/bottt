@@ -553,7 +553,9 @@ namespace Apex.Tests
             string oldLabel = c.Config.Label;
             File.Delete(c.Path_);
             Directory.CreateDirectory(c.Path_);
-            Assert.ThrowsAny<IOException>(() => c.Update(x => x.Label = "UNSAVED"));
+            var failure = Record.Exception(() => c.Update(x => x.Label = "UNSAVED"));
+            // Windows zgłasza katalog w miejscu pliku jako UnauthorizedAccessException, Unix jako IOException.
+            Assert.True(failure is IOException or UnauthorizedAccessException, failure?.ToString() ?? "Zapis powinien zawieść.");
             Assert.Equal(oldLabel, c.Config.Label);
         }
 

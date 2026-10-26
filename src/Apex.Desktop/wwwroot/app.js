@@ -110,6 +110,11 @@ function confirmModal(title, body, confirmText, danger, extra) {
 async function api(path, body) {
   const opts = { headers: { 'X-Apex-Token': TOKEN } };
   if (body !== undefined) { opts.method = 'POST'; opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  // Termin tylko odczytu statusu. Mutacji POST nie ponawiamy automatycznie.
+  const controller = path === '/api/status' && body === undefined ? new AbortController() : null;
+  if (controller) opts.signal = controller.signal;
+  const deadline = controller ? setTimeout(() => controller.abort(), 5000) : null;
+  try {
   const r = await fetch(path, opts);
   if (r.status === 401) throw new Error('Brak autoryzacji – odśwież stronę.');
   let data;
@@ -117,6 +122,7 @@ async function api(path, body) {
   catch (e) { throw new Error('Nieprawidłowa odpowiedź APEX (HTTP ' + r.status + ').'); }
   if (!r.ok) throw new Error('HTTP ' + r.status + ': ' + (data.message || 'Polecenie nie zostało potwierdzone. Sprawdź stan konta przed ponowieniem.'));
   return data;
+  } finally { if (deadline !== null) clearTimeout(deadline); }
 }
 
 function canOpenTrades(acc) {
