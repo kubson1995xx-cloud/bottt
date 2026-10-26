@@ -33,17 +33,22 @@ public sealed class ScopedPlatformState
             if (o != pending) { pendingRevision = checked(pendingRevision + 1); pending = o; }
         }
     }
-    public ScopeFrame Current(Guid baseline, string label, string transport) => new()
-    { BaselineId = baseline, Label = label, TransportGeneration = transport, BrokerEpoch = BrokerEpoch,
+    public ScopeFrame Current(Guid baseline, string label, string transport)
+    {
+        lock (gate) return new ScopeFrame { BaselineId = baseline, Label = label, TransportGeneration = transport, BrokerEpoch = BrokerEpoch,
+        ExecutionPath = "desktop-bridge", SafetyVersion = "scoped-demo-v1",
         BrokerConnected = BrokerConnected, PositionRevision = positionsRevision, PendingOrderRevision = pendingRevision };
-    public ScopeFrame Capture(Guid baseline, string label, string transport)
+    }
+    public ScopeFrame Capture(Guid baseline, string label, string transport, long? captureStartedTick = null)
     {
         lock (gate)
         {
             var frame = Current(baseline, label, transport) with { SnapshotId = Guid.NewGuid().ToString("N") };
             foreach (var id in captures.Where(x => Elapsed(x.Value.tick) >= 30).Select(x => x.Key).ToArray()) captures.Remove(id);
             if (captures.Count >= 32) throw new InvalidOperationException("scoped captures full");
-            captures.Add(frame.SnapshotId, (frame, Stopwatch.GetTimestamp())); return frame;
+            long now = Stopwatch.GetTimestamp(), start = captureStartedTick ?? now;
+            if (start > now) throw new InvalidOperationException("future capture tick");
+            captures.Add(frame.SnapshotId, (frame, start)); return frame;
         }
     }
     private static double Elapsed(long tick) => (double)(Stopwatch.GetTimestamp() - tick) / Stopwatch.Frequency;

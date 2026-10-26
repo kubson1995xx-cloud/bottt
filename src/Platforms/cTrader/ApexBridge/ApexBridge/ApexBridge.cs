@@ -450,9 +450,12 @@ namespace cAlgo.Robots
         private void SendPositions()
         {
             if (!_welcomed) return;
+            string epoch = _scopeState.BrokerEpoch;
             var positions = Positions.Select(ToDto).ToList(); var pending = CTraderScopeEvidence.Pending(PendingOrders);
             _scopeState.Observe(positions, pending);
-            Send(new PositionsMsg { Items = positions, PendingOrders = pending, Scoped = _scopeState.Current(_baseline, LabelPrefix, _transportGeneration) });
+            var frame = _scopeState.Current(_baseline, LabelPrefix, _transportGeneration);
+            if (frame.BrokerEpoch != epoch) { Send(BrokerState()); return; }
+            Send(new PositionsMsg { Items = positions, PendingOrders = pending, Scoped = frame });
         }
 
         private bool IsOwn(Position p) => PlatformSafety.OwnLabel(p.Label, LabelPrefix);
@@ -491,6 +494,7 @@ namespace cAlgo.Robots
             {
                 string epoch = _scopeState.BrokerEpoch;
                 long captured = BridgeProtocol.ToUnixMs(Server.TimeInUtc);
+                long captureStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                 var rows = CTraderHistory.Capture(History, LabelPrefix);
                 var positions = Positions.Select(ToDto).ToList(); var account = AccountDto();
                 var pending = CTraderScopeEvidence.Pending(PendingOrders);
@@ -498,9 +502,18 @@ namespace cAlgo.Robots
                 if (positions.Count > 10000 || pending.Count > 10000 || rows.Count > 100000 || request.RecoverOperations.Count > 1000)
                     throw new InvalidOperationException("scoped inventory overflow – no truncated proof");
                 _scopeState.Observe(positions, pending);
-                var scoped = _scopeState.Capture(_baseline, LabelPrefix, _transportGeneration);
+                var scoped = _scopeState.Capture(_baseline, LabelPrefix, _transportGeneration, captureStarted);
                 if (epoch != scoped.BrokerEpoch || scoped.BrokerConnected != true || !SafeAccount || !Server.IsConnected) throw new InvalidOperationException("broker epoch changed during capture");
-                var recovered = request.RecoverOperations.Select(id => _journal?.Lookup(id)).Where(r => r != null).Cast<ResultMsg>().ToList();
+                var recovered = request.RecoverOperations.Select(id =>
+                {
+                    var result = _journal?.Lookup(id); var original = _journal?.LookupOpeningRequest(id);
+                    if (result != null && result.OpeningFill == null && original != null)
+                    {
+                        var symbol = Symbols.GetSymbol(original.Symbol);
+                        if (symbol != null) result = CTraderScopeEvidence.RecoverOpening(result, original, openings, symbol.VolumeInUnitsStep);
+                    }
+                    return result;
+                }).Where(r => r != null).Cast<ResultMsg>().ToList();
                 int pages = Math.Max(1, (rows.Count + 249) / 250);
                 for (int page = 0; page < pages; page++) Send(new HistoryPage
                 {

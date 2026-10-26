@@ -124,6 +124,15 @@ namespace Apex.Platforms.CTrader
 
         // Read-only positive lookup; absence is NOT a rejection and never authorizes resend.
         internal ResultMsg? Lookup(string id) => _entries.TryGetValue(id, out var entry) ? Copy(entry.Result, id) : null;
+        internal OrderRequest? LookupOpeningRequest(string id)
+        {
+            if (!_entries.TryGetValue(id, out var entry) || BridgeProtocol.ReadType(entry.Fingerprint) != "open") return null;
+            var c = BridgeProtocol.Deserialize<OpenCmd>(entry.Fingerprint);
+            var direction = BridgeProtocol.ParseSide(c?.Side);
+            return c == null || direction == null ? null : new OrderRequest { ExecutionId = id, SignalId = c.SignalId ?? "", Symbol = c.Symbol,
+                Direction = direction.Value, VolumeUnits = c.Units, StopLossPips = c.SlPips, TakeProfitPips = c.TpPips, Label = c.Label,
+                Comment = c.Comment, MaxSlippagePips = c.MaxSlipPips };
+        }
         private void Save() => _persist(JsonSerializer.Serialize(_entries, BridgeProtocol.Json));
         private static ResultMsg Copy(ResultMsg r, string id) => new() { Id = id, Status = r.Status, PositionId = r.PositionId, Price = r.Price, OpeningFill = r.OpeningFill, Error = r.Error, Message = r.Message };
         private static ResultMsg Uncertain(string id, string message) => new() { Id = id, Status = "uncertain", Error = "TechnicalError", Message = message };

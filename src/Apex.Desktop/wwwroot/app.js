@@ -133,6 +133,7 @@ function canOpenTrades(acc) {
 async function command(action, args, confirm) {
   const acc = currentAccount();
   if (!acc) { toast('Brak wybranego konta.'); return; }
+  if (action === 'start' && acc.scope?.strategyStartBlocked) { toast('START strategii zablokowany do trwałego PASS Task2. ScopedReady dopuszcza tylko osobno zatwierdzony test DEMO.'); return; }
   const opens = action === 'start' || action === 'executionTest';
   if (opens && !canOpenTrades(acc)) { toast('Handel wymaga połączonego, zweryfikowanego konta DEMO i aktualnego panelu.'); return; }
   if (confirm) {
@@ -140,7 +141,7 @@ async function command(action, args, confirm) {
     if (!ok) return;
   }
   // Podczas otwartego potwierdzenia mogło zmienić się konto, połączenie lub typ rachunku.
-  if (opens && (currentAccount()?.key !== acc.key || !canOpenTrades(currentAccount()))) {
+  if ((opens || action === 'setupScope') && (currentAccount()?.key !== acc.key || !canOpenTrades(currentAccount()))) {
     toast('Stan konta zmienił się podczas potwierdzania. Sprawdź konto i spróbuj ponownie.'); return;
   }
   try {
@@ -289,10 +290,12 @@ function viewDashboard() {
   const e = acc.engine;
   const wrap = el('div', { class: 'stack' });
   if (!e) {
+    if (acc.scope) wrap.appendChild(scopePanel(acc));
     wrap.appendChild(card('Przygotowanie konta', null, el('p', { class: 'muted', text: acc.buildError ? 'Błąd: ' + acc.buildError : 'Most połączony – trwa pobieranie listy instrumentów i historii notowań…' })));
     return wrap;
   }
   const ccy = e.currency;
+  if (acc.scope) wrap.appendChild(scopePanel(acc));
   if (!e.guardAllowed) {
     wrap.appendChild(el('div', { class: 'callout critical' }, icon('shield'), el('div', null, el('strong', { text: 'Handel zablokowany przez strażnika konta. ' }), e.guardMessage)));
   }
@@ -308,7 +311,7 @@ function viewDashboard() {
       el('span', { class: 'badge ' + (e.dailyPnl >= 0 ? 'good' : 'critical') }, el('span', { class: 'dot' }), 'Dziś ' + signed(e.dailyPnl) + ' ' + ccy + ' (' + signed(e.dailyPnlPct) + '%)'),
       el('span', { class: 'muted', text: 'Saldo ' + money(e.balance, ccy) })),
     el('div', { class: 'controls' },
-      el('button', { class: 'btn primary', onclick: () => command('start', null, { title: 'Uruchomić automatyczny handel DEMO?', body: 'APEX będzie samodzielnie otwierał i zamykał transakcje DEMO na koncie ' + e.accountNumber + '. Najpierw zakończ test wykonania i sprawdź SL/TP oraz limity ryzyka. Po restarcie ponownie wymagany jest START.', button: 'Uruchom handel DEMO' }), disabled: e.mode === 'Running' || !canOpenTrades(acc) }, icon('play'), 'START'),
+      el('button', { class: 'btn primary', onclick: () => command('start', null, { title: 'Uruchomić automatyczny handel DEMO?', body: 'APEX będzie samodzielnie otwierał i zamykał transakcje DEMO na koncie ' + e.accountNumber + '. Najpierw zakończ test wykonania i sprawdź SL/TP oraz limity ryzyka. Po restarcie ponownie wymagany jest START.', button: 'Uruchom handel DEMO' }), disabled: e.mode === 'Running' || !canOpenTrades(acc) || acc.scope?.strategyStartBlocked }, icon('play'), 'START'),
       el('button', { class: 'btn', onclick: () => command('pause'), disabled: e.mode !== 'Running' }, icon('pause'), 'Wstrzymaj nowe'),
       el('button', { class: 'btn', onclick: () => command('stop', null, { title: 'Zatrzymać bota?', body: 'Bot przestanie otwierać i zarządzać pozycjami. Otwarte pozycje pozostaną chronione przez SL/TP u brokera.', button: 'Zatrzymaj' }) }, icon('stop'), 'STOP'),
       el('button', { class: 'btn danger', onclick: () => command('closeAll', null, { title: 'Zamknąć pozycje bota?', body: 'Zostaną zamknięte WSZYSTKIE pozycje otwarte przez APEX na tym koncie. Pozycje ręczne i innych botów nie są dotykane.', button: 'Zamknij pozycje bota', danger: true }) }, icon('x'), 'Zamknij pozycje bota'),
@@ -460,7 +463,7 @@ function brokerPositions(acc) {
     el('td', { class: 'num ' + (p.sl == null ? 'neg' : ''), text: price(p.sl) }),
     el('td', { class: 'num ' + (p.tp == null ? 'neg' : ''), text: price(p.tp) }),
     el('td', { class: 'num ' + cls(p.net), text: money(p.net, acc.engine?.currency || acc.account?.currency) }),
-    el('td', { text: p.label === S.host.label ? 'APEX' : 'Pozycja obca: ' + (p.label || 'ręczna') })));
+    el('td', { text: p.label === (acc.scope?.label || S.host.label) ? 'APEX' : 'Pozycja obca: ' + (p.label || 'ręczna') })));
   return el('div', null,
     el('div', { class: 'table-wrap' }, el('table', null,
       el('thead', null, el('tr', null, ...['ID u brokera', 'Instrument', 'Kierunek', 'Wolumen (units)', 'Wejście', 'Bieżąca cena', 'Stop Loss', 'Take Profit', 'Wynik netto', 'Pochodzenie'].map(text => el('th', { text })))),
@@ -670,6 +673,7 @@ function viewConnections() {
     el('tbody', null, rows))) : el('div', { class: 'empty', text: 'Brak połączonych platform.' })));
 
   const acc = currentAccount();
+  if (acc?.scope) wrap.appendChild(scopePanel(acc));
   if (acc && /mt5|metatrader/i.test(acc.platform)) {
     const kind = el('select', { 'aria-label': 'Typ prowizji', onchange: () => { S.dirty.connections = true; } }, el('option', { value: 'UsdPerLot' }, 'USD za lot za stronę'), el('option', { value: 'None' }, 'Brak (konto Standard – koszt w spreadzie)'));
     const val = el('input', { type: 'number', min: '0', max: '100', step: '0.1', value: acc.commission ? String(acc.commission.value) : '3.5', 'aria-label': 'Wartość prowizji', oninput: () => { S.dirty.connections = true; } });
@@ -686,6 +690,22 @@ function viewConnections() {
 
 /* ------------------------------------------------------------------ Diagnostyka */
 
+function scopePanel(acc) {
+  const s = acc.scope || {};
+  const proposed = s.baselineId && s.baselineId !== '00000000-0000-0000-0000-000000000000';
+  return card('Zakres odzyskiwania aplikacji', s.status || 'Unestablished',
+    el('p', { class: 'note', text: s.policy || 'Dedykowane konto DEMO hedged, wyłączny pisarz; obce pozycje i zlecenia blokują nowe ryzyko, nigdy nie są automatycznie zamykane.' }),
+    copyField(s.label || '', 'Dokładna etykieta cBota (kopiuj bez zmian)'),
+    el('p', { class: 'muted', text: 'ID zakresu: ' + (s.baselineId || 'brak') + ' · początek epoki: ' + (s.startUtc || 'jeszcze nie ustanowiona') }),
+    el('p', { text: 'Broker CoverageUnknown – NIE certyfikujemy pełnej historii brokera. ' + (s.eligibleTechnicalTest ? 'ScopedReady: można osobno zatwierdzić test techniczny DEMO.' : 'AwaitingEvidence/Conflict: nowe ryzyko zablokowane.') }),
+    el('p', { class: 'note', text: 'START strategii zablokowany: wymagany trwały PASS Task2. Wynik obecnej procedury testowej nie jest tym PASS.' }),
+    el('p', { class: 'muted', text: 'Epoka brokera: ' + (s.brokerEpoch || 'brak') + ' · łączność: ' + (s.brokerConnected ? 'aktywna' : 'niepotwierdzona') }),
+    el('p', { text: s.message || '' }), feed(s.pendingDeficits || [], true),
+    el('p', { text: s.nextAction || '' }),
+    proposed ? el('p', { class: 'note', text: 'W cTrader zatrzymaj ApexBridge, wklej tę etykietę do parametru „Dokładna etykieta pozycji APEX” i uruchom lokalnie ponownie. Nie uruchamiaj równocześnie Native/innego pisarza. Setup i parowanie NIE otwierają transakcji.' })
+      : el('button', { class: 'btn', disabled: !canOpenTrades(acc), onclick: () => command('setupScope', { confirmDedicatedDemo: true }, { title: 'Przygotować nowy zakres read-only?', body: 'Potwierdzasz dedykowane konto DEMO hedged i wyłącznego pisarza. Wymagane ZERO wszystkich pozycji i zleceń oczekujących oraz brak starych nierozliczonych stanów/config/dzienników. Nie kasuj starych danych ani rezerwacji. Ta czynność tylko rezerwuje etykietę/ID i nie uruchamia testu ani transakcji.', button: 'Przygotuj bez transakcji' }) }, 'Przygotuj zakres DEMO (read-only)'));
+}
+
 function viewDiagnostics() {
   const acc = currentAccount();
   const wrap = el('div', { class: 'stack' });
@@ -693,7 +713,7 @@ function viewDiagnostics() {
     const isLive = acc.engine.isLive;
     const test = el('div', { class: 'stack', style: 'gap:10px' },
       el('p', { class: 'muted', style: 'margin:0', text: 'Test otwiera pozycję o minimalnym wolumenie z SL i TP, po ok. 20 s przesuwa SL, a następnie zamyka pozycję. Każdy krok jest weryfikowany na podstawie faktycznego stanu u brokera.' }),
-      el('div', { class: 'controls' }, el('button', { class: 'btn primary', disabled: !canOpenTrades(acc), onclick: () => command('executionTest', { symbol: acc.testSymbol }, { title: 'Uruchomić test wykonania na DEMO?', body: 'Zatwierdzasz otwarcie rzeczywistej transakcji DEMO na koncie ' + acc.engine.accountNumber + ', na ' + (acc.testSymbol || 'instrumencie spełniającym limity ryzyka') + ', z SL i TP i próbą zamknięcia po ok. minucie. Przez cały test obserwuj pozycję w cTrader.', button: 'Zatwierdzam transakcję DEMO' }) }, icon('test'), 'Test wykonania (DEMO)'),
+      el('div', { class: 'controls' }, el('button', { class: 'btn primary', disabled: !canOpenTrades(acc) || (acc.scope && !acc.scope.eligibleTechnicalTest), onclick: () => command('executionTest', { symbol: acc.testSymbol, confirmDemoTrade: true }, { title: 'Uruchomić test wykonania na DEMO?', body: 'Zatwierdzasz otwarcie rzeczywistej transakcji DEMO na koncie ' + acc.engine.accountNumber + ', na ' + (acc.testSymbol || 'instrumencie spełniającym limity ryzyka') + ', z SL i TP i próbą zamknięcia po ok. minucie. Przez cały test obserwuj pozycję w cTrader.', button: 'Zatwierdzam transakcję DEMO' }) }, icon('test'), 'Test wykonania (DEMO)'),
         isLive ? el('span', { class: 'muted', text: 'Niedostępny na koncie LIVE.' }) : null),
       feed(acc.executionTest, false));
     wrap.appendChild(card('Test otwarcia, zarządzania i zamknięcia pozycji', 'tylko DEMO', test));

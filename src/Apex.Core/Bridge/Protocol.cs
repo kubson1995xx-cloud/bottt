@@ -250,8 +250,8 @@ namespace Apex.Core.Bridge
         public const string Capability = "scoped-recovery-v1";
         public Guid BaselineId { get; init; }
         public string Label { get; init; } = "";
-        public string ExecutionPath { get; init; } = "desktop-bridge";
-        public string SafetyVersion { get; init; } = "scoped-demo-v1";
+        public string ExecutionPath { get; init; } = "";
+        public string SafetyVersion { get; init; } = "";
         public string TransportGeneration { get; init; } = "";
         public string BrokerEpoch { get; init; } = "";
         public bool? BrokerConnected { get; init; }

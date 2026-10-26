@@ -31,6 +31,30 @@ public sealed class ScopedRecoveryTests
         f.Tick = TimeSpan.FromSeconds(31); f.Engine.OnTimer(Now.AddSeconds(31)); Assert.False(f.Engine.HistoryReady);
     }
 
+    [Fact]
+    public void PendingVisibleOpeningWaitsForReadOnlyWitnessInsteadOfAdoptingRemainingOrLatchingCollision()
+    {
+        var f = new Fixture(); f.Establish(); OrderRequest? sent = null;
+        f.Broker.OnOpen = r => { sent = r; return OrderOutcome.Uncertain(BrokerErrorKind.Timeout, "missing result"); };
+        Assert.Equal(OrderStatus.Uncertain, f.Engine.SendAdmittedOpen(f.Request, new Apex.Core.Management.TradePlan { Strategy = StrategyId.ExecutionTest, RiskAmount = 10 }, Now).Status);
+        f.Broker.Positions.Add(f.Position(1));
+        Assert.False(f.Engine.ReconcileScoped(f.Receipt(f.Position(1)), f.Authority, Now));
+        f.Engine.OnTimer(Now);
+        Assert.NotEqual(ScopedRecoveryStatus.Conflict, f.Engine.ScopedStatus); Assert.Empty(f.Engine.Plans);
+        Assert.True(f.Engine.RecoverOpeningOutcome(sent!.ExecutionId, OrderOutcome.Filled(42, 4000, f.Fill(sent)), Now));
+        Assert.False(f.Engine.ReconcileScoped(f.Receipt(f.Position(1)), f.Authority, Now)); // missing earlier partial
+        f.Broker.ClosedDeals.Add(f.Deal(1, 1)); Assert.True(f.Engine.ReconcileScoped(f.Receipt(f.Position(1)), f.Authority, Now));
+        Assert.Equal(2, f.State.OpenAdmissions[0].Fill!.InitialVolumeUnits); Assert.Single(f.Broker.Orders);
+    }
+
+    [Fact]
+    public void RegularScopedTimerSavePreservesUsablePermitToOriginalDeadline()
+    {
+        var f = new Fixture(); f.Establish(); f.Tick = TimeSpan.FromSeconds(6);
+        f.Engine.OnTimer(Now.AddSeconds(6)); Assert.NotNull(f.Engine.GetScopedPermit(f.Authority, Now.AddSeconds(6)));
+        f.Tick = TimeSpan.FromSeconds(30); f.Engine.OnTimer(Now.AddSeconds(30)); Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now.AddSeconds(30)));
+    }
+
     static readonly DateTime Now = RecoveryTests.Now;
     static readonly JsonSerializerOptions Json = new() { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
     sealed class Broker : FakeBroker
@@ -350,6 +374,7 @@ public sealed class ScopedRecoveryTests
         var f = new Fixture(); f.Establish(); f.Send();
         Assert.False(f.Engine.ReconcileScoped(f.Receipt(f.Position(1)), f.Authority, Now));
         Assert.Equal(ScopedRecoveryStatus.AwaitingEvidence, f.Engine.ScopedStatus); Assert.Null(f.Engine.GetScopedPermit(f.Authority, Now));
+        Assert.Contains("C+O", f.Engine.ScopedMessage);
         f.Broker.ClosedDeals.Add(f.Deal(1, 1)); Assert.True(f.Engine.ReconcileScoped(f.Receipt(f.Position(1)), f.Authority, Now));
     }
     [Theory]

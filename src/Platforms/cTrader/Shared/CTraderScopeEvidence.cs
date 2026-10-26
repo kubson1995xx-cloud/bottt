@@ -9,6 +9,22 @@ namespace Apex.Platforms.CTrader;
 
 public static class CTraderScopeEvidence
 {
+    public static ResultMsg RecoverOpening(ResultMsg result, OrderRequest request, IReadOnlyList<OpeningDealEvidence> observations, double step)
+    {
+        if (result.OpeningFill != null || result.Status == "rejected" || result.Id != request.ExecutionId) return result;
+        var candidates = observations.Where(d => d.Symbol == request.Symbol && d.Direction == request.Direction && d.Label == request.Label && d.Comment == request.Comment).ToArray();
+        if (candidates.Length != 1 || result.PositionId.HasValue && result.PositionId != candidates[0].PositionId) return result;
+        var d = candidates[0];
+        // No request/remaining substitution. Core separately validates actual quantum, complete
+        // immutable request and every observed graph member against its precommitted manifest.
+        var evidence = new OpeningRequestEvidence { ExecutionId = request.ExecutionId, SignalId = request.SignalId, Symbol = request.Symbol,
+            Direction = request.Direction, VolumeUnits = request.VolumeUnits, StopLossPips = request.StopLossPips, TakeProfitPips = request.TakeProfitPips,
+            Label = request.Label, Comment = request.Comment, MaxSlippagePips = request.MaxSlippagePips };
+        return new ResultMsg { Id = result.Id, Status = "uncertain", PositionId = d.PositionId, Price = d.Price,
+            OpeningFill = new OpeningFillEvidence(evidence, d.PositionId, d.VolumeUnits, step, d.Price, d.TimeUtc, candidates),
+            Message = "read-only correlated SDK opening graph; not resent", Error = result.Error };
+    }
+
     // SDK main thread only. Empty/unavailable graphs do NOT assert completeness. Every opening
     // reference actually supplied by either current positions or closing relationships is retained.
     public static IReadOnlyList<OpeningDealEvidence> CaptureOpenings(IEnumerable<Position> positions, IEnumerable<HistoricalTrade> history, string label)

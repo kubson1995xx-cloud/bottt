@@ -23,6 +23,18 @@ public sealed partial class BridgeSession
     private string _requestBrokerEpoch = "";
     private ScopeFrame? _liveScope;
     private List<PendingOrderDto> _pendingOrders = new();
+    private DateTime _pendingReceivedUtc;
+    internal bool ProtocolFault { get; private set; }
+    private void FaultProtocol()
+    { lock (_lock) { _historyFailed = true; _history = new(); _acceptedScope = null; if (ScopedCapable) ProtocolFault = true; } }
+    internal bool SourceInventoryReady
+    {
+        get { lock (_lock) return HasFreshSnapshots && !ProtocolFault && BrokerConnected && DateTime.UtcNow - _pendingReceivedUtc < TimeSpan.FromSeconds(30)
+            && _pendingReceivedTick is { } pt && MonotonicNow() - pt < TimeSpan.FromSeconds(30)
+            && _liveScope is { } f && f.BrokerEpoch == BrokerEpoch && f.BrokerConnected == true && f.Label == PeerLabel
+            && f.TransportGeneration == Id && f.BaselineId == _baselineId && f.ExecutionPath == "desktop-bridge"
+            && f.SafetyVersion == ScopedRecoveryPolicy.SafetyVersion && f.PositionRevision is >= 0 && f.PendingOrderRevision is >= 0; }
+    }
     private ScopedSnapshot? _acceptedScope;
     internal event Action<BridgeSession, ScopedSnapshot>? ScopedCompleted;
     internal event Action<BridgeSession>? BrokerChanged;
@@ -82,9 +94,11 @@ public sealed partial class BridgeSession
         lock (_lock)
         {
             var a = _acceptedScope;
-            return a != null && HasFreshSnapshots && !_historyFailed && ValidScope(a.Source)
+            return a != null && SourceInventoryReady && !_historyFailed && ValidScope(a.Source)
+                && DeploymentInventory != null && DeploymentInventory.All(x => x.Healthy && !x.Missing && (x.Label == receipt.Identity.Label || x.Entries == 0))
                 && receipt.Identity == a.Receipt.Identity && receipt.BaselineId == a.Receipt.BaselineId
                 && receipt.RequestId == a.Receipt.RequestId && receipt.ReceiptId == a.Receipt.ReceiptId
+                && receipt.CapturedUtc == a.Receipt.CapturedUtc && receipt.ReceivedUtc == a.Receipt.ReceivedUtc
                 && receipt.TransportGeneration == Id && receipt.BrokerGeneration == BrokerEpoch
                 && receipt.PositionRevision == _positionsRevision && receipt.PendingOrderRevision == _pendingRevision
                 && a.Source.PositionRevision == _liveScope?.PositionRevision && a.Source.PendingOrderRevision == _liveScope?.PendingOrderRevision

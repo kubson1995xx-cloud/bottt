@@ -105,7 +105,10 @@ namespace Apex.Desktop.Runtime
                 }
                 if (!_runtimes.TryGetValue(key, out var runtime))
                 {
-                    runtime = new AccountRuntime(key, platform, _config, _news, _log);
+                    runtime = new AccountRuntime(key, platform, _config, _news, _log, s.ScopedCapable ? new RecoveryIdentity
+                    { Platform = platform, Broker = hello.Account.Broker, AccountNumber = hello.Account.Number, Currency = hello.Account.Currency,
+                        IsLive = hello.Account.IsLive, IsHedging = hello.Account.Hedging, Label = _config.Config.Label,
+                        ExecutionPath = RecoveryExecutionPath.DesktopBridge, SafetyVersion = ScopedRecoveryPolicy.SafetyVersion } : null);
                     _runtimes[key] = runtime;
                 }
                 var current = runtime.Adapter.Session;

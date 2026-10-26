@@ -112,6 +112,7 @@ public sealed partial class FixRound1Tests
         var e = SessionEngine(s); Assert.Equal(Apex.Core.Model.EngineMode.Running, e.Mode);
         string old = s.HistoryRequestId;
         typeof(BridgeSession).GetField("_historyStarted", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(s, DateTime.UtcNow.AddSeconds(-11));
+        typeof(BridgeSession).GetField("_historyRequestTick", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(s, BridgeSession.MonotonicNow() - TimeSpan.FromSeconds(11));
         s.EnsureHistory("APEX"); Assert.NotEqual(old, s.HistoryRequestId);
         e.OnTimer(DateTime.UtcNow);
         Assert.Equal(Apex.Core.Model.EngineMode.Running, e.Mode);

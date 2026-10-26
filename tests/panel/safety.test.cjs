@@ -119,6 +119,35 @@ test('positions panel exposes broker IDs, SL and TP and distinguishes foreign po
   assert.match(view.textContent, /pozycje obce|InnyBot/i);
 });
 
+test('scope panel separates app readiness from broker coverage and copies exact generated label', () => {
+  const p = panel();
+  selectAccount(p, `S.host.pairingKey='key'; S.host.wsUrl='ws://127.0.0.1:5077/bridge'; S.host.tcpPort=5078;
+    S.data.data.accounts[0].scope={label:'A0123456789ABCDEF01',baselineId:'scope-id',status:'ScopedReady',eligibleTechnicalTest:true,strategyStartBlocked:true,brokerCoverageUnknown:true,pendingDeficits:['#42 C+O deficit'],nextAction:'Osobno zatwierdź test DEMO',policy:'Dedykowane DEMO hedged',brokerEpoch:'startup:3'};`);
+  const view = p.run('viewConnections()');
+  assert.match(view.textContent, /A0123456789ABCDEF01/);
+  assert.match(view.textContent, /CoverageUnknown/);
+  assert.match(view.textContent, /ScopedReady/);
+  assert.match(view.textContent, /scope-id/);
+  assert.match(view.textContent, /Task2.*PASS|PASS.*Task2/);
+});
+
+test('scope readiness and generic history cannot enable strategy START before Task2 PASS', async () => {
+  const p = panel(); await new Promise(setImmediate);
+  selectAccount(p, `S.data.data.accounts[0].engine.historyReady=true; S.data.data.accounts[0].scope={eligibleTechnicalTest:true,strategyStartBlocked:true};`);
+  const start = [...p.run('viewDashboard()').querySelectorAll('button')].find(b => b.textContent === 'START');
+  assert.ok(start.hasAttribute('disabled'));
+  const before = p.calls.length; await p.run(`command('start')`); assert.equal(p.calls.length, before);
+});
+
+test('technical test confirmation sends explicit DEMO approval but scope setup never starts it', async () => {
+  const p = panel(); await new Promise(setImmediate);
+  selectAccount(p, `S.data.data.accounts[0].scope={eligibleTechnicalTest:true,strategyStartBlocked:true}; confirmModal=async()=>true;`);
+  const execution = [...p.run('viewDiagnostics()').querySelectorAll('button')].find(b => b.textContent.includes('Test wykonania'));
+  execution.click(); await new Promise(setImmediate);
+  const command = p.calls.find(c => c.opts?.body && JSON.parse(c.opts.body).action === 'executionTest');
+  assert.ok(command); assert.equal(JSON.parse(command.opts.body).args.confirmDemoTrade, true);
+});
+
 test('shipped interface has no AI Lab or automatic update controls', () => {
   for (const file of ['index.html', 'app.js', 'decision-center.js']) {
     const text = fs.readFileSync(path.join(www, file), 'utf8');

@@ -499,6 +499,9 @@ namespace Apex.Core.Engine
                     SetMode(EngineMode.PausedNewEntries, "powtarzające się błędy wewnętrzne");
             }
             SaveState(utc);
+            // The timer's ordinary risk-state save changes durable revision. Reconcile the
+            // still-current frozen receipt before publishing status, never extend its deadline.
+            if (_state.Baseline != null) SynchronizeHistory(utc);
         }
 
         private void Cycle(DateTime utc)
@@ -1617,6 +1620,7 @@ namespace Apex.Core.Engine
         {
             var t = _test;
             if (t == null) return;
+            if (_state.Baseline != null && _state.OpenAdmissions.Any(a => a.Request.SignalId == t.SignalId && a.Fill == null && a.Stage == AdmissionStage.OutcomeUnknown)) return;
             var own = OwnPositions();
             var pos = own.FirstOrDefault(p => ExecutionLedger.TryParseComment(p.Comment, out var sidStrat, out var sid) && sidStrat == StrategyId.ExecutionTest && sid == t.SignalId);
             void Finish(string verdict)

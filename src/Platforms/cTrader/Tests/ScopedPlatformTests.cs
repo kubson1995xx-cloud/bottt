@@ -25,6 +25,33 @@ public sealed class ScopedPlatformTests
         Assert.DoesNotContain(values.Values, v => v.Contains("fresh")); // no rotation registration after loss
     }
 
+    [Fact]
+    public void UncertainJournalCanRecoverActualOpeningGraphReadOnlyWithoutResend()
+    {
+        var journal = new Apex.Platforms.CTrader.CommandJournal(null, _ => { });
+        var cmd = new OpenCmd { Id = "op", SignalId = "signal", Symbol = "US500", Units = 2, SlPips = 10, TpPips = 20, Label = "fresh-scope", Comment = "signal" };
+        journal.Run(cmd.Id, BridgeProtocol.Serialize(cmd), "signal", () => new ResultMsg { Id = cmd.Id, Status = "uncertain" });
+        var lookup = journal.GetType().GetMethod("LookupOpeningRequest", BindingFlags.NonPublic | BindingFlags.Instance); Assert.NotNull(lookup);
+        var request = (Apex.Core.Model.OrderRequest)lookup!.Invoke(journal, new object[] { cmd.Id })!;
+        var fill = BridgeProtocol.Deserialize<ResultMsg>(OpeningEvidenceTests.Wire)!.OpeningFill!;
+        var method = typeof(Apex.Platforms.CTrader.CTraderScopeEvidence).GetMethod("RecoverOpening"); Assert.NotNull(method);
+        var result = (ResultMsg)method!.Invoke(null, new object[] { journal.Lookup(cmd.Id)!, request, fill.OpeningDeals, 0.1 })!;
+        Assert.NotNull(result.OpeningFill); Assert.Equal("op", result.OpeningFill!.Request.ExecutionId);
+        Assert.Equal(1, result.OpeningFill.InitialVolumeUnits); Assert.Equal(2, result.OpeningFill.Request.VolumeUnits);
+        Assert.Equal("uncertain", result.Status); Assert.Equal(1, journal.Count);
+    }
+
+    [Fact]
+    public void CaptureCannotRenewFreshnessAfterLongMainThreadFreeze()
+    {
+        dynamic s = State(); s.BrokerEvent(true); s.Observe(Array.Empty<PositionDto>(), Array.Empty<PendingOrderDto>());
+        var method = ((object)s).GetType().GetMethods().Single(m => m.Name == "Capture");
+        Assert.True(method.GetParameters().Length == 4, "capture must retain its start monotonic tick");
+        long before = System.Diagnostics.Stopwatch.GetTimestamp() - 31 * System.Diagnostics.Stopwatch.Frequency;
+        ScopeFrame capture = (ScopeFrame)method.Invoke(s, new object[] { Guid.NewGuid(), "fresh", "transport", before })!;
+        Assert.False((bool)s.CanOpen(capture));
+    }
+
     static dynamic State()
     {
         var type = typeof(ScopedPlatformTests).Assembly.GetType("Apex.Platforms.CTrader.ScopedPlatformState");

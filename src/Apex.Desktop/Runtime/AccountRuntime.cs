@@ -53,7 +53,7 @@ namespace Apex.Desktop.Runtime
         private string _lastBuildError = "";
         private readonly DecisionRecorder _decisions = new(800);
 
-        public AccountRuntime(string key, string platform, ConfigStore config, NewsCalendar news, AppLog log)
+        public AccountRuntime(string key, string platform, ConfigStore config, NewsCalendar news, AppLog log, RecoveryIdentity? bootstrapIdentity = null)
         {
             Key = key;
             Platform = platform;
@@ -65,7 +65,10 @@ namespace Apex.Desktop.Runtime
             _priorAccountConfiguration = config.Config.Accounts.Count != 0;
             var safe = new string(key.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
             _dir = Path.Combine(config.DataDir, "konta", safe);
+            bool existed = Directory.Exists(_dir);
             Directory.CreateDirectory(_dir);
+            _bootstrapIdentity = bootstrapIdentity;
+            _bootstrapProvenance = InitializeBootstrap(bootstrapIdentity, existed);
             _journal = new FileJournal(Path.Combine(_dir, "dziennik"));
             _store = new FileStore(Path.Combine(_dir, "stan"));
             _adapter = new SessionAdapter(Commission, () => !_stop && _sessionReady && !_storageFault && !_store.HasFault && !_emergencyLatched, config.TrustedSyntheticComposition);
@@ -116,7 +119,7 @@ namespace Apex.Desktop.Runtime
             {
                 if (!ReferenceEquals(_adapter.Session, s)) return;
                 if (_engine == null) TryBuildEngine();
-                else { _engine.CmdStop(); _engine.SaveState(DateTime.UtcNow, true); Subscribe(); }
+                else { _engine.InvalidateScopedRuntime("zastąpienie połączenia transportowego"); _engine.CmdStop(); _engine.SaveState(DateTime.UtcNow, true); Subscribe(); }
                 _sessionReady = true;
                 ConfigureOwner();
             });
@@ -125,6 +128,7 @@ namespace Apex.Desktop.Runtime
         public void Detach(BridgeSession s)
         {
             _adapter.Detach(s);
+            Enqueue(() => { if (_adapter.Session == null) _engine?.InvalidateScopedRuntime("rozłączenie transportu"); });
             lock (_lifecycle) { if (!_stop) _wake.Set(); }
         }
 
@@ -486,7 +490,8 @@ namespace Apex.Desktop.Runtime
                 var json = _store.Get(key);
                 if (json == null)
                 {
-                    if (Settings.ScopeReservation != null) throw new InvalidDataException("Brak trwałego stanu zarezerwowanego zakresu – bez odtwarzania pustego stanu.");
+                    if (Settings.ScopeReservation != null || _priorScopeInventory.Contains(Path.Combine(_dir, "scope-bootstrap.json")))
+                        throw new InvalidDataException("Brak trwałego stanu zarezerwowanego/rozpoczętego zakresu – bez odtwarzania pustego stanu.");
                     return;
                 }
                 var state = JsonSerializer.Deserialize<EngineState>(json, ConfigStore.Json);
@@ -573,6 +578,7 @@ namespace Apex.Desktop.Runtime
                     UpdateRecoveryOperations();
                     if (_engine != null)
                     {
+                        if (_adapter.Session?.ProtocolFault == true) _engine.InvalidateScopedRuntime("błąd protokołu – połącz most ponownie");
                         _engine.SetGuard(EvaluateGuard());
                         _engine.OnTimer(now);
                         SampleEquity(now);

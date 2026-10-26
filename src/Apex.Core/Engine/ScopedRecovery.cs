@@ -23,7 +23,21 @@ public sealed partial class TradingEngine
     internal IReadOnlyList<OpenAdmission> ScopedAdmissions => _state.OpenAdmissions.AsReadOnly();
     internal long LastScopedObservationSequence => _state.OpenAdmissions.Select(x => x.LastObservationSequence).DefaultIfEmpty(-1).Max();
     public ScopedRecoveryStatus ScopedStatus { get; private set; }
+    public IReadOnlyList<string> ScopedDeficits { get; private set; } = Array.Empty<string>();
     public string ScopedMessage { get; private set; } = "Unestablished: runtime producer not integrated";
+    internal void InvalidateScopedRuntime(string reason)
+    {
+        _scopedPermit = null; _lastScopedReceipt = null; HistoryReady = false;
+        if (_state.Baseline == null) return;
+        if (_test != null)
+        {
+            _test.Log.Add("TEST PRZERWANY – " + reason + "; brak automatycznego wznowienia/PASS");
+            LastExecutionTest = _test.Log.ToArray(); _test = null;
+        }
+        if (ScopedStatus != ScopedRecoveryStatus.Conflict) ScopedStatus = ScopedRecoveryStatus.AwaitingEvidence;
+        ScopedMessage = reason + "; wymagane świeże uzgodnienie i jawne nowe polecenie";
+        CmdStop();
+    }
 
     internal static RecoveryBaseline CreateBaselineProposal(RecoveryIdentity identity)
     {
@@ -273,6 +287,10 @@ public sealed partial class TradingEngine
         catch (Exception ex) { return LatchScopeConflict(ex.Message, utc); }
     }
 
+    private bool PendingOpeningCandidate(string symbol, TradeDirection direction, string label, string comment) =>
+        _state.OpenAdmissions.Any(a => a.Stage == AdmissionStage.OutcomeUnknown && a.Fill == null && a.Request.Symbol == symbol
+            && a.Request.Direction == direction && a.Request.Label == label && a.Request.Comment == comment);
+
     private List<PositionInfo> ScopedManagedPositions(List<PositionInfo> positions, DateTime utc)
     {
         if (_state.Baseline == null) return positions;
@@ -283,6 +301,8 @@ public sealed partial class TradingEngine
             if (a?.Fill is { } f && p.Label == a.Request.Label && p.Symbol == a.Request.Symbol && p.Direction == a.Request.Direction
                 && p.Comment == a.Request.Comment && p.EntryPrice == f.EntryPrice && p.EntryTimeUtc == f.EntryTimeUtc && a.Stage == AdmissionStage.Bound)
                 managed.Add(p);
+            else if (PendingOpeningCandidate(p.Symbol, p.Direction, p.Label, p.Comment))
+            { ScopedStatus = ScopedRecoveryStatus.AwaitingEvidence; ScopedMessage = "UnknownOriginalVolume: oczekiwanie na oryginalny witness/journal; bez adopcji pozostałego wolumenu"; HistoryReady = false; }
             else if (_state.ScopeConflict.Length == 0) LatchScopeConflict("LabelCollision/entry mutation: automatic management quarantined", utc);
         }
         return managed;
@@ -309,6 +329,8 @@ public sealed partial class TradingEngine
             var next = ScopeCandidate();
             bool balanced = !next.Ledger.Any(e => e.State == SignalState.PendingVerification
                 && next.OpenAdmissions.All(a => a.Request.SignalId != e.SignalId || a.Stage == AdmissionStage.OutcomeUnknown));
+            var deficits = new List<string>();
+            if (!balanced) deficits.Add("Niepewna rezerwacja sygnału – wymagane pozytywne potwierdzenie, brak ponawiania open");
             var bound = next.OpenAdmissions.Where(x => x.Fill != null).ToDictionary(x => x.Fill!.PositionId);
             if (next.Plans.Any(p => !bound.ContainsKey(p.PositionId)) || next.ClosingDeals.Any(d => !bound.ContainsKey(d.PositionId))
                 || next.AccountedPositions.Any(id => !bound.ContainsKey(id))) throw new InvalidOperationException("unmanifested legacy accounting/plan obligation");
@@ -316,7 +338,11 @@ public sealed partial class TradingEngine
             if (receipt.Positions!.GroupBy(x => x.Id).Any(x => x.Count() != 1)) throw new InvalidOperationException("duplicate position identity");
             foreach (var p in receipt.Positions!)
             {
-                if (!bound.TryGetValue(p.Id, out var a)) throw new InvalidOperationException("unknown/foreign position or label collision");
+                if (!bound.TryGetValue(p.Id, out var a))
+                {
+                    if (PendingOpeningCandidate(p.Symbol, p.Direction, p.Label, p.Comment)) { balanced = false; continue; }
+                    throw new InvalidOperationException("unknown/foreign position or label collision");
+                }
                 var f = a.Fill!;
                 if (p.Label != a.Request.Label || p.Symbol != a.Request.Symbol || p.Direction != a.Request.Direction || p.Comment != a.Request.Comment
                     || p.EntryPrice != f.EntryPrice || p.EntryTimeUtc != f.EntryTimeUtc
@@ -325,6 +351,7 @@ public sealed partial class TradingEngine
             }
             foreach (var d in receipt.OpeningObservations!)
             {
+                if (!bound.ContainsKey(d.PositionId) && PendingOpeningCandidate(d.Symbol, d.Direction, d.Label, d.Comment)) { balanced = false; continue; }
                 if (!bound.TryGetValue(d.PositionId, out var a) || !a.Fill!.OpeningDeals.Contains(d))
                     throw new InvalidOperationException("unsupported opening addition/identity mutation");
             }
@@ -332,7 +359,14 @@ public sealed partial class TradingEngine
             foreach (var d in receipt.Closed!)
             {
                 if (d.Label != _cfg.Label) continue;
-                if (!ValidDeal(d) || !bound.TryGetValue(d.PositionId, out var a)) throw new InvalidOperationException("unknown closing deal / label collision");
+                if (!ValidDeal(d)) throw new InvalidOperationException("invalid closing deal");
+                if (!bound.TryGetValue(d.PositionId, out var a))
+                {
+                    // Keep missing original-fill evidence unresolved. Do not book by comment or
+                    // turn the remaining poll into an opening witness; only positive recovery binds.
+                    if (PendingOpeningCandidate(d.Symbol, d.Direction, d.Label, d.Comment)) { balanced = false; continue; }
+                    throw new InvalidOperationException("unknown closing deal / label collision");
+                }
                 var f = a.Fill!;
                 if (d.Symbol != a.Request.Symbol || d.Direction != a.Request.Direction || d.Comment != a.Request.Comment
                     || d.EntryPrice != f.EntryPrice || d.EntryTimeUtc != f.EntryTimeUtc) throw new InvalidOperationException("closing entry identity mutation");
@@ -344,7 +378,7 @@ public sealed partial class TradingEngine
             for (int i = 0; i < next.OpenAdmissions.Count; i++)
             {
                 var a = next.OpenAdmissions[i]; if (a.Stage == AdmissionStage.Rejected) continue;
-                if (a.Fill == null) { balanced = false; continue; }
+                if (a.Fill == null) { balanced = false; deficits.Add("UnknownOriginalVolume: " + a.OperationId + " – wymagany oryginalny witness/journal"); continue; }
                 var f = a.Fill; ValidateFill(a, f);
                 var deals = next.ClosingDeals.Where(x => x.PositionId == f.PositionId).OrderBy(x => x.ExitTimeUtc).ThenBy(x => x.ClosingDealId).ToList();
                 var p = receipt.Positions.FirstOrDefault(x => x.Id == f.PositionId);
@@ -359,7 +393,7 @@ public sealed partial class TradingEngine
                     next.OpenAdmissions[i] = a;
                 }
                 if (c + o > v) throw new InvalidOperationException("closing plus remaining exceeds original quantum volume");
-                if (c + o < v) { balanced = false; continue; }
+                if (c + o < v) { balanced = false; deficits.Add($"#{f.PositionId} C+O={c}+{o} < V0={v}; brakujący wolumen {v - c - o}"); continue; }
                 if (olderObservation) { balanced = false; continue; }
                 if (p != null || a.Stage == AdmissionStage.Terminal) continue;
                 if (deals.Count == 0) { balanced = false; continue; }
@@ -376,7 +410,10 @@ public sealed partial class TradingEngine
             }
             if (!CommitScope(next, utc)) return false;
             EvaluateHealth(); if (!ExportClosed(utc)) return false;
-            return PublishScoped(receipt, authority, utc, balanced, expires);
+            ScopedDeficits = deficits.ToArray();
+            bool ready = PublishScoped(receipt, authority, utc, balanced, expires);
+            if (!balanced && deficits.Count > 0 && ScopedStatus != ScopedRecoveryStatus.Conflict) ScopedMessage = "AwaitingEvidence: " + string.Join("; ", deficits);
+            return ready;
         }
         catch (Exception ex) { return LatchScopeConflict(ex.Message, utc); }
     }

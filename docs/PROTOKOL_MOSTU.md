@@ -1,5 +1,67 @@
 # APEX Bridge Protocol v1
 
+## Aktualny scoped runtime (Phase C)
+
+Główna ścieżka: **ApexBridge + APEX Desktop**, dedykowane i wyłączne konto DEMO **hedged**.
+`coverage:"unknown"` pozostaje niezmienione. `ScopedReady` oznacza uzgodnienie wyłącznie trwałego
+zakresu aplikacji, nie kompletność brokera i nie zgodę START. **Strategie są zablokowane do Task2 PASS**.
+Native `ApexTradingAI` jest obecnie jawnie tylko odczyt/redukcja, bez setupu/permitu/test-open.
+Natywny backtest korzysta z osobnej zaufanej kompozycji tylko dla rzeczywistego SDK `IsBacktesting`.
+
+1. `hello` negocjuje równocześnie `historyCapability:"closing-deals-v1"` i
+   `scopedCapability:"scoped-recovery-v1"`. Wymaga jawnych `account.isLive` i `account.hedging`,
+   dokładnego `label`, `brokerEpoch` i `brokerConnected`; `deploymentInventory[]` zawiera
+   `label,healthy,entries,missing` ze znanych platformowych dzienników/katalogu, nie deklarację coverage.
+   Nazwa `Symulator`, JSON coverage ani `IsBacktest` nie nadają uprawnienia symulacji produkcji.
+2. `welcome` dodaje `scopedCapability,baselineId,transportGeneration`. `baselineId` przed setupem
+   to pusty GUID. Host nie zmienia parametru cBota automatycznie; pokaże dokładną etykietę do skopiowania.
+3. SDK `Server.Connected`/`Disconnected` natychmiast zmieniają losową startup-epokę/licznik,
+   również gdy outage mieści się pomiędzy timerami. `brokerState` niesie `brokerEpoch,brokerConnected`;
+   ten sam obiekt jest w `account.brokerState` i `result.brokerState`. WebSocket alive nie oznacza broker alive.
+4. `positions` dodaje jawne **wszystkie** `pendingOrders[]` oraz `scoped`. Pending order:
+   `id,label,symbol,side,units,target,sl,tp,comment`. Brak tablicy nie oznacza pustej tablicy.
+   `scoped` (`ScopeFrame`) ma zawsze jawne:
+   `baselineId,label,executionPath:"desktop-bridge",safetyVersion:"scoped-demo-v1",transportGeneration,
+   brokerEpoch,brokerConnected,positionRevision,pendingOrderRevision,snapshotId`.
+   W live frame `snapshotId` jest pusty; obie rewizje obejmują wszystkie obiekty i SL/TP/tożsamość,
+   nie zmienny mark-to-market. Frame nie jest permittem.
+5. `historyRequest` dodaje `baselineId` i `recoverOperations[]` (oryginalne Core operation IDs).
+   Na wątku SDK zamrażane są konto, wszystkie pozycje/zlecenia, dostępne deale, opening graph
+   `Position.Deals` i `History.ClosingDeal.Closing` oraz dodatnio skorelowane wyniki platformowego
+   journalu. Każda strona ma identyczny `scoped` z losowym niepustym `snapshotId` i ten sam capture UTC.
+   Ostatnia dodaje `pendingOrders,openingObservations,recoveredResults` (jawne tablice również gdy puste).
+   Opening observations mają dokładne pola `OpeningDealEvidence`; wyniki zachowują oryginalne
+   `openingFill.request.executionId`. Lookup nie wysyła ponownie open; brak danych nie jest rejection.
+6. Limity: 100000 closing rows, 1000 stron, 500 rows/stronę (SDK nadaje 250), 10000 pozycji i pending
+   orders, 100000 opening observations, 1000 recovered operations, 8 MiB/frame. Overflow/brak strony/
+   konflikt/missing wymaganych metadanych blokuje, bez ucinania dowodu. Capture/receipt/request max 30 s;
+   cykliczne pobranie co 10 s zachowuje ostatnią poprawną receipt tylko do jej oryginalnego deadline.
+7. Account owner autoryzuje odbiór przy aktualnym attachment, zamraża dane, nadaje kolejność powyżej
+   trwałego `LastScopedObservationSequence`, i wywołuje internal Core `EstablishBaseline/ReconcileScoped`.
+   Stara kompletna receipt może dokończyć księgowanie po reconnect, nigdy odblokować nowej generacji.
+8. Core zapisuje admission/opID/request/risk/plan przed gateway i przekazuje opaque, nieserializowalne
+   `ScopedDispatchAuthorization`. SessionAdapter recheck po oczekiwaniu na send lock. `open.id` to
+   oryginalny precommitted operation ID; `open.scoped` to dokładny zaakceptowany ScopeFrame.
+   SDK po trwałym journal reserve ponownie sprawdza własny capture, pełną stałą tożsamość konta,
+   label/baseline/transport/epoch/revisions/freshness i SL/TP bezpośrednio przed SDK open. Zmiana = zero open.
+
+Setup w polskim panelu: **Połączenia platform → Przygotuj zakres DEMO (read-only)**. Jawne potwierdzenie
+dedykowanego DEMO/hedging/wyłącznego pisarza nie zatwierdza transakcji. Inventory obejmuje dotychczasowy
+config, wszystkie pliki kont/stany/control/dzienniki/etykiety oraz znany katalog platformy. Nowa instalacja
+otrzymuje przed pierwszym zapisem znacznik pełnej tożsamości `scope-bootstrap.json`; pozwala on wrócić
+do setupu po zwykłym restarcie, nie odtwarzać brakującego stanu ani omijać legacy. Core zachowuje risk latches.
+Po rezerwacji skopiuj wygenerowaną etykietę do parametru cBota **„Dokładna etykieta pozycji APEX”**,
+zatrzymaj/uruchom most i sparuj ponownie. Świeży zerowy inventory ustanawia zakres atomowo, bez open.
+Osobny **Test wykonania (DEMO)** wymaga nowego potwierdzenia transakcji (`confirmDemoTrade:true`).
+Setup używa `setupScope` / `args.confirmDedicatedDemo:true`; żadne z tych działań nie uruchamia strategii.
+
+Zakres nie rozwiązuje utraty wszystkich danych/zgodnego rollbacku, ukrytych dowolnych writerów ani
+omijanych przez SDK otwarć/zamknięć. Katalog zna dotychczas zarejestrowane etykiety i legacy APEX/APEX-N;
+SDK nie oferuje enumeracji dowolnych dawnych namespace'ów LocalStorage ani retencji całej historii.
+Nie zakładaj, że nowy pusty katalog danych/nowy terminal anuluje zobowiązania starej instalacji.
+Brak/corrupt/legacy/niepewne otwarcie/deficyt pozostają do uzgodnienia; nigdy nie kasuj plików lub nie
+rotuj etykiety w celu „naprawy”. Pełny dokładnie własny close/Emergency pozostają dostępne bez scope/PASS.
+
 Jeden format dla wszystkich platform. Każdy komunikat to obiekt JSON z polem `type`, nazwy pól w camelCase.
 Implementacje wzorcowe: `src/Platforms/cTrader/ApexBridge` (C#), `src/Platforms/MT5/ApexBridge.mq5` (MQL5), symulator `tools/Apex.PlatformSimulator`.
 Definicje typów: `src/Apex.Core/Bridge/Protocol.cs`.
@@ -35,11 +97,10 @@ stan/pozycje i przyjmować pełne zamknięcie, ale **nie certyfikuje synchroniza
 SDK Automate **1.0.21** udostępnia `History.Count`, indexer, `FindByPositionId(int)` i
 `FindByClosingDealId(int)`, ale **nie dokumentuje** load-more/paginacji serwera ani flagi zakresu
 pełnej historii brokera. Zatem oba prawdziwe cBoty raportują `coverage:"unknown"` / `RequiredCoverage=false`.
-W obecnej wersji oznacza to **STOP i blokadę START oraz technicznego test-open w cTrader**, dopóki
-osobna, zweryfikowana procedura zakresu/baseline nie zostanie wdrożona. Nie istnieje przełącznik
-operatora ani pole JSON, które po stronie ścieżki cTrader podnosi to do potwierdzonego coverage.
-Tylko lokalny źródłowy zbiór symulatora (`platform:"Symulator"`) i zaufany natywny runtime backtest
-mogą mieć pełne pokrycie swoich syntetycznych danych. To nie odbiór Pepperstone.
+Bez ustanowionego scoped baseline oznacza to blokadę test-open. Nowy scoped runtime opisany wyżej
+może dopuścić jawny test techniczny bez zmiany coverage. Nie istnieje przełącznik operatora ani JSON,
+który podnosi coverage cTrader do kompletnego. Zaufana kompozycja symulacyjna i rzeczywisty natywny
+runtime backtest mają odrębną structural authority; sama nazwa platformy jej nie nadaje.
 
 Bez pełnego coverage nie importujemy przypadkowej historii sprzed instalacji ani wyników pozycji
 odtworzonej z bieżącego SL. Dostępne deale można trwale rozliczać dla zachowanego oryginalnego
@@ -61,13 +122,10 @@ SHA-256; uszkodzona, obca albo niejednoznaczna koperta blokuje, nie odtwarza si�
 Restart/reconnect nigdy nie uruchamia strategii; zapisane full-close intents ponawiają się z backoff
 15…300 s do autorytatywnego rozliczenia. Bez połączenia lub trwałego zapisu nie ma gwarancji likwidacji.
 
-## Etap rozszerzenia zakresu — dowód opening fill (nie gotowy bootstrap)
+## Dowód opening fill
 
-**To jest etap pośredni, nie odblokowanie cTrader.** Nie ma jeszcze konfiguracji świeżego
-zakresu, trwałego manifestu Core ani permitu nowego ryzyka. `CoverageUnknown` nadal blokuje
-prawdziwy test-open i START. Sama nazwa `Symulator`, pole JSON czy `IsBacktest` nie są dowodem
-zaufanej kompozycji — ich strukturalne odseparowanie od produkcji pozostaje wymaganą pracą.
-Nie uruchamiać testu transakcyjnego w celu sprawdzenia tego etapu.
+Dowód wchodzi w trwały manifest i scoped proof opisane wyżej. Nie jest samodzielnym permittem,
+certyfikatem brokera ani trwałym PASS Task2. Faktyczny test DEMO wymaga osobnego zatwierdzenia.
 
 `open.signalId` jest opcjonalnym, dokładnym identyfikatorem Core, niezależnym od komentarza
 brokera. Odpowiedź `result` może zawierać `openingFill` także przy `uncertain`:
@@ -93,8 +151,8 @@ Opening `dealId` nigdy nie zastępuje kanonicznego klucza **closingDealId:Int32�
 Deserializacja `openingFill` sama nie nadaje własności ani prawa do handlu; Core musi jeszcze
 powiązać go z trwałym wcześniejszym admission i uzgodnić `C+O=V0` w bieżącym zakresie/generacji.
 SDK nie gwarantuje pełnej retencji grafu; nie można wykryć dowolnych ukrytych zewnętrznych mutacji.
-Przyszła minimalna polityka to dedykowane, wyłączne konto **DEMO hedging**, bez obcych otwartych
-pozycji i pending orders. Ten etap nie implementuje jeszcze kontroli tej polityki ani setupu.
+Obsługiwana polityka to dedykowane, wyłączne konto **DEMO hedging**, bez obcych otwartych
+pozycji i pending orders. Wykryty obcy obiekt blokuje nowe ryzyko; nie jest automatycznie likwidowany.
 
 ## Transport
 
@@ -146,7 +204,7 @@ Wysyłane są **wszystkie** pozycje konta, także ręczne i innych botów. APEX 
 `{"type":"result","id":"<id polecenia>","status":"filled|rejected|uncertain","positionId":123,"price":1.0851,"error":"NoMoney","message":"…"}`.
 - `filled` – wykonane i potwierdzone przez serwer brokera.
 - `rejected` – serwer odrzucił; zlecenie na pewno nie zostało wykonane.
-- `uncertain` (lub brak odpowiedzi w 15 s) – stan nieznany. APEX **nie ponawia** zlecenia, tylko weryfikuje stan pozycji (po komentarzu z identyfikatorem sygnału) przez 90 s.
+- `uncertain` (lub brak odpowiedzi w 15 s) – trwałe nierozstrzygnięte zobowiązanie. APEX **nie ponawia** open. Ani 90 s, ani pusta dostępna historia nie zwalniają rezerwacji; wymagany pozytywny journal/witness dla dokładnego operation/request.
 
 Kody `error` (wielkość liter bez znaczenia, nieznany kod = `Other`): `None, TechnicalError, BadVolume, NoMoney, MarketClosed, Disconnected, EntityNotFound, Timeout, UnknownSymbol, InvalidStopLossTakeProfit, InvalidRequest, NoTradingPermission, Other`. Błędy techniczne (`TechnicalError, Timeout, Disconnected, Other`) liczą się do limitu kolejnych błędów – po 5 bot wstrzymuje nowe wejścia.
 
@@ -160,7 +218,7 @@ Kody `error` (wielkość liter bez znaczenia, nieznany kod = `Other`): `None, Te
 |---|---|---|
 | `welcome` | `accepted, reason, hostVersion, label` | przy `accepted:false` zakończ połączenie |
 | `subscribe` | `symbols[], tfs[], history{tf:liczba}` | wyślij historię (`bars` snapshot), potem bieżące notowania i nowe świece |
-| `open` | `id, symbol, side, units, slPips, tpPips?, label, comment, maxSlipPips?` | **odrzuć, jeśli `slPips` ≤ 0**; ustaw SL/TP w zleceniu; etykieta i komentarz bez zmian; konto LIVE odrzuć, jeśli w moście nie zezwolono |
+| `open` | `id,signalId,symbol,side,units,slPips,tpPips,label,comment,maxSlipPips?,scoped` | wymagane dodatnie skończone SL i TP, aktualny scoped capture i exact identity; REAL zawsze odrzucony, bez wyjątku parametru |
 | `modify` | `id, positionId, sl` | tylko pozycje z etykietą APEX |
 | `close` | `id, positionId, units?` | tylko pozycje z etykietą APEX; `units` = częściowe zamknięcie |
 | `margin` | `id, symbol, side, units` | odpowiedz `marginResult` |
@@ -180,4 +238,4 @@ Identyfikator sygnału jest deterministyczny (FNV-1a z symbolu, strategii, kieru
 3. Po `subscribe` wyślij historię świec i zacznij wysyłać `quotes` (co ~1 s), `account` i `positions` (co ~2 s), nowe zamknięte świece i `closed`.
 4. Obsłuż `open/modify/close/margin` z odpowiedzią `result`. Nigdy nie otwieraj pozycji bez SL.
 5. Przy rozłączeniu łącz się ponownie co kilka sekund.
-6. Przetestuj na symulatorze/DEMO: test wykonania w panelu (Diagnostyka → Test wykonania) musi zakończyć się „TEST ZALICZONY”.
+6. Najpierw testuj syntetycznie bez brokera. Faktyczny test DEMO wymaga osobnej zgody; tekst procedury testowej nie jest trwałym PASS Task2 i nie odblokowuje START.
