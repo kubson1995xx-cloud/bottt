@@ -14,15 +14,19 @@ namespace Apex.Desktop.Bridge
     /// po rozłączeniu silnik widzi IsConnected = false (wstrzymuje działania), po powrocie – uzgadnia stan pozycji.
     /// Każde polecenie handlowe bez odpowiedzi po wysłaniu jest raportowane jako NIEPEWNE (silnik najpierw sprawdza pozycje).
     /// </summary>
-    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider
+    public sealed class SessionAdapter : IBrokerGateway, IBrokerHistory, IMarketData, IFeatureProvider, ITrustedSimulationGateway
     {
+        private readonly bool _trustedSimulation;
+        bool ITrustedSimulationGateway.TrustedSimulation => _trustedSimulation;
         private BridgeSession? _session;
         private readonly Func<CommissionOverride?> _commission;
         private readonly Func<bool> _canOpen;
 
         public SessionAdapter(Func<CommissionOverride?> commission) : this(commission, () => true) { }
-        public SessionAdapter(Func<CommissionOverride?> commission, Func<bool> canOpen)
+        public SessionAdapter(Func<CommissionOverride?> commission, Func<bool> canOpen) : this(commission, canOpen, false) { }
+        internal SessionAdapter(Func<CommissionOverride?> commission, Func<bool> canOpen, bool trustedSimulation)
         {
+            _trustedSimulation = trustedSimulation;
             _commission = commission;
             _canOpen = canOpen;
         }
@@ -67,7 +71,7 @@ namespace Apex.Desktop.Bridge
                 return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "Nowe wejścia zablokowane przez stan Desktop/historii.");
             var s = Session;
             if (s == null) return OrderOutcome.Rejected(BrokerErrorKind.Disconnected, "brak sesji mostu");
-            string id = s.NextId();
+            string id = string.IsNullOrEmpty(req.ExecutionId) ? s.NextId() : req.ExecutionId;
             var (sent, json) = s.Request(new OpenCmd
             {
                 Id = id,

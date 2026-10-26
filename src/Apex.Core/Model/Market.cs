@@ -216,6 +216,8 @@ namespace Apex.Core.Model
     /// <summary>Żądanie otwarcia pozycji rynkowej.</summary>
     public sealed class OrderRequest
     {
+        /// <summary>Core precommitted operation ID; adapters must preserve it as the platform journal command ID.</summary>
+        public string ExecutionId { get; init; } = "";
         public string Symbol { get; init; } = "";
         public TradeDirection Direction { get; init; }
         public double VolumeUnits { get; init; }

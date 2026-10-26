@@ -69,10 +69,12 @@ public sealed partial class HistoryIntegrationTests
         if (fault == "error") last.Error = "unavailable";
         s.Handle(BridgeProtocol.Serialize(last)); Assert.False(s.History.Complete);
     }
-    [Fact]
-    public async Task ActualCTraderCannotClaimRequiredCoverageFromEnumeration()
+    [Theory]
+    [InlineData("cTrader")]
+    [InlineData("Symulator")]
+    public async Task ActualCTraderCannotClaimRequiredCoverageFromEnumeration(string claimedPlatform)
     {
-        var s = Session("cTrader"); await s.RequestHistoryAsync("APEX");
+        var s = Session(claimedPlatform); await s.RequestHistoryAsync("APEX");
         var page = Page(s, 0, 1, 1); s.Handle(BridgeProtocol.Serialize(page));
         Assert.True(s.History.Complete); Assert.False(s.History.RequiredCoverage);
     }

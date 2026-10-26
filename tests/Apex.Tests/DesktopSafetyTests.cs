@@ -292,7 +292,8 @@ namespace Apex.Tests
         [Fact]
         public async Task CompleteHistoryIsAppliedBeforeLaterReconnectAction()
         {
-            using var r = Runtime();
+            var config = Config(); config.TrustedSyntheticComposition = true;
+            using var r = Runtime(config);
             var first = Session(); Symbols(first); r.Attach(first);
             await r.Command(_ => "ready");
             using var entered = new ManualResetEventSlim();

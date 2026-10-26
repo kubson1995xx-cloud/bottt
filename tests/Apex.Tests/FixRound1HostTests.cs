@@ -39,7 +39,7 @@ public sealed partial class FixRound1Tests
     { Id = id, Label = label, Symbol = "US500", Side = "buy", Units = 2, Entry = 4000, Sl = sl, Tp = tp, EntryTime = BridgeProtocol.ToUnixMs(Now.AddHours(-2)) };
     static BridgeSession HostSession(HostTransport t, bool live = false)
     {
-        var s = new BridgeSession(t); t.Session = s;
+        var s = new BridgeSession(t, trustedSyntheticComposition: true); t.Session = s;
         s.HelloReceived += (s, _) => s.State = SessionState.Active;
         s.Handle(BridgeProtocol.Serialize(new HelloMsg { Platform = "Symulator", Account = HostAccount(live), HistoryCapability = HistoryPage.Capability }));
         s.Handle(BridgeProtocol.Serialize(new PositionsMsg { Items = new() { HostPosition(), HostPosition(43, "APEX-other") } }));
@@ -93,7 +93,7 @@ public sealed partial class FixRound1Tests
     }
     static TradingEngine SessionEngine(BridgeSession s)
     {
-        var adapter = new SessionAdapter(() => null); adapter.Attach(s);
+        var adapter = new SessionAdapter(() => null, () => true, trustedSimulation: true); adapter.Attach(s);
         var e = new TradingEngine(new EngineConfig(), new Apex.Core.Adaptive.StrategyBook(Scenarios.DipOnlyProfile()),
             adapter, adapter, adapter, new MemoryStore(), new NullLog(), new NullJournal());
         e.SetGuard(new Apex.Core.Safety.AccountGuardResult { Allowed = true }); e.Initialize(DateTime.UtcNow); e.CmdStart();

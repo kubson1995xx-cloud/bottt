@@ -24,7 +24,9 @@ namespace Apex.Desktop
 {
     public static class Program
     {
-        public static async Task<int> Main(string[] args)
+        public static Task<int> Main(string[] args) => Run(args, trustedSyntheticComposition: false);
+
+        internal static async Task<int> Run(string[] args, bool trustedSyntheticComposition)
         {
             Console.OutputEncoding = Encoding.UTF8;
             string dataDir = GetArg(args, "--data") ?? ConfigStore.DefaultDataDir();
@@ -39,7 +41,7 @@ namespace Apex.Desktop
                 return 2;
             }
 
-            var config = new ConfigStore(dataDir);
+            var config = new ConfigStore(dataDir) { TrustedSyntheticComposition = trustedSyntheticComposition };
             var log = new AppLog(Path.Combine(dataDir, "logi"));
             var news = new NewsCalendar();
             var newsService = new NewsService(news, config, log);

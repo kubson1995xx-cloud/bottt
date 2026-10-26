@@ -98,7 +98,7 @@ namespace Apex.Tests
         }
 
         [Fact]
-        public void UncertainResponse_NoPosition_IsWithdrawnAfterTimeoutWithoutRetry()
+        public void UncertainResponse_NoPosition_RemainsObligationAfterTimeoutWithoutRetry()
         {
             var rig = new EngineRig();
             rig.Broker.OpenModes.Enqueue("uncertain-none");
@@ -108,12 +108,12 @@ namespace Apex.Tests
             rig.Tick(30);
             Assert.Single(rig.Engine.Ledger.Pending); // przed upływem limitu czasu weryfikacji – nadal czekamy
             rig.Tick(40);
-            Assert.Empty(rig.Engine.Ledger.Pending);
+            Assert.Single(rig.Engine.Ledger.Pending);
             for (int i = 0; i < 10; i++) rig.Tick(30);
 
             Assert.Single(rig.Broker.Orders);
             Assert.Empty(rig.Broker.Positions);
-            Assert.Equal(SignalState.Consumed, rig.Engine.Ledger.Entries.Single().State);
+            Assert.Equal(SignalState.PendingVerification, rig.Engine.Ledger.Entries.Single().State);
         }
 
         [Fact]

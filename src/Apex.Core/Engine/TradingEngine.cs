@@ -60,6 +60,8 @@ namespace Apex.Core.Engine
         private readonly ITradeJournal _journal;
         private readonly NewsCalendar? _news;
 
+        private readonly bool _simulation;
+        private readonly bool _trustedSimulation;
         private EngineState _state = new();
         private readonly ExecutionLedger _ledger = new();
         private RiskManager _risk;
@@ -106,6 +108,8 @@ namespace Apex.Core.Engine
             var err = cfg.Validate();
             if (err != null) throw new ArgumentException("Nieprawidłowa konfiguracja: " + err);
             _cfg = cfg;
+            _trustedSimulation = broker is ITrustedSimulationGateway trusted && trusted.TrustedSimulation;
+            _simulation = cfg.IsBacktest && _trustedSimulation; // immutable local authority, not mutable config
             _book = book;
             _broker = broker;
             _market = market;
@@ -233,7 +237,7 @@ namespace Apex.Core.Engine
         {
             var acc = _broker.GetAccount();
             _lastAccount = acc;
-            if (!_cfg.IsBacktest) LoadState(acc.Number);
+            if (!_simulation) LoadState(acc.Number);
             _state.AccountNumber = acc.Number;
             if (string.IsNullOrEmpty(_state.Broker)) { _state.Broker = acc.BrokerName; _state.Currency = acc.Currency; _state.Label = _cfg.Label; }
             if (_state.Broker != acc.BrokerName || _state.Currency != acc.Currency || _state.Label != _cfg.Label)
@@ -275,7 +279,7 @@ namespace Apex.Core.Engine
             try
             {
                 var st = JsonSerializer.Deserialize<EngineState>(json!, StateJson);
-                if (st == null || st.AccountNumber != account || (st.SchemaVersion != 1 && st.SchemaVersion != 2) || !Enum.IsDefined(typeof(EngineMode), st.Mode)
+                if (st == null || st.AccountNumber != account || (st.SchemaVersion != 1 && st.SchemaVersion != 2 && st.SchemaVersion != 3) || !Enum.IsDefined(typeof(EngineMode), st.Mode)
                     || st.Risk == null || st.Ledger == null || st.Plans == null || st.Suspended == null || st.RecentTrades == null
                     || st.DisabledStrategies == null || st.DisabledClasses == null
                     || st.Plans.Any(p => p == null) || st.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId)))
@@ -288,7 +292,7 @@ namespace Apex.Core.Engine
                     || st.ClosedRecords.Any(x => x == null) || st.ClosedOutbox.Any(x => x == null))
                     throw new JsonException("Uszkodzony rejestr odzyskiwania.");
                 ValidateFinancialState(st);
-                if (st.SchemaVersion == 2)
+                if (st.SchemaVersion >= 2)
                 {
                     using var document = JsonDocument.Parse(json!);
                     string[] required = { "SchemaVersion", "AccountNumber", "Broker", "Currency", "Label", "Mode", "Risk", "Ledger", "Plans", "PendingCloses",
@@ -310,6 +314,23 @@ namespace Apex.Core.Engine
                     HistoryMessage = "migracja v1 z historycznymi wynikami wymaga ręcznego uzgodnienia";
                 }
                 else st.SchemaVersion = 2;
+                if (st.SchemaVersion < 3)
+                {
+                    // Preserve old accounting/latches, never bless an old namespace as fresh.
+                    st.SchemaVersion = 3; st.LegacyScopeQuarantine = true; st.Baseline = null;
+                    st.OpenAdmissions = new List<OpenAdmission>();
+                }
+                else
+                {
+                    using var scopeDocument = JsonDocument.Parse(json!);
+                    string[] requiredScope = { "DurableRevision", "Baseline", "OpenAdmissions", "LegacyScopeQuarantine", "ScopeConflict" };
+                    if (requiredScope.Any(n => !scopeDocument.RootElement.TryGetProperty(n, out _))) throw new JsonException("missing v3 scope fields");
+                    ValidateScopeDocument(scopeDocument.RootElement);
+                    ValidateScopeState(st);
+                }
+                ScopedStatus = st.ScopeConflict.Length != 0 ? ScopedRecoveryStatus.Conflict
+                    : st.Baseline == null ? ScopedRecoveryStatus.Unestablished : ScopedRecoveryStatus.AwaitingEvidence;
+                ScopedMessage = st.ScopeConflict.Length != 0 ? st.ScopeConflict : "restart: fresh owner-authorized scoped receipt required";
                 _ledger.Restore(st.Ledger);
                 _plans.Clear();
                 foreach (var p in st.Plans) _plans[p.PositionId] = p;
@@ -336,7 +357,7 @@ namespace Apex.Core.Engine
         private bool TrySaveState(DateTime utc, bool force = false)
         {
             if (_stateReadFault) return false; // Nie kasujemy dowodów uszkodzenia ani nie cofamy blokad/rejestru.
-            if (_cfg.IsBacktest) return true;
+            if (_simulation) return true;
             if (!_dirty && !force) return _persistenceHealthy;
             if (!force && (utc - _lastSaveUtc).TotalSeconds < 5) return _persistenceHealthy;
             try
@@ -348,6 +369,8 @@ namespace Apex.Core.Engine
                 _state.Suspended = _suspended.ToList();
                 _state.SavedUtc = utc;
                 if (_state.RecentTrades.Count > 300) _state.RecentTrades = _state.RecentTrades.Skip(_state.RecentTrades.Count - 300).ToList();
+                _state.DurableRevision = checked(_state.DurableRevision + 1);
+                _scopedPermit = null;
                 _store.Set(StoreKey(_state.AccountNumber), JsonSerializer.Serialize(_state, StateJson));
                 _store.Flush();
                 _dirty = false;
@@ -378,7 +401,7 @@ namespace Apex.Core.Engine
         }
 
         private bool QuoteFresh(Quote q, DateTime utc) => q.IsValid && q.TimeUtc <= utc
-            && (_cfg.IsBacktest || utc - q.TimeUtc <= TimeSpan.FromSeconds(_cfg.MaxQuoteAgeSeconds));
+            && (_simulation || utc - q.TimeUtc <= TimeSpan.FromSeconds(_cfg.MaxQuoteAgeSeconds));
 
         private static bool HasValidTarget(PositionInfo pos) => pos.TakeProfit is > 0
             && double.IsFinite(pos.TakeProfit.Value) && (int)pos.Direction * (pos.TakeProfit.Value - pos.EntryPrice) > 0;
@@ -389,10 +412,15 @@ namespace Apex.Core.Engine
         /// </summary>
         public void Reconcile(DateTime utc, string why)
         {
-            var own = OwnPositions();
+            var own = ScopedManagedPositions(OwnPositions(), utc);
             var ids = new HashSet<long>(own.Select(p => p.Id));
             foreach (var pos in own)
             {
+                if (_state.Baseline != null && !_state.OpenAdmissions.Any(a => a.Fill?.PositionId == pos.Id))
+                {
+                    LatchScopeConflict("LabelCollision: unknown exact-label position", utc);
+                    continue;
+                }
                 CloseOrphanTest(pos, utc);
                 if (_plans.ContainsKey(pos.Id)) continue;
                 var plan = ReconstructPlan(pos, utc);
@@ -444,7 +472,7 @@ namespace Apex.Core.Engine
                 EntryPrice = pos.EntryPrice,
                 InitialStop = stop,
                 InitialRisk = r,
-                InitialVolume = pos.VolumeUnits,
+                InitialVolume = _state.OpenAdmissions.FirstOrDefault(a => a.Fill?.PositionId == pos.Id)?.Fill?.InitialVolumeUnits ?? pos.VolumeUnits,
                 EntryTimeUtc = pos.EntryTimeUtc,
                 BestPrice = pos.EntryPrice,
                 LastManagedBarTime = utc.AddHours(-1),
@@ -530,7 +558,7 @@ namespace Apex.Core.Engine
             if (_risk.State.DailyLimitHit && _cfg.Risk.CloseAllOnDailyLimit && _plans.Count > 0)
                 CloseAllOwn(utc, "przekroczony dzienny limit straty");
 
-            var own = OwnPositions();
+            var own = ScopedManagedPositions(OwnPositions(), utc);
             EnsurePlans(own, utc);
             if (_state.Mode == EngineMode.EmergencyStopped)
             {
@@ -698,13 +726,8 @@ namespace Apex.Core.Engine
                     _log.Info($"Weryfikacja: zlecenie {e.SignalId} ({e.Symbol}) zostało wykonane – pozycja #{match.Id}.");
                     _dirty = true;
                 }
-                else if (_broker.IsConnected && (utc - e.TimeUtc).TotalSeconds > _cfg.VerificationTimeoutSeconds)
-                {
-                    _ledger.MarkConsumed(e.SignalId, "brak pozycji po weryfikacji", utc);
-                    _pendingInfo.Remove(e.SignalId);
-                    _log.Warn($"Weryfikacja: zlecenie {e.SignalId} ({e.Symbol}) NIE zostało wykonane – sygnał wycofany (bez ponawiania).");
-                    _dirty = true;
-                }
+                // Absence in an available collection, regardless of elapsed time, cannot
+                // distinguish non-send from a fast fill/close. Keep the obligation forever.
             }
         }
 
@@ -826,7 +849,7 @@ namespace Apex.Core.Engine
 
         private void SampleSpreads(DateTime utc)
         {
-            if (_cfg.IsBacktest) return;
+            if (_simulation) return;
             foreach (var u in _universe)
             {
                 var q = _market.GetQuote(u.Symbol);
@@ -895,7 +918,7 @@ namespace Apex.Core.Engine
             gates.Add(new DecisionGate { Name = "Kompletność historii", Passed = true, Detail = $"≥ {strat.RequiredSignalBars} świec" });
             var decisionTime = fs.Bars.Times[i] + strat.SignalTf.Duration();
             // Świeca sprzed długiej przerwy w danych (np. po rozłączeniu) – nie handlujemy starego sygnału.
-            if (utc - decisionTime > TimeSpan.FromMinutes(Math.Max(20, (int)strat.SignalTf / 2.0)) && !_cfg.IsBacktest)
+            if (utc - decisionTime > TimeSpan.FromMinutes(Math.Max(20, (int)strat.SignalTf / 2.0)) && !_simulation)
             {
                 if (_market.IsMarketOpen(u.Symbol, utc, out _)) WarnData(u.Symbol, utc, $"dane {strat.SignalTf} nieaktualne (ostatnia świeca zamknięta {decisionTime:HH:mm} UTC)");
                 gates.Add(new DecisionGate { Name = "Aktualność danych", Passed = false, Detail = $"ostatnia świeca zamknięta {decisionTime:yyyy-MM-dd HH:mm} UTC" });
@@ -981,7 +1004,7 @@ namespace Apex.Core.Engine
         private void ProcessPool(DateTime utc, AccountSnapshot acc)
         {
             if (_pool.Count == 0) return;
-            if (!_cfg.IsBacktest)
+            if (!_simulation)
             {
                 var oldest = _pool.Values.Min(p => p.FirstSeenUtc);
                 if ((utc - oldest).TotalSeconds < _cfg.CollectionWindowSeconds) return;
@@ -1219,7 +1242,13 @@ namespace Apex.Core.Engine
             { _ledger.MarkConsumed(sid, "nieprawidłowy SL/TP", utc); _dirty = true; return false; }
 
             _pendingInfo[sid] = new PendingInfo { Candidate = c, RiskAmount = r.Sizing.RiskAmount, Score = r.Score.Total, Units = r.Sizing.Units };
-            var outcome = _broker.OpenMarket(req);
+            var outcome = SendAdmittedOpen(req, new TradePlan
+            {
+                SignalId = sid, Symbol = c.Symbol, Strategy = c.Strategy, Variant = c.StrategyVariant, Direction = c.Direction,
+                SignalTf = c.SignalTf, InitialVolume = r.Sizing.Units, InitialRisk = c.StopDistance,
+                EntryAtr = c.Atr, RiskAmount = r.Sizing.RiskAmount, Score = r.Score.Total, EntryReason = c.Reason,
+                Regime = c.PrimaryRegimeName, LastManagedBarTime = c.SignalBarTime, Exit = c.Exit,
+            }, utc);
             switch (outcome.Status)
             {
                 case OrderStatus.Filled:
@@ -1289,7 +1318,7 @@ namespace Apex.Core.Engine
                 EntryPrice = pos.EntryPrice,
                 InitialStop = stop,
                 InitialRisk = Math.Abs(pos.EntryPrice - stop),
-                InitialVolume = pos.VolumeUnits,
+                InitialVolume = _state.OpenAdmissions.FirstOrDefault(a => a.Fill?.PositionId == pos.Id)?.Fill?.InitialVolumeUnits ?? pos.VolumeUnits,
                 RiskAmount = riskAmount,
                 EntryTimeUtc = pos.EntryTimeUtc == default ? utc : pos.EntryTimeUtc,
                 EntryAtr = c.Atr,
@@ -1555,11 +1584,12 @@ namespace Apex.Core.Engine
                 if (!_ledger.TryReserve(sid, sym, utc)) return "Test z tym identyfikatorem już był wykonany – spróbuj za minutę.";
                 _dirty = true;
                 if (!TrySaveState(utc, true)) return "Test zablokowany: zapis rezerwacji nieudany.";
-                var res = _broker.OpenMarket(new OrderRequest
+                var res = SendAdmittedOpen(new OrderRequest
                 {
                     Symbol = sym, Direction = TradeDirection.Long, VolumeUnits = spec.VolumeMin, StopLossPips = slPips, TakeProfitPips = tpPips,
                     Label = _cfg.Label, Comment = ExecutionLedger.BuildComment(StrategyId.ExecutionTest, sid), SignalId = sid,
-                });
+                }, new TradePlan { SignalId = sid, Symbol = sym, Strategy = StrategyId.ExecutionTest, Direction = TradeDirection.Long,
+                    InitialVolume = units, InitialRisk = stop, RiskAmount = risk, EntryAtr = atr, EntryReason = "test wykonania", Exit = new ExitPlan() }, utc);
                 if (res.Status == OrderStatus.Rejected)
                 {
                     _ledger.MarkConsumed(sid, res.Message, utc);
@@ -1612,7 +1642,7 @@ namespace Apex.Core.Engine
                     }
                     else if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds)
                     {
-                        _ledger.MarkConsumed(t.SignalId, "test: brak pozycji", utc);
+                        // Timeout ends the UI run, never discharges the uncertain open obligation.
                         Finish("TEST NIEZALICZONY – pozycja nie pojawiła się po otwarciu");
                     }
                     break;

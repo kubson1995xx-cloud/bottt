@@ -132,7 +132,7 @@ namespace Apex.Desktop.Bridge
                     Positions = m.Positions.Select(x => x.ToInfo()).ToArray(),
                     // SDK enumeration does not certify broker completeness. Synthetic local fixtures
                     // alone have a complete in-memory source; no cTrader claim can enable risk.
-                    RequiredCoverage = Platform == "Symulator" && m.Coverage == "required",
+                    RequiredCoverage = _trustedSyntheticComposition && m.Coverage == "required",
                     Closed = _historyRows.Select(x => x.ToInfo()).ToArray(),
                 };
                 _historyReceived = DateTime.UtcNow;
@@ -143,8 +143,11 @@ namespace Apex.Desktop.Bridge
             HistoryCompleted?.Invoke(this, completed);
         }
 
-        public BridgeSession(IBridgeTransport transport)
+        private readonly bool _trustedSyntheticComposition;
+        public BridgeSession(IBridgeTransport transport) : this(transport, false) { }
+        internal BridgeSession(IBridgeTransport transport, bool trustedSyntheticComposition)
         {
+            _trustedSyntheticComposition = trustedSyntheticComposition;
             _transport = transport;
             ConnectedUtc = DateTime.UtcNow;
             LastMessageUtc = DateTime.UtcNow;

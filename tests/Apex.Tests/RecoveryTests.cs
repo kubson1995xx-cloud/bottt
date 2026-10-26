@@ -139,7 +139,7 @@ public sealed class RecoveryTests
         engine.CmdStart(); Assert.Equal(EngineMode.Stopped, engine.Mode);
     }
 
-    internal sealed class LegacyBroker : IBrokerGateway, IMarketData
+    internal class LegacyBroker : IBrokerGateway, IMarketData
     {
         readonly FakeBroker inner = new() { Now = Now };
         public bool IsConnected => inner.IsConnected;
@@ -351,10 +351,12 @@ public sealed class RecoveryTests
         }
         finally { Directory.Delete(dir, true); }
     }
+    private sealed class TrustedLegacySimulator : LegacyBroker, ITrustedSimulationGateway
+    { bool ITrustedSimulationGateway.TrustedSimulation => true; }
     [Fact]
     public void ExistingOfflineBacktestTerminalCallbackStillAccounts()
     {
-        var broker = new LegacyBroker();
+        var broker = new TrustedLegacySimulator();
         var engine = new TradingEngine(new EngineConfig { IsBacktest = true }, new StrategyBook(Scenarios.DipOnlyProfile()),
             broker, broker, new BarStore(), new MemoryStore(), new NullLog(), new NullJournal());
         engine.Initialize(Now); engine.OnPositionClosed(Closed()); engine.OnPositionClosed(Closed());

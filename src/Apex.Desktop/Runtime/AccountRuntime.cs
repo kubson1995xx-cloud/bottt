@@ -65,7 +65,7 @@ namespace Apex.Desktop.Runtime
             Directory.CreateDirectory(_dir);
             _journal = new FileJournal(Path.Combine(_dir, "dziennik"));
             _store = new FileStore(Path.Combine(_dir, "stan"));
-            _adapter = new SessionAdapter(Commission, () => !_stop && _sessionReady && !_storageFault && !_store.HasFault && !_emergencyLatched);
+            _adapter = new SessionAdapter(Commission, () => !_stop && _sessionReady && !_storageFault && !_store.HasFault && !_emergencyLatched, config.TrustedSyntheticComposition);
             LoadEquity();
             _thread = new Thread(Loop) { IsBackground = true, Name = "APEX " + key };
             _thread.Start();
@@ -476,7 +476,7 @@ namespace Apex.Desktop.Runtime
                 if (json == null) return;
                 var state = JsonSerializer.Deserialize<EngineState>(json, ConfigStore.Json);
                 using var parsed = JsonDocument.Parse(json);
-                if (state == null || state.AccountNumber != account || (state.SchemaVersion != 1 && state.SchemaVersion != 2)
+                if (state == null || state.AccountNumber != account || (state.SchemaVersion != 1 && state.SchemaVersion != 2 && state.SchemaVersion != 3)
                     || !Enum.IsDefined(state.Mode) || state.Risk == null || state.Ledger == null || state.Plans == null
                     || state.Suspended == null || state.RecentTrades == null || state.DisabledStrategies == null || state.DisabledClasses == null
                     || state.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId) || string.IsNullOrWhiteSpace(e.Symbol) || !Enum.IsDefined(e.State))

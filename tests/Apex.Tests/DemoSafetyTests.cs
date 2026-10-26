@@ -33,8 +33,9 @@ public class DemoSafetyTests
         }
     }
 
-    private sealed class Gateway : IBrokerGateway, IBrokerHistory, IMarketData
+    private sealed class Gateway : IBrokerGateway, IBrokerHistory, IMarketData, ITrustedSimulationGateway
     {
+        bool ITrustedSimulationGateway.TrustedSimulation => true;
         public FakeBroker Inner = new();
         public int QuoteOffsetSeconds;
         public bool RejectModify, IgnoreModify, FailClose, DropTp;

@@ -42,7 +42,7 @@ namespace Apex.Tests
                 News = new { Enabled = false },
             }));
 
-            string dll = LocateDesktopDll();
+            string dll = typeof(SyntheticHostEntry).Assembly.Location; // explicit trusted synthetic composition, not production CLI
             var psi = new ProcessStartInfo("dotnet")
             {
                 RedirectStandardOutput = true,

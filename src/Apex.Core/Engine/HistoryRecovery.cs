@@ -60,7 +60,7 @@ namespace Apex.Core.Engine
             // Preserve the existing offline backtester callback contract. Its simulator emits a
             // terminal aggregate, has no durable history capability and never uses a real broker.
             // Production bridge/native compositions implement IBrokerHistory and cannot enter here.
-            if (_cfg.IsBacktest && _broker is not IBrokerHistory)
+            if (_simulation && _broker is not IBrokerHistory)
             {
                 if (!_state.AccountedPositions.Add(info.PositionId)) return;
                 var record = BuildClosedRecord(info); _journal.TradeClosed(record);
@@ -77,17 +77,19 @@ namespace Apex.Core.Engine
         /// receipt time. This does not grant readiness/START to a replaced connection.</summary>
         public bool ReplayHistory(BrokerHistorySnapshot snapshot, DateTime utc)
         {
+            if (_state.Baseline != null) return false; // public/JSON snapshots are not owner-authorized scoped receipts
             if (!snapshot.Complete || snapshot.Positions == null || snapshot.AccountNumber != _state.AccountNumber) return false;
-            return AcceptHistory(snapshot.Closed, snapshot.Positions, utc, snapshot.RequiredCoverage);
+            return AcceptHistory(snapshot.Closed, snapshot.Positions, utc, snapshot.RequiredCoverage && _trustedSimulation);
         }
 
         private void SynchronizeHistory(DateTime utc)
         {
+            if (_state.Baseline != null) { BlockHistory("Scoped producer/permit dispatch requires Phase C integration"); return; }
             if (_stateReadFault) { BlockHistory("stan odzyskiwania wymaga ręcznego uzgodnienia"); return; }
-            if (!_cfg.IsBacktest && (_journal is not IRecoveryJournal durable || !durable.IsHealthy))
+            if (!_simulation && (_journal is not IRecoveryJournal durable || !durable.IsHealthy))
             { BlockHistory("dziennik odzyskiwania niedostępny"); return; }
             if (!_broker.IsConnected) { BlockHistory("oczekiwanie na połączenie"); return; }
-            if (_cfg.IsBacktest && _broker is not IBrokerHistory) { HistoryReady = true; return; }
+            if (_simulation && _broker is not IBrokerHistory) { HistoryReady = true; return; }
             if (_broker is not IBrokerHistory history) { BlockHistory("most nie obsługuje wymaganej historii"); return; }
             try
             {
@@ -100,7 +102,7 @@ namespace Apex.Core.Engine
                     BlockHistory("nowa generacja połączenia – wymagany START");
                 _historyGeneration = snapshot.Generation;
                 if (!ReplayHistory(snapshot, utc)) return;
-                if (!snapshot.RequiredCoverage)
+                if (!snapshot.RequiredCoverage || !_trustedSimulation)
                 { BlockHistory("CoverageUnknown: SDK udostępnia kolekcję dostępną, nie dowód kompletności wymaganej historii"); return; }
                 var open = OwnPositions().Select(x => x.Id).ToHashSet();
                 if (_plans.Keys.Any(id => !open.Contains(id)))
@@ -190,7 +192,7 @@ namespace Apex.Core.Engine
                 if (changed)
                 {
                     next.SavedUtc = utc;
-                    if (!_cfg.IsBacktest)
+                    if (!_simulation)
                     {
                         try { _store.Set(StoreKey(next.AccountNumber), JsonSerializer.Serialize(next, StateJson)); _store.Flush(); }
                         catch

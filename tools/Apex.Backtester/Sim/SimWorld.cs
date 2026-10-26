@@ -50,8 +50,9 @@ namespace Apex.Backtester.Sim
     /// SL/TP sprawdzane na ścieżce M15 wewnątrz świecy H1 (gdy brak M15 – na H1), przy jednoczesnym trafieniu SL i TP
     /// zakładamy najpierw SL (konserwatywnie); luki cenowe realizowane po cenie otwarcia.
     /// </summary>
-    public sealed class SimWorld : IBrokerGateway, IMarketData, IFeatureProvider
+    public sealed class SimWorld : IBrokerGateway, IMarketData, IFeatureProvider, ITrustedSimulationGateway
     {
+        bool ITrustedSimulationGateway.TrustedSimulation => true;
         private readonly Dictionary<string, SymbolData> _data;
         private readonly FxRates _fx;
         private readonly CostScenario _cost;

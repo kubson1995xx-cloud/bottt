@@ -1,5 +1,14 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## Autonomia Phase B — Core scope/admission/conservation (lokalnie; Task1 nadal PARTIAL)
+
+- Stan **v3**: trwały full-identity Proposed/Established baseline z losowym ID/etykietą, permanentne OpenAdmissions (pełne żądanie/opID/fingerprint, risk/plan/context, generacje), niezmienny actual OpeningFill i terminal manifest. Migracja v2 zachowuje wszystkie dowody/latches, ale pozostaje Unestablished/quarantine. Braki pól także zagnieżdżonych blokują odczyt bez nadpisania.
+- Wspólny dispatch strategii i testu zapisuje manifest przed gateway; actual2/1/0.5 nie są zamienne. Core sprawdza exact-quantum **C durable-union + O = V0** przy pozycji otwartej i zamkniętej; konflikty entry/identity/growth/opening addition/namespace/postfinal latching. Niepewna nieobecność nie zwalnia zobowiązania po 90 s; brak manifestu po crash również blokuje. Unknown scoped objects nie są automatycznie przejmowane/modyfikowane. Failsafe pełnego close i poprzednie poprawki CSV/no-engine zachowane.
+- Internal `ScopedReceiptAuthority` / opaque permit + API `ReserveBaseline`, `EstablishBaseline`, `ReconcileScoped`, `RecoverOpeningOutcome`, `Get/ValidateScopedPermit`; owner/state revision/generacje/monotonic expiry. **Producent/runtime Phase C nadal niewpięty, prawdziwy cTrader CoverageUnknown/STOP i test-open zablokowany.** Sam status Ready w teście Core nie jest działającym setupem ani PASS/START.
+- Zamknięto starą furtkę `Symulator`/JSON coverage/mutable IsBacktest: produkcyjny entry zawsze nieufny. Osobny **niepakowany executable testowy** jawnie komponuje syntetyczne open/modify/close; rzeczywisty ApexDesktop.dll nadal ma oddzielny test history/reconnect/replay/full-close. Native runtime backtesting wymaga późniejszego powiązania z SDK IsBacktesting; sam config już nie daje bypassu.
+- Pełne końcowe bramki: **423/423 Core/Desktop (60 scoped)**, **100/100 platform**, **11/11 panel**, npm check PASS; pełne DEMO solution i oba rzeczywiste SDK solution/.algo **0 ostrzeżeń/błędów**. RED/GREEN/TRX/parsed JSON: `/home/ubuntu/.hermes/cache/scratch/apex-autonomy/task1-scope-core/`. Real FileStore/FileJournal restart i awarie przed/po publication sprawdzone.
+- Raport `.superpowers/sdd/2026-10-26-apex-autonomy/task-1-scope-core-report.md`; append scope-report. Phase C: broker events/generacje/pending orders/producenci/frozen receipts/dispatch permits/setup po polsku; host musi zinwentaryzować stare scope przed zmianą etykiety. Task2 durable PASS nadal osobno. Brak brokera/transakcji/push/child/reviewera; domyślne 0.5/1.5/5/x5, SL/TP i REAL block zachowane. Parent independent review oczekiwany; to nie akceptacja całego Task1.
+
 ## Autonomia Phase B — prerequisite volume quantum
 
 - Poprawiono load-bearing Minor z przeglądu opening witness: sam `volumeStep` musi round-tripować double→decimal→double, nie tylko jednostki. `Math.BitIncrement(0.1)` daje UNKNOWN zamiast zaokrąglonego dowodu.

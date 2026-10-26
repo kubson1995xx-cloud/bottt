@@ -11,8 +11,9 @@ using Apex.Core.Strategies;
 namespace Apex.Tests
 {
     /// <summary>Atrapa brokera i rynku z wstrzykiwaniem awarii – do testów silnika bez platformy.</summary>
-    public class FakeBroker : IBrokerGateway, IBrokerHistory, IMarketData
+    public class FakeBroker : IBrokerGateway, IBrokerHistory, IMarketData, ITrustedSimulationGateway
     {
+        bool ITrustedSimulationGateway.TrustedSimulation => true;
         public readonly Dictionary<string, InstrumentSpec> Specs = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, double> Mid = new(StringComparer.OrdinalIgnoreCase);
         public readonly List<PositionInfo> Positions = new();
@@ -79,7 +80,7 @@ namespace Apex.Tests
             return MarketOpen;
         }
 
-        public OrderOutcome OpenMarket(OrderRequest r)
+        public virtual OrderOutcome OpenMarket(OrderRequest r)
         {
             Orders.Add(r);
             string mode = OpenModes.Count > 0 ? OpenModes.Dequeue() : "fill";

@@ -46,9 +46,9 @@ public sealed class ReviewBoundaryTests : IDisposable
         s.Handle(BridgeProtocol.Serialize(new SymbolsMsg()));
         return s;
     }
-    private AccountRuntime Runtime()
+    private AccountRuntime Runtime(bool trustedSimulation = false)
     {
-        var c = new ConfigStore(_dir); c.Update(x => x.News.Enabled = false);
+        var c = new ConfigStore(_dir) { TrustedSyntheticComposition = trustedSimulation }; c.Update(x => x.News.Enabled = false);
         return new AccountRuntime("cTrader:Pepperstone:910001", "cTrader", c, new NewsCalendar(), new AppLog(Path.Combine(_dir, "log")));
     }
     [Fact]
@@ -80,7 +80,7 @@ public sealed class ReviewBoundaryTests : IDisposable
     [Fact]
     public async Task ReceivedHistorySurvivesNetworkThreadReconnectAndRetiredEventsAreIgnored()
     {
-        using var r = Runtime(); var first = Session(new Transport()); r.Attach(first); await r.Command(_ => "ready");
+        using var r = Runtime(trustedSimulation: true); var first = Session(new Transport()); r.Attach(first); await r.Command(_ => "ready");
         using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
         var blocked = r.Command(_ => { entered.Set(); release.Wait(TimeSpan.FromSeconds(5)); return "released"; });
         Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));

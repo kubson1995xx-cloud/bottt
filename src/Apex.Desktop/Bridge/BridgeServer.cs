@@ -116,7 +116,7 @@ namespace Apex.Desktop.Bridge
                 return;
             }
             using var ws = await ctx.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
-            var session = new BridgeSession(new WebSocketTransport(ws, remote.ToString()));
+            var session = new BridgeSession(new WebSocketTransport(ws, remote.ToString()), _config.TrustedSyntheticComposition);
             _accounts.Register(session);
             var buffer = new byte[64 * 1024];
             var ms = new MemoryStream();
@@ -189,7 +189,7 @@ namespace Apex.Desktop.Bridge
             client.NoDelay = true;
             var ep = client.Client.RemoteEndPoint as IPEndPoint;
             if (ep == null || !IPAddress.IsLoopback(ep.Address)) { client.Close(); return; }
-            var session = new BridgeSession(new TcpTransport(client));
+            var session = new BridgeSession(new TcpTransport(client), _config.TrustedSyntheticComposition);
             _accounts.Register(session);
             try
             {

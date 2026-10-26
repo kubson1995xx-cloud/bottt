@@ -53,6 +53,8 @@ namespace Apex.Desktop.Services
     /// <summary>Wczytywanie i bezpieczny zapis konfiguracji (zapis atomowy przez plik tymczasowy).</summary>
     public sealed class ConfigStore
     {
+        // Set only by the separate friend test executable, never read from host config/JSON/CLI.
+        internal bool TrustedSyntheticComposition { get; set; }
         private readonly object _lock = new();
         public static readonly JsonSerializerOptions Json = new()
         {

@@ -444,7 +444,7 @@ namespace cAlgo.Robots
         {
             if (!SafeAccount || !IsConnected) return OrderOutcome.Rejected(BrokerErrorKind.NoTradingPermission, "wymagane aktywne konto DEMO");
             if (!PlatformSafety.OwnLabel(q.Label, _label) || string.IsNullOrWhiteSpace(q.Comment)) return OrderOutcome.Rejected(BrokerErrorKind.InvalidRequest, "nieprawidłowa etykieta/sygnał");
-            string id = string.IsNullOrEmpty(q.SignalId) ? q.Comment : q.SignalId;
+            string id = !string.IsNullOrEmpty(q.ExecutionId) ? q.ExecutionId : string.IsNullOrEmpty(q.SignalId) ? q.Comment : q.SignalId;
             string fingerprint = BridgeProtocol.Serialize(new { q.Symbol, q.Direction, q.VolumeUnits, q.StopLossPips, q.TakeProfitPips, q.Label, q.Comment, q.MaxSlippagePips });
             var result = _journal.Run(id, fingerprint, _label + "|" + q.Comment, () =>
             {

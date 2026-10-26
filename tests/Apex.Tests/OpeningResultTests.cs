@@ -17,10 +17,13 @@ public sealed class OpeningResultTests
         public string Remote => "memory";
         public BridgeSession Session = null!;
         public string Status = "filled";
+        public string? LastOpenId;
         public Task SendAsync(string json, CancellationToken ct)
         {
             using var command = JsonDocument.Parse(json);
-            string id = command.RootElement.GetProperty("id").GetString()!;
+            if (!command.RootElement.TryGetProperty("id", out var commandId)) return Task.CompletedTask;
+            string id = commandId.GetString()!;
+            if (BridgeProtocol.ReadType(json) == "open") LastOpenId = id;
             var response = new ResultMsg { Id = id, Status = Status, PositionId = 42, Price = 4000 };
             // Supply optional new evidence through the wire, not by peeking into adapter internals.
             string result = BridgeProtocol.Serialize(response).TrimEnd('}') + ",\"openingFill\":" + Evidence + "}";
@@ -44,6 +47,23 @@ public sealed class OpeningResultTests
         using var json = JsonDocument.Parse(BridgeProtocol.Serialize(command));
         Assert.True(json.RootElement.TryGetProperty("signalId", out var signal), "Original signal identity was lost");
         Assert.Equal("exact-core-signal", signal.GetString());
+    }
+
+    [Fact]
+    public async Task RealOpenDispatchUsesCorePrecommittedOperationId()
+    {
+        var t = new Transport(); var s = t.Session = new BridgeSession(t, trustedSyntheticComposition: true);
+        var account = new AccountDto { Number = 910001, Broker = "Pepperstone", Currency = "USD", Balance = 10000, Equity = 10000, FreeMargin = 10000 };
+        s.Handle(BridgeProtocol.Serialize(new HelloMsg { Platform = "cTrader", Account = account, HistoryCapability = HistoryPage.Capability }));
+        s.State = SessionState.Active; s.Handle(BridgeProtocol.Serialize(new PositionsMsg()));
+        await s.RequestHistoryAsync("fresh-scope");
+        s.Handle(BridgeProtocol.Serialize(new HistoryPage { RequestId = s.HistoryRequestId, Page = 0, Pages = 1, Total = 0,
+            CapturedAt = BridgeProtocol.ToUnixMs(DateTime.UtcNow), Account = account, Positions = new(), Coverage = "required" }));
+        Assert.True(s.History.RequiredCoverage);
+        var adapter = new SessionAdapter(() => null, () => true, trustedSimulation: true); adapter.Attach(s);
+        adapter.OpenMarket(new OrderRequest { ExecutionId = "core-precommitted-operation", SignalId = "signal", Symbol = "US500", VolumeUnits = 2,
+            Direction = TradeDirection.Long, Label = "fresh-scope", Comment = "signal", StopLossPips = 10, TakeProfitPips = 20 });
+        Assert.Equal("core-precommitted-operation", t.LastOpenId);
     }
 
     [Theory]
