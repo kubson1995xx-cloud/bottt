@@ -18,6 +18,7 @@ namespace Apex.Backtester
         public const string SemanticsVersion = "backtest-v2.1-complete-account-evidence";
         public static int Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "naval-shared-replay") return Naval.SharedPortfolioCommand.Run(args.Skip(1).ToArray());
             if (args.Length > 0 && args[0] == "naval") return Naval.NavalResearchCommand.Run(args.Skip(1).ToArray());
             if (args.Length == 0 || args[0] == "help" || args[0] == "--help")
             {
