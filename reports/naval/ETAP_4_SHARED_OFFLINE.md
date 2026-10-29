@@ -1,7 +1,7 @@
 # Task4 — wspólny kapitał offline, kandydat do odbioru
 
 ## Status
-Kod `9541009` na `feature/apex-naval-command`, baza `365cdea`. Implementacja i lokalne bramki zakończone; **niezależny przegląd nadal trwa**. To nie końcowy odbiór Task4, brokerowy test ani zgoda na aktywację flot.
+Kod `9541009` na `feature/apex-naval-command`, baza `365cdea`. Implementacja i lokalne bramki zakończone; **niezależny przegląd zażądał dwóch poprawek Important**. Task4 pozostaje nieodebrany. Review odtworzył (1) overwrite authority przez output containment przy trailing separator state-dir; (2) premature slot/symbol release po nonfinal reduction, bo finality wejścia błędnie uznawano za końcową finality zamknięcia. Oba przypadki mają poprawkę w `e31e36d` i potwierdzone regresje RED→GREEN; **scoped re-review nadal trwa, Task4 nie jest jeszcze odebrany**. Parent zweryfikował 8/8 hashy poprawki i actual TRX: targeted 50/50 Core i 14/14 command, affected 684/684 Core/Desktop i 136/136 Backtester; build solution/SDK bez błędów i ostrzeżeń. Nowe pole `ReductionUnsettled` jest wymagane w reservations: stare niezaakceptowane snapshots bez niego odmawiają load bez zmiany bajtów i nie mają automatycznej migracji. Poniższe starsze zielone wyniki są dowodem historycznym kandydata `9541009`, nie końcowych bajtów poprawki. To nie brokerowy test ani zgoda na aktywację flot.
 
 ## Dostarczone działanie
 - Jeden `NavalPortfolioCoordinator` i autorytatywny stan kapitału, nie oddzielne salda finansowane dla obu flot. Fleet/account-scoped handles konsumują te same cash/risk/slot holds.
