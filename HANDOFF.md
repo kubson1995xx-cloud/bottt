@@ -1,5 +1,19 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
+## APEX NAVAL COMMAND — aktywna rozbudowa 2026-10-29
+
+- Zlecenie: audyt → plan → pierwszy bezpieczny etap offline. Użytkownik rozszerzył zakres o opcjonalne OKX backtest/DEMO, ALFA/BRAVO i animowany panel; nie zezwolił na LIVE ani faktyczną transakcję DEMO. Stary panel/cTrader/ryzyko zachować.
+- **Źródło rozbudowy: `819cba9ba12c14b44577508af83417f70c2e5a86`, nie starsze `a886a15`.** Początkowa kopia główna była starsza niż istniejący `apex-demo/autonomy`; feature branch przesunięto fast-forward, bez resetowania innych gałęzi/worktree. Nie odtwarzać ukończonych history recovery/accounting/scoped certification/partial/backtester z autonomii.
+- Zweryfikowany zachowany Windows run [40360216699](https://github.com/kubson1995xx-cloud/bottt/actions/runs/40360216699) dla exact819cba9: success; rzeczywiste TRX **634 bot /126 platform /64 backtester PASS**, panel16 PASS i prawdziwy EXE smoke bez brokera PASS. Archiwum AI Lab180/181, jawnie poza produktem. To dowód bazowego produktu, nie nowego Naval/OKX i nie odbiór Windows11/cTrader.
+- Audyt bieżącej bazy: `reports/naval/AUDYT.md`; oficjalne OKX/EEA notatki `reports/naval/OKX_API_NOTES.md`. Stare scratch audyty a886 nie są aktualną listą braków finansowych.
+- Spec `docs/superpowers/specs/2026-10-29-apex-naval-design.md`, wymagania `2026-10-29-apex-naval-mission.md`, plan `docs/superpowers/plans/2026-10-29-apex-naval.md`; commit planu260e849. Gałąź `feature/apex-naval-command`, lokalna, bez push.
+- **UKOŃCZONE LOKALNIE Task1+2:** czysty evaluator w Core/Naval i read-only lokalny JSON replay. Kod `6f421651eb9a0cf2fbb07c69faf575343df31a47`; nowe **65/65** testów (zachowany TRX, 52/52 identycznych source inputów), rodzicielski nowy affected Core/Desktop **634/634 PASS**, solution i oba actual SDK cBoty DLL/.algo **0 warnings/errors**. Pierwszy build brakował assets Backtester.Tests; cache-only restore rozwiązał prerequisite, bez zmiany źródeł. Actual CLI odczytany przez rodzica:4 synthetic decyzje OFFLINE/NO_EXECUTION; invalid schema exit2 bez outputu.
+- **Niezależny review przyjął etap**, brak Critical/Important. Odłożony Minor M1: przy awarii stdout po udanym zapisie CLI zwraca exit2 i mylące „no replay published”, mimo kompletnego JSON. Nie dotyczy danych/strategii/zleceń; znany i opisany, nie ukryta poprawka po testach. Bez gateway/sieci/kluczy/zleceń/P&L/sizingu/admission. Nie nazywać tego gotowym UI/adapterem/flotami operacyjnymi.
+- Trwały raport odbioru i decyzji: `reports/naval/ETAP_1_OFFLINE.md`; instrukcja `docs/NAVAL_OFFLINE.md`. Dowody wykonawcy `scratch/apex-naval-offline`, rodzica `scratch/apex-naval-parent-verification`; kopie w scratch mogą wygasnąć, komendy/liczniki/digests zapisane w raporcie. Brak nowego pakietu Windows/OKX E2E.
+- Ledger tej misji `.superpowers/sdd/2026-10-29-apex-naval/progress.md`, raport wykonawcy `offline-report.md` (po ukończeniu). Plan Tasks3–8 to NIEUKOŃCZONA roadmapa: genuine spot data/backtest, central/fleet admission, OKX read/recovery/approved trade, telemetry/React/animacje, Windows/VPS.
+- Granice: centralne0,5%/1,5%/5%, nowy cash spot bez lewara; cTrader nadal Crypto refusal/REAL refusal, SL/TP, certyfikat i scoped guards bez zmian. Nie ma broker acceptance, nowych wyników rentowności ani zgody na jakąkolwiek transakcję.
+
+
 ## Aktualny stan Task5 — źródło dostawy `apex-demo/autonomy`
 
 **Ten rozdział zastępuje niższe checkpointy i poprzedni ZIP. Wszystko poniżej jest historią etapów, nie bieżącą listą zadań ani upoważnieniem do ponownych pełnych testów/audytów.** Stary artefakt `926afaa` jest nieaktualny dla autonomii.
