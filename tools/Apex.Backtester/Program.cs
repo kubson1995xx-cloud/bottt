@@ -18,6 +18,7 @@ namespace Apex.Backtester
         public const string SemanticsVersion = "backtest-v2.1-complete-account-evidence";
         public static int Main(string[] args)
         {
+            if (args.Length > 0 && args[0] == "naval") return Naval.NavalResearchCommand.Run(args.Skip(1).ToArray());
             if (args.Length == 0 || args[0] == "help" || args[0] == "--help")
             {
                 Console.WriteLine("Offline DEMO research only. smoke|research|portfolio --data DIR --manifest FILE --out DIR --from YYYY-MM-DD --to YYYY-MM-DD --warmup-from YYYY-MM-DD [--symbol EURUSD | --symbols EURUSD,GBPUSD] [--cost base|elevated|double] [--intrabar h1|m15] [--fx-max-age-hours 2] [--only Strategy|Class] [--tag NAME] [--profiles FILE,...] [--is-years 4] [--max-combos 100] [--max-runs 1000] [--parallel 1]. See docs/BACKTESTER.md. No implicit holdout or promotion.");
