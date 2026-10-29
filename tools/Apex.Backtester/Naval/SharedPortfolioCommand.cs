@@ -24,7 +24,7 @@ internal static class SharedPortfolioCommand
                 if(i+1>=args.Length||(args[i]!="--input"&&args[i]!="--state-dir"&&args[i]!="--output")||!options.TryAdd(args[i],args[i+1]))throw new ArgumentException("Unknown/duplicate/missing shared replay option");
             if(options.Count!=3)throw new ArgumentException("Require --input FILE --state-dir DIR --output FILE");
             string input=Local(options["--input"]),state=Local(options["--state-dir"]),output=Local(options["--output"]);
-            if(output==input||output==state||output.StartsWith(state+Path.DirectorySeparatorChar,StringComparison.Ordinal)||input.StartsWith(state+Path.DirectorySeparatorChar,StringComparison.Ordinal))throw new ArgumentException("Input/output must be separate from authority directory");
+            if(Path.GetRelativePath(input,output)=="."||SameOrWithin(output,state)||SameOrWithin(input,state))throw new ArgumentException("Input/output must be separate from authority directory");
             if(new FileInfo(input).Length>10000000)throw new ArgumentException("Input exceeds bounded local replay size");
             byte[] bytes=File.ReadAllBytes(input);
             var manifest=JsonSerializer.Deserialize<SharedReplayInput>(bytes,Json)??throw new ArgumentException("Empty input");
@@ -39,6 +39,14 @@ internal static class SharedPortfolioCommand
         catch(Exception e){Console.Error.WriteLine("OFFLINE shared replay refused: "+e.Message);return 2;}
     }
     private static string Hash(byte[] bytes)=>Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    private static bool SameOrWithin(string path,string directory)
+    {
+        // GetRelativePath handles roots, trailing separators and the target OS's case identity.
+        string relative=Path.GetRelativePath(directory,path);
+        return !Path.IsPathRooted(relative)&&relative!=".."&&
+            !relative.StartsWith(".."+Path.DirectorySeparatorChar,StringComparison.Ordinal)&&
+            !relative.StartsWith(".."+Path.AltDirectorySeparatorChar,StringComparison.Ordinal);
+    }
     private static string Local(string path)
     {
         if(string.IsNullOrWhiteSpace(path)||path.Contains("://")||path.IndexOf('\0')>=0)throw new ArgumentException("Local filesystem path required");

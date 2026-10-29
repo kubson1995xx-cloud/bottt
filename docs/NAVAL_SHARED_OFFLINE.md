@@ -23,6 +23,10 @@ From the repository root, using the already installed SDK/cache:
 All three paths are mandatory, local filesystem paths. Input and output must be
 outside the authority directory and must not be the same file. Symlink/reparse
 paths are refused by this CLI. Unknown/duplicate options fail with exit code 2.
+Containment/identity is checked before opening the authority, including trailing
+directory separators and filesystem roots, using native OS path comparison
+(case-insensitive on Windows). A similarly named sibling directory is not inside
+the authority. This is not protection against hard links or a hostile filesystem.
 Exit 0 means instructions executed/exported; individual business proposals may
 be refused, and their results must be inspected. It does not mean broker-ready.
 
@@ -103,6 +107,22 @@ receipt/fill watermarks, command/signal tombstones, coherent marks/day/peak equi
 sticky daily/DD/emergency latches, and mode/reason. `stateDigest` detects accidental
 scalar/content corruption as well as structural validation. It is an integrity
 checksum, **not** authentication against a hostile local filesystem user.
+
+Reservations retain `TerminalCoverage` for the final entry/remainder proof and
+separately persist `ReductionUnsettled`. A newly accepted reduction sets the latter
+even if entry proof already exists and inventory becomes zero. The slot/symbol and
+the previously held quote close-fee buffer remain until complete final lifecycle
+fill/fee coverage is accepted. Reconciliation/restart or duplicate fills cannot
+settle this flag; cancelled entry pending quantity is never recreated. Final
+coverage clears it and releases only obligations no longer backed by inventory or
+pending quantity. Later unique reductions require new final coverage again.
+
+The envelope schema remains 5 and the Naval schema label remains
+`naval-cash-risk-v1`, but this fix requires the new reservation field. Earlier
+unaccepted Task4 authority files with reservations missing `ReductionUnsettled`
+are refused without rewriting them; no migration, reset or inferred finality is
+provided. Keep those files intact for separately reviewed recovery. This fix does
+not repair an authority already overwritten by an old executable's export.
 
 One directory-wide exclusive lease owns the whole `EngineState` key
 `naval-authority-v1`; no per-fleet files or `SpotAccount` ledger exist here. All

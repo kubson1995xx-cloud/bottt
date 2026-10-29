@@ -160,7 +160,7 @@ public sealed class NavalPortfolioCoordinator
                         decimal removed=checked(f.Quantity+(inBase?f.Fee:0));
                         if(removed>position.Inventory)return StopCandidate(e,"OVERSELL",true,NavalJson.Serialize(r.Fills));
                         decimal cost=position.AllocatedCost*(position.Inventory-removed)/position.Inventory;
-                        changed=position with{Inventory=position.Inventory-removed,AllocatedCost=cost};
+                        changed=position with{Inventory=position.Inventory-removed,AllocatedCost=cost,ReductionUnsettled=true};
                         cash=cash with{Cash=checked(cash.Cash+f.Quantity*f.Price-(inBase?0:f.Fee))};
                     }
                     else
@@ -180,7 +180,7 @@ public sealed class NavalPortfolioCoordinator
                 {
                     var position=candidate.Reservations.SingleOrDefault(p=>p.Id==id);
                     if(!r.Final||!r.Complete||position==null||(expected==NavalEvidenceKind.Reject&&position.Filled!=0))return StopCandidate(e,"TERMINAL_CONFLICT",true,Conflict(r));
-                    candidate=candidate with{Reservations=candidate.Reservations.Select(p=>p.Id==id?p with{Pending=0,TerminalCoverage=true,
+                    candidate=candidate with{Reservations=candidate.Reservations.Select(p=>p.Id==id?p with{Pending=0,TerminalCoverage=true,ReductionUnsettled=false,
                         Stage=expected==NavalEvidenceKind.Reject?NavalReservationStage.Rejected:NavalReservationStage.Terminal}:p).ToArray()};
                 }
                 if(r.Marks.Count!=_definition.Catalog.Count||!_definition.Catalog.All(i=>r.Marks.TryGetValue(i.Instrument,out var price)&&price>0))

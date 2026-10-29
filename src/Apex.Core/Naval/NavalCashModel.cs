@@ -58,6 +58,8 @@ public sealed record NavalReservation
     public decimal CloseFeeHold { get; init; }
     public decimal RiskHold { get; init; }
     public bool TerminalCoverage { get; init; }
+    // Entry finality is retained above; every newly accepted reduction needs its own final coverage.
+    public bool ReductionUnsettled { get; init; }
     public NavalReservationStage Stage { get; init; }
 }
 public sealed record NavalAcceptedFill(string Key, string Digest, NavalFill Fill);

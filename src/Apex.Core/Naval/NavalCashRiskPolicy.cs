@@ -6,7 +6,7 @@ namespace Apex.Core.Naval;
 
 internal static class NavalCashRiskPolicy
 {
-    internal static bool Active(NavalReservation r) => r.Pending > 0 || r.Inventory > 0 || !r.TerminalCoverage;
+    internal static bool Active(NavalReservation r) => r.Pending > 0 || r.Inventory > 0 || !r.TerminalCoverage || r.ReductionUnsettled;
     internal static bool Text(string? s) => !string.IsNullOrWhiteSpace(s) && s.Length <= 200 && s == s.Trim() && !s.Any(char.IsControl);
     internal static void ValidateDefinition(NavalPortfolioDefinition d)
     {
@@ -43,6 +43,8 @@ internal static class NavalCashRiskPolicy
             var f=d.Fees;var mark=marks.TryGetValue(r.Intent.Instrument,out var p)?p:r.Intent.EntryPriceCeiling;
             decimal pendingNet=NetBuy(r.Pending,f),debit=BuyDebit(r.Pending,r.Intent.EntryPriceCeiling,f);
             decimal buffer=f.ExitInBase?0:(pendingNet+r.Inventory)*Math.Max(Math.Max(r.Intent.EntryPriceCeiling,r.Intent.TakeProfitPrice),mark)*f.ExitRate;
+            // Posting a reduction is not proof that its fees/fills are final, even at zero inventory.
+            if(r.ReductionUnsettled)buffer=Math.Max(buffer,r.CloseFeeHold);
             decimal risk=Math.Max(0,debit-StopValue(pendingNet,r,f))+Math.Max(0,NetSell(r.Inventory,mark,f)-StopValue(r.Inventory,r,f));
             return r with{EntryHold=debit,CloseFeeHold=buffer,RiskHold=risk};
         }

@@ -296,7 +296,7 @@ internal sealed class NavalCashFixture : IDisposable
         return new(C.OwnerToken,D.Id,"e-"+Generation+"-"+(++Sequence),Generation,Generation>state.Generation?1:state.Sequence+1,capture??Clock.Now,Clock.Now,kind,complete,final,Marks,fills,
             cash??state.Accounts,observations??state.Reservations.Where(NavalActive).Select(r=>new NavalObservation(r.Id,r.Inventory,ids.Contains(r.Id)?0:r.Pending)),ids);
     }
-    internal static bool NavalActive(NavalReservation r)=>r.Inventory>0||r.Pending>0||!r.TerminalCoverage;
+    internal static bool NavalActive(NavalReservation r)=>NavalCashRiskPolicy.Active(r);
     internal NavalFill Fill(NavalRiskResult r,decimal q,decimal price,decimal fee,bool reduction=false,string trade="buy",string feeCurrency="USD")
     {var reservation=View.Reservations.Single(x=>x.Id==r.ReservationId);return new(reservation.Account,reservation.Intent.Instrument,trade,r.ReservationId!,reduction,q,price,fee,feeCurrency,Clock.Now);}
     internal NavalRiskResult Reconcile()=>C.Reconcile(Receipt(NavalEvidenceKind.Reconcile,complete:true));
