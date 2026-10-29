@@ -50,7 +50,7 @@ public static class NavalBacktestRunner
             account.Apply(new("fill-" + (++nextId), entry.PositionId, symbol, entry.BaseAsset, entry.QuoteAsset,
                 time, SpotSide.Sell, p.Quantity, reference, px, p.Quantity * px * spec.Cost.FeeRate,
                 entry.QuoteAsset, reason, boundary));
-            protections.Remove(symbol); CheckRisk();
+            protections.Remove(symbol);
         }
         equity.Add(new(spec.From, account.Cash, spec.InitialCash, spec.InitialCash, 0, 0, spec.InitialCash));
         for (var day = spec.From; day < spec.To; day = day.AddDays(1))
@@ -58,7 +58,6 @@ public static class NavalBacktestRunner
             var bars = instruments.ToDictionary(x => x.Key, x => features[x.Key].At(day));
             dayStart = previousClose;
             foreach (var b in bars) marks[b.Key] = b.Value.Open;
-            CheckRisk();
             // 1. Protective gaps, 2. channel exits, 3. ranked entry admission.
             foreach (var symbol in account.Positions.Keys.OrderBy(s => s, StringComparer.Ordinal).ToArray())
             {
@@ -66,8 +65,14 @@ public static class NavalBacktestRunner
                 if (b.Open <= p.Stop) Sell(symbol, day, b.Open, "StopGap");
                 else if (b.Open >= p.Target) Sell(symbol, day, p.Target, "TakeProfitGap");
             }
+            // Observe the whole gap phase: a TP gap cannot peak inventory above its conservative fill.
+            CheckRisk();
             foreach (var s in pending.Where(s => s.Decision.Action == NavalAction.ExitSignal).OrderBy(s => s.Decision.Instrument, StringComparer.Ordinal))
-                if (account.Positions.ContainsKey(s.Decision.Instrument)) Sell(s.Decision.Instrument, day.AddTicks(1), bars[s.Decision.Instrument].Open, "Channel");
+                if (account.Positions.ContainsKey(s.Decision.Instrument))
+                {
+                    Sell(s.Decision.Instrument, day.AddTicks(1), bars[s.Decision.Instrument].Open, "Channel");
+                    CheckRisk();
+                }
             foreach (var s in pending.Where(s => s.Decision.Action == NavalAction.EntrySignal).OrderByDescending(s => s.Rank).ThenBy(s => s.Decision.Instrument, StringComparer.Ordinal))
             {
                 var symbol = s.Decision.Instrument; var instrument = instruments[symbol]; var b = bars[symbol];
@@ -101,10 +106,14 @@ public static class NavalBacktestRunner
                 if (b.Low <= p.Stop) Sell(symbol, closeTime, p.Stop, "Stop");
                 else if (b.High >= p.Target) Sell(symbol, closeTime, p.Target, "TakeProfit");
             }
+            // All close-observed fills and surviving close marks form one observation, not ordinal ticks.
             foreach (var b in bars) marks[b.Key] = b.Value.Close;
             CheckRisk();
             if (closeTime == spec.To)
+            {
                 foreach (var symbol in account.Positions.Keys.OrderBy(s => s, StringComparer.Ordinal).ToArray()) Sell(symbol, closeTime, bars[symbol].Close, "Boundary", true);
+                CheckRisk();
+            }
             previousClose = account.LiquidationEquity(marks, spec.Cost);
             var balance = spec.InitialCash + account.Trades.Sum(t => t.Net);
             closePeak = Math.Max(closePeak, previousClose); balancePeak = Math.Max(balancePeak, balance);
