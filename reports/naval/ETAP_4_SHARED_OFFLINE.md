@@ -1,4 +1,11 @@
-# Task4 — wspólny kapitał offline, kandydat do odbioru
+# Task4 — wspólny kapitał, odbiór wyłącznie offline
+
+## Końcowa dyspozycja
+**ZAAKCEPTOWANY OFFLINE**, kod `e31e36d`, po niezależnym review i scoped re-review (`task-4-fix1-review.md`). Oba Important są ADDRESSED, bez nowych Critical/Important z poprawki. Parent wykonał retained verifier z exit 0: 8/8 plików i 40 artefaktów zgodnych, rzeczywiste RED→GREEN, CLI i persisted state potwierdzone. Nie powtarzano niezmienionych suite. Końcowe affected: 684/684 Core/Desktop i 136/136 Backtester, solution/SDK bez błędów i ostrzeżeń.
+
+Odbiór dotyczy jednego zaufanego syntetycznego lifecycle na rezerwację, Linux, lokalnego współpracującego filesystemu oraz authority Offline-only. **Nie obejmuje brokera, Windows runtime, utraty zasilania, migracji starego Naval ani rentowności.** Starsze niezaakceptowane reservations bez `ReductionUnsettled` wymagają osobno ocenionego recovery, nie resetu. Task5A może rozpocząć izolowany read-only adapter bez zmiany authority.
+
+Poniższy opis kandydata i wcześniejszych dowodów jest zachowany jako historia; nie nadpisuje tej dyspozycji.
 
 ## Status
 Kod `9541009` na `feature/apex-naval-command`, baza `365cdea`. Implementacja i lokalne bramki zakończone; **niezależny przegląd zażądał dwóch poprawek Important**. Task4 pozostaje nieodebrany. Review odtworzył (1) overwrite authority przez output containment przy trailing separator state-dir; (2) premature slot/symbol release po nonfinal reduction, bo finality wejścia błędnie uznawano za końcową finality zamknięcia. Oba przypadki mają poprawkę w `e31e36d` i potwierdzone regresje RED→GREEN; **scoped re-review nadal trwa, Task4 nie jest jeszcze odebrany**. Parent zweryfikował 8/8 hashy poprawki i actual TRX: targeted 50/50 Core i 14/14 command, affected 684/684 Core/Desktop i 136/136 Backtester; build solution/SDK bez błędów i ostrzeżeń. Nowe pole `ReductionUnsettled` jest wymagane w reservations: stare niezaakceptowane snapshots bez niego odmawiają load bez zmiany bajtów i nie mają automatycznej migracji. Poniższe starsze zielone wyniki są dowodem historycznym kandydata `9541009`, nie końcowych bajtów poprawki. To nie brokerowy test ani zgoda na aktywację flot.
