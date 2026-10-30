@@ -37,7 +37,7 @@ $oldPackage=$env:APEX_PACKAGE_ROOT;$oldEvidence=$env:NAVAL_HOST_EVIDENCE_DIR
 $env:APEX_PACKAGE_ROOT=$null;$env:NAVAL_HOST_EVIDENCE_DIR=$null
 function Inputs {
     $names=@(& git -C $repo ls-files) + @(& git -C $repo ls-files --others --exclude-standard)
-    $items=@($names|Sort-Object -Unique|Where-Object { $_ -match '^(src/|tests/|tools/|frontend/|config/|docs/|reports/|\.github/|package.*\.json$|APEX.*\.sln$|README\.md$|PRZECZYTAJ\.md$|Directory\.|global\.json$|NuGet\.)' }|ForEach-Object {
+    $items=@($names|Sort-Object -Unique|Where-Object { $_ -match '^(src/|tests/|tools/|frontend/|config/|docs/|reports/|\.github/|\.gitattributes$|package.*\.json$|APEX.*\.sln$|README\.md$|PRZECZYTAJ\.md$|Directory\.|global\.json$|NuGet\.)' }|ForEach-Object {
         $p=Join-Path $repo $_
         if (-not (Test-Path -LiteralPath $p -PathType Leaf) -or ((Get-Item -LiteralPath $p -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Source input missing/link' }
         [ordered]@{path=$_;bytes=(Get-Item -LiteralPath $p).Length;sha256=(Hash $p)}
