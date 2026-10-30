@@ -138,7 +138,10 @@ namespace Apex.Desktop
             if (naval != null) app.MapGet("/index.html", RenderIndex);
             app.UseStaticFiles();
             if (naval != null)
+            {
                 NavalReadEndpoints.MapNavalReadEndpoints(app, new NavalReadService(new NavalPublicationReader(naval.PublicationPath, naval.Scope), naval.Scope), naval.Access);
+                NavalFrontendEndpoints.MapNavalFrontendEndpoints(app);
+            }
 
             app.MapGet("/api/status", () => Results.Json(new
             {

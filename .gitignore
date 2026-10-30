@@ -9,3 +9,6 @@ TestResults/
 /dist/
 node_modules/
 .superpowers/
+/frontend/naval/dist/
+/frontend/naval/*.tsbuildinfo
+/src/Apex.Desktop/wwwroot/naval/

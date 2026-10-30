@@ -1,0 +1,23 @@
+{
+  "name": "apex-naval-read",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "build": "npm run typecheck && vite build && node scripts/stage-dist.mjs",
+    "test:build": "node --test tests/build.test.mjs"
+  },
+  "dependencies": {
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vite": "8.2.4",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/node": "26.6.5"
+  }
+}
