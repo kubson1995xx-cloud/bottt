@@ -1,6 +1,14 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
-## Bieżący punkt wznowienia Naval — Task8A ODEBRANY LOKALNIE / LINUX ENGINEERING DELIVERY
+## Bieżący punkt wznowienia — Windows x64 self-contained (zlecenie 2026-10-30)
+
+- Użytkownik zlecił gotowy `APEX-NAVAL-COMMAND-Windows-x64.zip`: double-click `ApexDesktop.exe`, bez ręcznej instalacji .NET, automatyczna przeglądarka, wyłącznie `127.0.0.1`, osobny prywatny katalog z Windows ACL. Zachować pięć widoków, stary polski panel, opcjonalne 3D i wszystkie istniejące funkcje oraz zabezpieczenia. Instrukcja po polsku i kontrola sekretów obowiązkowe.
+- Zgoda obejmuje push gałęzi roboczej i GitHub Actions `windows-latest` z rzeczywistym uruchomieniem EXE/panelu. Nie obejmuje merge, wdrożenia, rzeczywistych kont ani jakichkolwiek transakcji DEMO/LIVE. Tylko syntetyczna/historyczna prezentacja; bez zmian logiki handlowej.
+- Baza: `fff4baf` na `feature/apex-naval-command`, repo było czyste. Aktywny wykonawca planu: `sa-0-639af3c3` / `deleg_999c319f`. Sprawdza istniejący startup, ACL, auth, builder, verifier i workflow, zapisując spec/plan `2026-10-30-apex-naval-windows`. Bez implementacji produktu w tym zadaniu.
+- Następne bramki: implementacja i regresje nowej granicy uruchamiania, niezależny scoped review, rzeczywisty Windows CI oraz pobranie/odczyt finalnego artefaktu. Nie nazywać Windows odebranym przed wykonaniem tych bramek. Hosted Windows Server nie jest testem na fizycznym Windows 11 Pro użytkownika.
+- Starszy wpis o konieczności zgody na push/CI poniżej jest historią: aktualne zlecenie udziela tej zgody. Nie wznawiać ukończonego Task5A ze starej listy zadań.
+
+## Poprzedni odbiór — Task8A / LINUX ENGINEERING DELIVERY
 
 - **Task8A zaakceptowany w lokalnym zakresie Linux**, kod `0720f29`. Review `task-8a-fix2-review.md`: residual I3-R1 ADDRESSED, brak nowych Critical/Important; I1/I2 zamknięte w poprzednim scopedreview. Controlled150/150 i root18/18 zweryfikowane, oryginalne TAP inputs0/0/1→0/1/1. Nie oznacza całej misji ani brokerskiego odbioru.
 - **Trwały artifact poza scratch:** `/home/ubuntu/projects/apex-deliveries/naval-linux-0720f29/APEX-NAVAL-COMMAND-linux-x64.zip`,1505312bytes,SHA256`3d81314e45f26f1f437a183883d63deff153a6b2bfbb25aa03686a952721144a`. Parent skopiował i odczytał SHA/CRC49members oraz22indexedfiles w evidence-index.json. PRZECZYTAJ.md i evidence/ zachowują raporty,source-map,metadata,browserresult i werdykty; nie polegać na scratch survival. ZIP niezmieniony, explicit engineering reseal.
