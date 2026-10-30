@@ -1,6 +1,17 @@
 name: APEX Windows DEMO
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'full-delivery keeps the existing package job; task1-source validates private storage only'
+        type: choice
+        options: [full-delivery, task1-source]
+        default: full-delivery
+      phase:
+        description: 'Source evidence label only; RED failures still fail the run'
+        type: choice
+        options: [red, green]
+        default: green
   push:
     branches: ["claude/beautiful-mccarthy-9cibo1"]
     paths:
@@ -16,6 +27,7 @@ permissions:
   contents: read
 jobs:
   windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full-delivery'
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
@@ -75,4 +87,25 @@ jobs:
             ${{ runner.temp }}/APEX Windows DEMO-package-evidence/archive-readback.json
             ${{ runner.temp }}/APEX Windows DEMO-package-evidence/packaged.trx
           if-no-files-found: warn
+          retention-days: 30
+  nativeSource:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'task1-source' && github.ref == 'refs/heads/feature/apex-naval-command'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Native Task1 source tests only (no broker or package)
+        shell: powershell
+        env:
+          TASK1_PHASE: ${{ inputs.phase }}
+        run: ./tools/windows/Test-PrivateDataSource.ps1 -Phase $env:TASK1_PHASE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Task1-Windows-Source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/apex-task1-source-${{ github.run_id }}-${{ github.run_attempt }}/*
+          if-no-files-found: error
           retention-days: 30

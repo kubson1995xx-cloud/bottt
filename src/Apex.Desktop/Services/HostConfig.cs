@@ -161,6 +161,11 @@ namespace Apex.Desktop.Services
             string? env = Environment.GetEnvironmentVariable("APEX_DATA_DIR");
             if (!string.IsNullOrWhiteSpace(env)) return env!;
             string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            return DefaultDataDirFromLocalAppData(baseDir);
+        }
+
+        internal static string DefaultDataDirFromLocalAppData(string baseDir)
+        {
             if (string.IsNullOrWhiteSpace(baseDir)) baseDir = AppContext.BaseDirectory;
             return System.IO.Path.Combine(baseDir, "APEX Trading AI");
         }
