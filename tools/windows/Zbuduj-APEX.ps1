@@ -110,6 +110,12 @@ try {
         $oldPresentation=$env:APEX_PRESENTATION_TEST_DIRECTORY
         try {
             $env:APEX_PRESENTATION_TEST_DIRECTORY=Join-Path $presentationBuild 'presentation'
+            # Program.Run intentionally reads its real app-base presentation, not
+            # the helper-only test environment override. Match the accepted Task3
+            # lane's genuine two-file prerequisite before native source execution.
+            $nativePresentation=Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0/presentation'
+            New-Item -ItemType Directory -Force -Path $nativePresentation | Out-Null
+            foreach ($name in @('naval-publication.json','presentation.json')) { Copy-Item -LiteralPath (Join-Path $env:APEX_PRESENTATION_TEST_DIRECTORY $name) -Destination (Join-Path $nativePresentation $name) -Force }
             Save-BinaryMap 'before-windows-source.json'
             Invoke-ApexBuildDotnet test tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-build --no-restore --filter 'Gate=Source' --logger 'trx;LogFileName=windows.trx' --results-directory $evidence;Sprawdz 'All native Windows Source tests'
             $testCounts.windows=Read-ApexTestCounts (Join-Path $evidence 'windows.trx')
