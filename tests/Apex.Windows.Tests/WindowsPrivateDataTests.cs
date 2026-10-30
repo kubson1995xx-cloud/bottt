@@ -183,6 +183,27 @@ public sealed class WindowsPrivateDataTests
         Assert.Equal(before, f.Snapshot());
     }
 
+    [Fact]
+    public async Task UnavailablePrivateRootExitsWithSafeCodeWithoutWrites()
+    {
+        using var f = new PrivateFixture(); string data = f.Directory("data");
+        File.WriteAllText(System.IO.Path.Combine(data, "apex.config.json"), "{");
+        var acl = new DirectoryInfo(data).GetAccessControl();
+        // Explicit current-user denial also applies to an elevated runner; an
+        // Administrators allow must not hide the unavailable-directory case.
+        acl.AddAccessRule(new FileSystemAccessRule(PrivateFixture.Me, FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories, AccessControlType.Deny));
+        new DirectoryInfo(data).SetAccessControl(acl);
+        var before = f.Snapshot();
+        var psi = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        psi.ArgumentList.Add(typeof(Apex.Desktop.Program).Assembly.Location); psi.ArgumentList.Add("--data"); psi.ArgumentList.Add(data); psi.ArgumentList.Add("--no-browser");
+        using var process = Process.Start(psi)!; var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try { await process.WaitForExitAsync(timeout.Token); } finally { if (!process.HasExited) process.Kill(true); }
+        string output = await stdout + await stderr;
+        Assert.Equal(2, process.ExitCode); Assert.Equal(before, f.Snapshot());
+        Assert.Contains("HOST_DATA_UNAVAILABLE", output); Assert.DoesNotContain("Exception", output);
+    }
+
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "ConvertStringSecurityDescriptorToSecurityDescriptorW")] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string s, uint revision, out IntPtr sd, out uint size);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "SetFileSecurityW")] static extern bool SetFileSecurity(string path, uint info, IntPtr sd);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
