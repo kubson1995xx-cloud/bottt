@@ -61,7 +61,10 @@ namespace Apex.Desktop
 
             // Jedna instancja na katalog danych – dwa procesy APEX nie mogą zarządzać tymi samymi kontami.
             FileStream lockFile;
-            try { lockFile = new FileStream(Path.Combine(dataDir, "apex.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            // Windows admission must still inspect the existing empty lock's ACL.
+            // Permit reads only: a second ReadWrite owner and delete/replace remain
+            // denied. Unix keeps FileShare.None for its exclusive flock semantics.
+            try { lockFile = new FileStream(Path.Combine(dataDir, "apex.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, OperatingSystem.IsWindows() ? FileShare.Read : FileShare.None); }
             catch (IOException ex) when ((ex.HResult & 0xffff) is 32 or 33 or 11)
             {
                 Console.Error.WriteLine("HOST_ALREADY_RUNNING: APEX już działa dla tego katalogu danych. Zamknij drugą instancję; nie otwarto przeglądarki.");
@@ -128,6 +131,7 @@ namespace Apex.Desktop
             AccountManager? accounts = null;
             BridgeServer? bridge = null;
             WebApplication? app = null;
+            CancellationTokenRegistration stopping = default;
             void StopBackground()
             {
                 try { cts.Cancel(); }
@@ -156,7 +160,7 @@ namespace Apex.Desktop
                     o.SerializerOptions.NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals;
                 });
                 app = builder.Build();
-                using var stopping = app.Lifetime.ApplicationStopping.Register(() =>
+                stopping = app.Lifetime.ApplicationStopping.Register(() =>
                 {
                     try { StopBackground(); }
                     finally { accounts.Dispose(); }
@@ -363,7 +367,11 @@ namespace Apex.Desktop
                         finally
                         {
                             try { if (newsService != null) await newsService.StopAsync(); }
-                            finally { if (app != null) await app.DisposeAsync(); }
+                            finally
+                            {
+                                try { if (app != null) await app.DisposeAsync(); }
+                                finally { stopping.Dispose(); }
+                            }
                         }
                     }
                 }

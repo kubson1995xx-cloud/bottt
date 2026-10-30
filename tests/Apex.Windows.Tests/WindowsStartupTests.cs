@@ -65,6 +65,11 @@ public sealed class WindowsStartupTests
         {
             using var file = new FileStream(Path.Combine(Root, "apex.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             Assert.DoesNotContain(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners(), p => p.Port == Port);
+            if (Resources.TryGetValue("bridge", out var bridge))
+            {
+                var listener = (TcpListener?)typeof(BridgeServer).GetField("_tcp", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(bridge);
+                Assert.False(listener?.Server.IsBound == true, "Optional TCP listener survived shutdown");
+            }
             if (Resources.TryGetValue("services", out var service))
                 Assert.True(((Task?)typeof(NewsService).GetField("_worker", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(service))?.IsCompleted == true, "News worker survived host shutdown");
             if (Resources.TryGetValue("accounts", out var a))
@@ -139,6 +144,8 @@ public sealed class WindowsStartupTests
     {
         await using var first = new Host(false); _ = first.Start(); await first.Ready();
         var before = File.ReadAllBytes(first.Store.Path_); var calls = new List<ProcessStartInfo>();
+        Assert.Throws<IOException>(() => { using var duplicate = new FileStream(Path.Combine(first.Root, "apex.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite); });
+        Assert.NotNull(Record.Exception(() => File.Delete(Path.Combine(first.Root, "apex.lock"))));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var previousError = Console.Error; using var error = new StringWriter(); Console.SetError(error);
         try { Assert.Equal(2, await Program.Run(new[] { "--data", first.Root }, false, null, calls.Add, timeout.Token, null)); }
