@@ -22,8 +22,12 @@ foreach ($name in (& git ls-files)) {
     sdk=(& dotnet --version); powershell=$PSVersionTable.PSVersion.ToString(); inputs=$inputs
 } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $evidence 'source-map.json') -Encoding UTF8
 function Invoke-Gate([string]$label, [string[]]$arguments) {
+    # Windows PowerShell 5.1 wraps native stderr as ErrorRecords. Retain it,
+    # then gate on the real exit code rather than aborting evidence collection.
+    $ErrorActionPreference = 'Continue'
     & dotnet @arguments *> (Join-Path $evidence ($label + '.log'))
-    return $LASTEXITCODE
+    $nativeExit = $LASTEXITCODE
+    return $nativeExit
 }
 function Assert-Build([string]$label, [string[]]$arguments) {
     $exit = Invoke-Gate $label $arguments

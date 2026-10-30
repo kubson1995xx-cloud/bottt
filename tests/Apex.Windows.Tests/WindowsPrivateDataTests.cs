@@ -221,9 +221,10 @@ internal sealed class PrivateFixture : IDisposable
     }
     internal static void Junction(string link, string target)
     {
-        var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        psi.ArgumentList.Add("/c"); psi.ArgumentList.Add($"mklink /J \"{link}\" \"{target}\"");
-        using var p = Process.Start(psi)!; p.WaitForExit(); Assert.Equal(0, p.ExitCode);
+        // cmd is not a CommandLineToArgvW consumer: don't quote its whole /c
+        // command as one ArgumentList item (that quotes mklink as a filename).
+        var psi = new ProcessStartInfo("cmd.exe", $"/d /c mklink /J \"{link}\" \"{target}\"") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        using var p = Process.Start(psi)!; string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd(); p.WaitForExit(); Assert.True(p.ExitCode == 0, "Junction fixture: " + output);
         Assert.True((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0);
     }
     public void Dispose() { if (System.IO.Directory.Exists(Root)) System.IO.Directory.Delete(Root, true); }
