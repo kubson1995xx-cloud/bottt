@@ -51,6 +51,8 @@ function Read-ApexFrontendCounts([string]$Path) {
 # Public presentation validation is deliberately not financial authority. The native Source
 # test and (in Task3) the host must ALSO use NavalPublicationReader.Parse on these bytes.
 function Read-ApexPresentationJson([string]$Path, [int]$MaximumBytes) {
+    # PS5.1 does not preload the framework assembly containing the JSON XML reader.
+    Add-Type -AssemblyName System.Runtime.Serialization
     if ((Get-Item -LiteralPath $Path).Length -gt $MaximumBytes) { throw 'Presentation JSON too large' }
     $bytes=[IO.File]::ReadAllBytes($Path)
     # The framework JSON XML reader retains duplicate keys on PS5.1 AND PS7.
