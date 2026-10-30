@@ -1,4 +1,16 @@
-# Task8A — paczka Linux istnieje, residual TAP check w naprawie
+# Task8A — lokalna dostawa Linux odebrana
+
+## Końcowa dyspozycja
+**ZAAKCEPTOWANY LOKALNIE/Linux engineering delivery**, kod `0720f29`, po `task-8a-fix2-review.md`: I3-R1 ADDRESSED, brak nowych Critical/Important, I1/I2 wcześniej zamknięte. 150kontroli weryfikatora i root18/18, exactreviewinput0/1/1. Nie deklarować całej misji ani Windows/broker acceptance.
+
+**Trwała paczka:** `/home/ubuntu/projects/apex-deliveries/naval-linux-0720f29/APEX-NAVAL-COMMAND-linux-x64.zip`,1505312bytes,SHA256`3d81314e45f26f1f437a183883d63deff153a6b2bfbb25aa03686a952721144a`. Parent skopiował poza scratch, ponownie odczytał hash/CRC49members i22indexedfiles. `PRZECZYTAJ.md`, `evidence/` oraz `evidence-index.json` zachowują instrukcję i dowody. Engineeringresealmetadane nie zostały podmienione.
+
+Runtime i assets zachowane bajtowo; actual849/126/168tests,109packaged i100browsercheckrecords reused, nie nowy run. TargetLinuxx64/glibc framework-dependent ASP.NETCore8, defaultread-off, brak kont i kluczy. Historyczny/syntetyczny passivehost i UI/3D nie stanowią operationalOKX/trustedbrokerfinancialauthority.
+
+Następny WindowsremoteCI/push wymaga jawnej odrębnej zgody; remoteActions nie wykonano. Windowsnative/ACL/browser/device/VPS/mobileTLS/privatebroker/recovery/issuer oraz realDEMOE2E nadal osobne. LIVE niedozwolony, rentowność nieudowodniona.
+
+## Historia — kandydaci i naprawy
+Poniższe BLOCKED/REQUESTCHANGES/wtokuwpisy to zachowana historia, nie bieżący status.
 
 ## Scoped review round1
 I1 i I2 ADDRESSED; I3 częściowo niezamknięty (`task-8a-fix1-review.md`). Jedyny residual Important I3-R1: parser pomija dodatkowy bare numbered TAP result `ok 59`, akceptując59recordsvsplan58 przy rehashed logach. Obecny ZIP ma autentyczne spójne wyniki; wada dotyczy fail-closed validatora.

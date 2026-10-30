@@ -1,6 +1,15 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
-## Bieżący punkt wznowienia Naval — Task8A NAPRAWA WERYFIKATORA / PACZKA NIEODEBRANA
+## Bieżący punkt wznowienia Naval — Task8A ODEBRANY LOKALNIE / LINUX ENGINEERING DELIVERY
+
+- **Task8A zaakceptowany w lokalnym zakresie Linux**, kod `0720f29`. Review `task-8a-fix2-review.md`: residual I3-R1 ADDRESSED, brak nowych Critical/Important; I1/I2 zamknięte w poprzednim scopedreview. Controlled150/150 i root18/18 zweryfikowane, oryginalne TAP inputs0/0/1→0/1/1. Nie oznacza całej misji ani brokerskiego odbioru.
+- **Trwały artifact poza scratch:** `/home/ubuntu/projects/apex-deliveries/naval-linux-0720f29/APEX-NAVAL-COMMAND-linux-x64.zip`,1505312bytes,SHA256`3d81314e45f26f1f437a183883d63deff153a6b2bfbb25aa03686a952721144a`. Parent skopiował i odczytał SHA/CRC49members oraz22indexedfiles w evidence-index.json. PRZECZYTAJ.md i evidence/ zachowują raporty,source-map,metadata,browserresult i werdykty; nie polegać na scratch survival. ZIP niezmieniony, explicit engineering reseal.
+- Runtime/servedassets/logs są bajtowo identyczne z rzeczywistym wcześniej wykonanym buildem `dacf8eb`:849bot/126platform/168Backtester,109extractedpackage i100browserrecords REUSED, nie nowe execution. Linuxx64/glibcframeworkdependentASP.NET8. Defaultread-off, bez kont/credentials, read-onlyhost/historyczne/synthetic, nie operationalOKX.
+- **Nie ma aktywnego wykonawcy. Następny zewnętrzny gate wymaga osobnej zgody:** push dokładnej zreviewowanej gałęzi feature/apex-naval-command do kubson1995xx-cloud/bottt i workflow_dispatch świeżego WindowsCI z readback artifact. Nie pushować/uruchamiaćremote CI bez zgody. WindowsPS5.1/nativeACL/browser/device, VPS/systemd/TLS/mobile/privatebroker/WS/issuer/realDEMOtransaction pozostają NIEODEBRANE. TransakcjaDEMO wymaga osobnej zgody niezależnie od CI. Localwholemissioncompletion/rentowność nieudowodnione.
+
+## Historia — poprawki weryfikatora i wcześniejsze paczki
+
+Poniższe dawne NIEODEBRANY/review-w-toku wpisy są historią i nie zastępują bieżącej dyspozycji.
 
 - **Task8A review REQUEST CHANGES — 3 Important**, kod `ba29e41`, raport `task-8a-delivery-review.md`. Niezależny review potwierdził realny ZIP i jego testy, ale copy-only probes wykazały luki weryfikatora: I1 rehashed private-map/cache/replay files, I2 unlisted case-alias asset, I3 sprzeczne frontend TAP log/hash/count bindings. Nie wykazano zanieczyszczenia istniejącej paczki ani produkcyjnego auth/Core/scene defect. Cały etap nadal NIEODEBRANY.
 - **Scoped review round1: I1 i I2 ADDRESSED, I3 częściowo niezamknięty.** Raport `task-8a-fix1-review.md` odtworzył residual Important I3-R1: dodatkowy bare wpis `ok 59` przed planem `1..58` jest pomijany przez regex. To weryfikatorowy kontrakt wyników, nie fałszywe wyniki obecnego ZIP-a. Exact runtime/asset parity i autentyczność dowodów nadal potwierdzone.
