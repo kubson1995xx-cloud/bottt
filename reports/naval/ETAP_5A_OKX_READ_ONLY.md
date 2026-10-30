@@ -1,5 +1,12 @@
 # Task5A — adapter OKX EEA DEMO tylko do odczytu
 
+## Końcowy odbiór zakresu offline
+**ZAAKCEPTOWANY OFFLINE**, źródła `b6c327f`, po review i scoped re-review `task-5a-fix1-review.md`. I1–I6 i M1: ADDRESSED, bez nowych Critical/Important z poprawki. Parent ponownie porównał 21/21 źródeł z manifestem i odczytał actual TRX: **130 PASS / 0 FAIL / 1 explicit public-smoke SKIP**, library build **0 warnings/errors**, osobny synthetic handler smoke **8/8**. Zachowane artefakty dotyczą identycznych bajtów; bez powtarzania suite.
+
+Odbiór dotyczy izolowanego transportu i fixture pipeline, nie prywatnej łączności, final-byte public connectivity, pełnej historii/uzgodnienia, Core/WS/continuity ani broker authority. **Private DEMO smoke BLOCKED — securely configured credentials absent.** Publiczny sukces 568 instrumentów pochodzi z wcześniejszych bajtów. Snapshoty pozostają nieufnymi observations; brak START/zleceń/drugiego ledgera.
+
+Poniżej zachowana historia kandydata, błędów i poprzednich dowodów; nie zastępuje powyższego odbioru.
+
 ## Status
 Kod `11fd206`, baza `52731cb`, gałąź `feature/apex-naval-command`. **Review: REQUEST_CHANGES — 6 Important i 1 Minor odtworzone na końcowym DLL. Etap NIEODEBRANY.** Raport `task-5a-okx-read-review.md` wykazał: pomijanie wspólnego UID quota przy bootstrap różnych bindings, brak wykrycia konfliktu pending ordId w stronicowaniu, ignorowanie actual tradeQuoteCcy w diagnostyce, porównanie cash/bills z różnych interwałów, cichą utratę precyzji derived decimal i malformed Unicode wymykający się Failed-read contract. Minor dotyczy pending Limit=1 z pustą stroną. Brak Critical i ujawnionego write/Core authority bypass. Poprawki `b6c327f` mają 25 nowych regresji i behavioral RED→GREEN; **scoped re-review w toku, etap wciąż NIEODEBRANY**. Parent dopasował 21/21 plików do manifestu `2c2419cc69c64434947d62cc9c920fc9f34f0f3c5f8bd69284fc52a1eaa1ee0e`, odczytał full affected TRX: 130 PASS / 0 FAIL / 1 explicit public SKIP i build 0 warnings/errors. Osobny synthetic real-handler smoke ma 8/8; nie dodawać go do licznika suite. W poprawkach nie było sieci ani credentials. Zachowane wcześniejsze 105 zielonych testów nie obejmowały tych przypadków. Review napraw: `task-5a-fix1-review.md`.
 
