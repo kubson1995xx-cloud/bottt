@@ -35,7 +35,7 @@ internal static class WindowsLocalSetup
             }
             catch (Exception e) when (e is not OutOfMemoryException) { return LocalSetupState.Pending; }
         }
-        return Directory.EnumerateFileSystemEntries(dataDirectory).Any(p => !Path.GetFileName(p).Equals("apex.lock", StringComparison.Ordinal)) ? LocalSetupState.Existing : LocalSetupState.Empty;
+        return Directory.EnumerateFileSystemEntries(dataDirectory).Any(p => !Path.GetFileName(p).Equals("apex.lock", StringComparison.Ordinal) || (File.GetAttributes(p) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) ? LocalSetupState.Existing : LocalSetupState.Empty;
     }
     internal static LocalSetupResult Ensure(string dataDirectory, string presentationDirectory) => Ensure(dataDirectory, presentationDirectory, null);
     // Per-call source test observer: no global state, CLI/config/environment switch or financial authority.

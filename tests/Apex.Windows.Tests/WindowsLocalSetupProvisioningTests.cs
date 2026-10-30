@@ -89,6 +89,14 @@ public sealed partial class WindowsLocalSetupTests
         var before = f.Snapshot(); var restart = Ensure(f.Root); Same(before, f);
         Assert.False(Property<bool>(restart, "Initialized")); Assert.False(Property<bool>(restart, "NeedsCredentialPrompt"));
     }
+    [Theory, Trait("Gate", "Source")]
+    [InlineData("apex.lock")][InlineData("notes")]
+    public void OnlyOrdinaryOwnedLockIsIgnored(string directoryName)
+    {
+        using var f = new SetupFixture(); File.Delete(Path.Combine(f.Root, "apex.lock"));
+        Directory.CreateDirectory(Path.Combine(f.Root, directoryName));
+        Assert.Equal("Existing", State(f.Root)); RefusesUnchanged(f);
+    }
     [Fact, Trait("Gate", "Source")]
     public void ExistingConfigAndCustomProfileAreBytePreserved()
     {
