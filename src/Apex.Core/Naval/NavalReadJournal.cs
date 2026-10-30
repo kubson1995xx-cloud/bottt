@@ -119,6 +119,7 @@ public static class NavalReadJournal
             j.Batches.Count!=Math.Min(Capacity,j.LastSequence)||j.OldestAvailableSequence!=j.LastSequence-j.Batches.Count+1||j.IntegrityDigest!=Digest(j))
             throw new InvalidDataException("Invalid publication metadata");
         long sequence=j.OldestAvailableSequence;long generation=-1,sourceSequence=-1;
+        var acceptedFillKeys=new HashSet<string>(StringComparer.Ordinal);
         foreach(var b in j.Batches)
         {
             if(b.Sequence!=sequence++||b.EventId!=j.Epoch+":"+b.Sequence.ToString(System.Globalization.CultureInfo.InvariantCulture)||b.FinancialRevision!=j.BaselineRevision+b.Sequence||
@@ -140,8 +141,16 @@ public static class NavalReadJournal
                         !j.Checkpoint.Fleets.Any(fleet=>fleet.Fleet==f.Fleet&&fleet.Fills.Contains(f.Fill))))||
                     (reservation&&(f.Account!=f.Reservation!.Reservation.Account||f.Fleet!=f.Reservation.Reservation.Fleet||f.ReservationId!=f.Reservation.Reservation.Id))||
                     (coverage&&(!f.Coverage!.Complete||!f.Coverage.Final||!f.Coverage.TerminalCoverage||
-                        (f.Coverage.OfflineLifecycleFinal&&(f.Reservation!.Reservation.Pending!=0||f.Reservation.Reservation.Inventory!=0||f.Coverage.ReductionUnsettled)))))
+                        f.Coverage.TerminalCoverage!=f.Reservation!.Reservation.TerminalCoverage||
+                        f.Coverage.ReductionUnsettled!=f.Reservation.Reservation.ReductionUnsettled||
+                        f.Coverage.OfflineLifecycleFinal!=(f.Reservation.Reservation.Pending==0&&f.Reservation.Reservation.Inventory==0&&
+                            f.Reservation.Reservation.TerminalCoverage&&!f.Reservation.Reservation.ReductionUnsettled))))
                     throw new InvalidDataException("Invalid typed publication fact");
+                // FactId only orders publication facts; it cannot make a repeated economic fill new.
+                if(fill&&!acceptedFillKeys.Add(f.Fill!.Key))throw new InvalidDataException("Duplicate accepted publication fill");
+                if(operation&&((f.Operation!.DurableMode!="STOP"&&f.Operation.DurableMode!="RUNNING")||
+                    (!KnownCodes.Contains(f.Operation.ResultCode)&&f.Operation.ResultCode is not ("UNCERTAIN" or "OFFLINE_STOP"))))
+                    throw new InvalidDataException("Invalid public operation vocabulary");
             }
         }
         var last=j.Batches.Last();if(last.SourceGeneration!=j.Checkpoint.SourceGeneration||last.SourceSequence!=j.Checkpoint.SourceSequence)throw new InvalidDataException("Publication source mismatch");

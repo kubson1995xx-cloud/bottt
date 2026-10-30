@@ -116,6 +116,85 @@ public class NavalSharedPublicationTests
         Assert.Throws<JsonException>(()=>JsonSerializer.Deserialize<long>("9007199254740993",ExportJson));
         Assert.Throws<JsonException>(()=>JsonSerializer.Deserialize<decimal>("\"NaN\"",ExportJson));
     }
+    [Theory] [InlineData("duplicateWithinBatch")] [InlineData("duplicateAcrossBatches")]
+    [InlineData("reservationTerminal")] [InlineData("reservationUnsettled")] [InlineData("coverageUnsettled")]
+    [InlineData("contradictoryFinality")] [InlineData("omittedFinality")]
+    public void NavalSharedPublication_RehashedInvalidFactsRefuseExportWithoutAuthorityMutation(string fault)
+    {
+        AssertRehashedExportRefusal(n=>
+        {
+            var batches=n["NavalReadJournal"]!["Batches"]!.AsArray();
+            if(fault.StartsWith("duplicate",StringComparison.Ordinal))
+            {
+                var source=batches.First(b=>b!["Facts"]!.AsArray().Any(x=>x!["Fill"]!=null))!;
+                var target=fault=="duplicateAcrossBatches"?batches.Last()!:source;var facts=target["Facts"]!.AsArray();
+                var duplicate=source["Facts"]!.AsArray().First(x=>x!["Fill"]!=null)!.DeepClone();
+                duplicate["FactId"]=target["EventId"]!.GetValue<string>()+":"+facts.Count;facts.Add(duplicate);
+            }
+            else
+            {
+                var fact=batches.SelectMany(b=>b!["Facts"]!.AsArray()).Single(x=>x!["Kind"]!.GetValue<int>()==(int)NavalReadFactKind.OfflineReductionCoverageAccepted)!;
+                if(fault is "reservationTerminal" or "contradictoryFinality")fact["Reservation"]!["Reservation"]!["TerminalCoverage"]=false;
+                if(fault is "reservationUnsettled" or "contradictoryFinality")fact["Reservation"]!["Reservation"]!["ReductionUnsettled"]=true;
+                if(fault=="coverageUnsettled"){fact["Coverage"]!["ReductionUnsettled"]=true;fact["Coverage"]!["OfflineLifecycleFinal"]=false;}
+                if(fault=="omittedFinality")fact["Coverage"]!["OfflineLifecycleFinal"]=false;
+            }
+        });
+    }
+    [Theory]
+    [InlineData(NavalReadFactKind.OfflineReservationAccepted,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineReservationAccepted,"ResultCode")]
+    [InlineData(NavalReadFactKind.OfflineReservationRefused,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineReservationRefused,"ResultCode")]
+    [InlineData(NavalReadFactKind.OfflineReconciliationAccepted,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineReconciliationAccepted,"ResultCode")]
+    [InlineData(NavalReadFactKind.OfflineSafetyChanged,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineSafetyChanged,"ResultCode")]
+    [InlineData(NavalReadFactKind.OfflineModeChanged,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineModeChanged,"ResultCode")]
+    public void NavalSharedPublication_RehashedUnsafeOperationRefusesExportWithoutAuthorityMutation(NavalReadFactKind kind,string field)
+    {
+        AssertRehashedExportRefusal(n=>
+        {
+            var operation=n["NavalReadJournal"]!["Batches"]!.AsArray().SelectMany(b=>b!["Facts"]!.AsArray())
+                .First(x=>x!["Kind"]!.GetValue<int>()==(int)kind)!["Operation"]!;
+            operation[field]=field=="DurableMode"?"READY":"SYNTHETIC_PRIVATE_DIAGNOSTIC_SENTINEL";
+        });
+    }
+    [Fact] public void NavalSharedPublication_SanitizedFallbackCodesSurviveReopenAndExport()
+    {
+        using var f=new Files();Assert.Equal(0,f.Run());var n=JsonNode.Parse(File.ReadAllText(f.Authority))!;
+        // CLI timeout produces UNCERTAIN; OFFLINE_STOP is the other intentional Core fallback.
+        var j=n["NavalReadJournal"]!;
+        j["Batches"]!.AsArray().SelectMany(b=>b!["Facts"]!.AsArray()).First(x=>x!["Operation"]!=null)!["Operation"]!["ResultCode"]="OFFLINE_STOP";
+        RehashJournal(j);File.WriteAllText(f.Authority,n.ToJsonString());f.Empty();Assert.Equal(0,f.Run(f.Input));
+        var operations=f.Read().Journal.Batches.SelectMany(b=>b.Facts).Where(x=>x.Operation!=null).Select(x=>x.Operation!).ToArray();
+        Assert.Contains(operations,x=>x.ResultCode=="UNCERTAIN"&&x.DurableMode=="STOP");
+        Assert.Contains(operations,x=>x.ResultCode=="OFFLINE_STOP"&&x.DurableMode=="STOP");
+        Assert.DoesNotContain("SYNTHETIC_PRIVATE_DIAGNOSTIC_SENTINEL",File.ReadAllText(f.Publication));
+        var bytes=File.ReadAllBytes(f.Authority);f.Empty();Assert.Equal(0,f.Run(f.Input));Assert.Equal(bytes,File.ReadAllBytes(f.Authority));
+    }
+    // Control and invalid copy both go through actual Program.Main, including owner reopen.
+    // Rehash only typed journal metadata; never alter financial state, seal, marker or revision.
+    private static void AssertRehashedExportRefusal(Action<JsonNode> mutate)
+    {
+        using var f=new Files();Assert.Equal(0,f.Run());f.Empty();
+        byte[] control=File.ReadAllBytes(f.Authority);Assert.Equal(0,f.Run(f.Input));Assert.Equal(control,File.ReadAllBytes(f.Authority));
+        var n=JsonNode.Parse(control)!;string financial=n["Naval"]!.ToJsonString();string revision=n["DurableRevision"]!.ToJsonString();
+        mutate(n);Assert.Equal(financial,n["Naval"]!.ToJsonString());Assert.Equal(revision,n["DurableRevision"]!.ToJsonString());
+        RehashJournal(n["NavalReadJournal"]!);
+        File.WriteAllText(f.Authority,n.ToJsonString());byte[] invalid=File.ReadAllBytes(f.Authority);
+        byte[] marker=File.ReadAllBytes(Path.Combine(f.State,".naval-initialized"));
+        File.Delete(f.Publication);File.Delete(f.Result);
+        Assert.Equal(2,f.Run(f.Input));Assert.Equal(invalid,File.ReadAllBytes(f.Authority));
+        Assert.Equal(marker,File.ReadAllBytes(Path.Combine(f.State,".naval-initialized")));
+        Assert.False(File.Exists(f.Publication));Assert.False(File.Exists(f.Result));
+    }
+    private static void RehashJournal(JsonNode journal)
+    {
+        journal["IntegrityDigest"]="";var typed=JsonSerializer.Deserialize<NavalReadJournalState>(journal.ToJsonString())!;
+        journal["IntegrityDigest"]=Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(typed)));
+    }
     static IEnumerable<string> Properties(JsonElement node)
     {
         if(node.ValueKind==JsonValueKind.Object)foreach(var property in node.EnumerateObject()){yield return property.Name;foreach(var child in Properties(property.Value))yield return child;}

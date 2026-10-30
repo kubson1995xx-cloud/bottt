@@ -200,6 +200,93 @@ public class NavalReadJournalTests
         using var f=new NavalCashFixture();f.Run();f.Owner.Dispose();f.Store.Value=f.Store.Value!.Replace("\"NavalReadJournal\":","\"NavalReadJournal\":null,\"NavalReadJournal\":");
         Assert.ThrowsAny<Exception>(()=>new NavalCoreStateOwner(f.DirectoryPath,f.Store,f.D));
     }
+    [Theory] [InlineData(false)] [InlineData(true)]
+    public void NavalReadJournal_RehashedDuplicateEconomicFillRefusesOwnerReopen(bool acrossBatches)
+    {
+        using var f=new NavalCashFixture();PopulateValidationHistory(f);var n=JsonNode.Parse(f.Store.Value!)!;
+        var batches=n["NavalReadJournal"]!["Batches"]!.AsArray();
+        var source=batches.First(b=>b!["Facts"]!.AsArray().Any(x=>x!["Fill"]!=null))!;
+        var target=acrossBatches?batches.Last()!:source;var facts=target["Facts"]!.AsArray();
+        var duplicate=source["Facts"]!.AsArray().First(x=>x!["Fill"]!=null)!.DeepClone();
+        duplicate["FactId"]=target["EventId"]!.GetValue<string>()+":"+facts.Count;facts.Add(duplicate);
+        AssertRehashedOwnerRefusal(f,n);
+    }
+    [Theory] [InlineData("reservationTerminal")] [InlineData("reservationUnsettled")]
+    [InlineData("coverageUnsettled")] [InlineData("contradictoryFinality")] [InlineData("omittedFinality")]
+    public void NavalReadJournal_RehashedContradictoryCoverageRefusesOwnerReopen(string fault)
+    {
+        using var f=new NavalCashFixture();PopulateValidationHistory(f);var n=JsonNode.Parse(f.Store.Value!)!;
+        var fact=n["NavalReadJournal"]!["Batches"]!.AsArray().SelectMany(b=>b!["Facts"]!.AsArray())
+            .Single(x=>x!["Kind"]!.GetValue<int>()==(int)NavalReadFactKind.OfflineReductionCoverageAccepted)!;
+        if(fault is "reservationTerminal" or "contradictoryFinality")fact["Reservation"]!["Reservation"]!["TerminalCoverage"]=false;
+        if(fault is "reservationUnsettled" or "contradictoryFinality")fact["Reservation"]!["Reservation"]!["ReductionUnsettled"]=true;
+        if(fault=="coverageUnsettled"){fact["Coverage"]!["ReductionUnsettled"]=true;fact["Coverage"]!["OfflineLifecycleFinal"]=false;}
+        if(fault=="omittedFinality")fact["Coverage"]!["OfflineLifecycleFinal"]=false;
+        AssertRehashedOwnerRefusal(f,n);
+    }
+    [Theory]
+    [InlineData(NavalReadFactKind.OfflineReservationAccepted,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineReservationAccepted,"ResultCode")]
+    [InlineData(NavalReadFactKind.OfflineReservationRefused,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineReservationRefused,"ResultCode")]
+    [InlineData(NavalReadFactKind.OfflineReconciliationAccepted,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineReconciliationAccepted,"ResultCode")]
+    [InlineData(NavalReadFactKind.OfflineSafetyChanged,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineSafetyChanged,"ResultCode")]
+    [InlineData(NavalReadFactKind.OfflineModeChanged,"DurableMode")]
+    [InlineData(NavalReadFactKind.OfflineModeChanged,"ResultCode")]
+    public void NavalReadJournal_RehashedUnsafeOperationRefusesOwnerReopen(NavalReadFactKind kind,string field)
+    {
+        using var f=new NavalCashFixture();PopulateValidationHistory(f);var n=JsonNode.Parse(f.Store.Value!)!;
+        var operation=n["NavalReadJournal"]!["Batches"]!.AsArray().SelectMany(b=>b!["Facts"]!.AsArray())
+            .First(x=>x!["Kind"]!.GetValue<int>()==(int)kind)!["Operation"]!;
+        operation[field]=field=="DurableMode"?"READY":"SYNTHETIC_PRIVATE_DIAGNOSTIC_SENTINEL";
+        AssertRehashedOwnerRefusal(f,n);
+    }
+    [Fact] public void NavalReadJournal_OrdinaryHistoryAndSanitizedFallbacksReopenWithoutMutation()
+    {
+        using var f=new NavalCashFixture();PopulateValidationHistory(f);var before=f.Store.Value!;f.Restart();
+        Assert.Equal(before,f.Store.Value);var p=f.C.ReadPublication()!;
+        var operations=p.Journal.Batches.SelectMany(b=>b.Facts).Where(x=>x.Operation!=null).Select(x=>x.Operation!).ToArray();
+        Assert.Contains(operations,x=>x.ResultCode=="UNCERTAIN"&&x.DurableMode=="STOP");
+        Assert.Contains(operations,x=>x.ResultCode=="OFFLINE_STOP"&&x.DurableMode=="STOP");
+        Assert.Contains(operations,x=>x.ResultCode=="STARTED"&&x.DurableMode=="RUNNING");
+        Assert.Equal(2,p.Journal.Batches.SelectMany(b=>b.Facts).Count(x=>x.Kind==NavalReadFactKind.OfflineFillAccepted));
+        Assert.DoesNotContain("SYNTHETIC_PRIVATE_DIAGNOSTIC_SENTINEL",NavalJson.Serialize(p));
+        Assert.False(NavalReadJournal.ReadPage(p,new(p.Journal.Epoch,p.Journal.ScopeId,0)).ResetRequired);
+    }
+    private static void PopulateValidationHistory(NavalCashFixture f)
+    {
+        Assert.Equal(NavalMutationStatus.Refused,f.C.ForFleet(f.A[0],NavalFleet.Alpha).TryReserve(f.Intent()).Status);
+        f.Run();var r=f.Reserve(signal:1);Assert.Equal(NavalMutationStatus.Applied,r.Status);
+        Assert.Equal(NavalMutationStatus.Stopped,f.C.MarkUncertain(r.ReservationId!,"SYNTHETIC_PRIVATE_DIAGNOSTIC_SENTINEL").Status);f.Run();
+        Assert.Equal(NavalMutationStatus.Applied,f.C.Confirm(f.Receipt(NavalEvidenceKind.Confirm,fills:new[]{f.Fill(r,2,100,.2m)})).Status);
+        Assert.Equal(NavalMutationStatus.Applied,f.C.Terminal(f.Receipt(NavalEvidenceKind.Terminal,true,true,terminal:new[]{r.ReservationId!})).Status);
+        Assert.Equal(NavalMutationStatus.Applied,f.C.Confirm(f.Receipt(NavalEvidenceKind.Confirm,fills:new[]{f.Fill(r,2,110,.22m,true,"sell")})).Status);
+        Assert.Equal(NavalMutationStatus.Applied,f.C.Terminal(f.Receipt(NavalEvidenceKind.Terminal,true,true,terminal:new[]{r.ReservationId!})).Status);
+        f.C.Stop("SYNTHETIC_PRIVATE_DIAGNOSTIC_SENTINEL");
+    }
+    // Both copies use the real owner and disk store. Only journal metadata is changed/rehashed;
+    // a valid control must reopen, and neither refusal nor passive reading may rewrite authority.
+    private static void AssertRehashedOwnerRefusal(NavalCashFixture f,JsonNode mutated)
+    {
+        var original=JsonNode.Parse(f.Store.Value!)!;
+        Assert.Equal(original["Naval"]!.ToJsonString(),mutated["Naval"]!.ToJsonString());
+        Assert.Equal(original["DurableRevision"]!.ToJsonString(),mutated["DurableRevision"]!.ToJsonString());
+        var j=mutated["NavalReadJournal"]!;j["IntegrityDigest"]="";
+        j["IntegrityDigest"]=NavalJson.Hash(JsonSerializer.Deserialize<NavalReadJournalState>(j.ToJsonString())!);
+        f.Owner.Dispose();
+        foreach(bool bad in new[]{false,true})
+        {
+            string directory=Path.Combine(f.DirectoryPath,bad?"invalid-copy":"control-copy");Directory.CreateDirectory(directory);
+            File.Copy(Path.Combine(f.DirectoryPath,".naval-initialized"),Path.Combine(directory,".naval-initialized"));
+            var store=new PublicationDiskStore(directory);store.Set(NavalCoreStateOwner.StateKey,bad?mutated.ToJsonString():f.Store.Value!);
+            string path=Path.Combine(directory,"authority.json");byte[] bytes=File.ReadAllBytes(path);
+            if(bad)Assert.Throws<InvalidDataException>(()=>new NavalCoreStateOwner(directory,store,f.D));
+            else {using var owner=new NavalCoreStateOwner(directory,store,f.D);Assert.NotNull(new NavalPortfolioCoordinator(owner,f.D,f.Clock).ReadPublication());}
+            Assert.Equal(bytes,File.ReadAllBytes(path));
+        }
+    }
     private sealed class PublicationDiskStore:IKeyValueStore
     {
         private readonly string _path;internal string? Fault;
