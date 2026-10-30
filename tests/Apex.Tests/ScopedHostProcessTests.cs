@@ -177,6 +177,42 @@ public sealed class ScopedHostProcessTests
         Assert.Contains("uruchomiony", await h.Command("start")); Assert.Equal(1, h.Opens);
     }
 
+    [Theory]
+    [InlineData("stale")]
+    [InlineData("future")]
+    [InlineData("unsafe-stop-bound")]
+    public async Task ProductionTechnicalStopRefusesInvalidQuoteWithoutModifyOrPass(string fault)
+    {
+        await using var h = new Host(); await h.Start(); await h.Connect("APEX");
+        await h.Status(a => a.GetProperty("engineReady").GetBoolean());
+        await h.Command("setupScope", new { confirmDedicatedDemo = true });
+        var status = await h.Status(a => a.GetProperty("scope").GetProperty("baselineId").GetGuid() != Guid.Empty);
+        await h.Connect(status.GetProperty("scope").GetProperty("label").GetString()!);
+        await h.Status(a => a.GetProperty("scope").GetProperty("eligibleTechnicalTest").GetBoolean());
+        Assert.Contains("rozpoczęty", await h.Command("executionTest", new { symbol = "US500", confirmDemoTrade = true }));
+        await h.Status(a => a.GetProperty("executionTest").EnumerateArray().Any(x => x.GetString()!.Contains("Krok 1 OK")));
+        // Change only the next observed tick after a valid protected fill. Repeated
+        // history publications must neither rejuvenate stale data nor repair unsafe data.
+        h.Quote = new QuoteDto
+        {
+            S = "US500", B = fault == "unsafe-stop-bound" ? 3991.1 : 4000,
+            A = fault == "unsafe-stop-bound" ? 3991.2 : 4000.1,
+            T = fault == "stale" ? BridgeProtocol.ToUnixMs(DateTime.UtcNow.AddSeconds(-181))
+                : fault == "future" ? BridgeProtocol.ToUnixMs(DateTime.UtcNow.AddSeconds(60)) : h.Quote.T,
+            O = true, Ttc = 3600, Pv = 1,
+        };
+        await h.Publish();
+        status = await h.Status(a => a.GetProperty("executionTest").EnumerateArray()
+            .Any(x => x.GetString()!.Contains("nie można bezpiecznie zacieśnić SL")), 45);
+        Assert.Equal(1, h.Opens); Assert.Equal(0, h.Modifies); Assert.Equal(1, h.Closes);
+        Assert.Equal(0, status.GetProperty("positions").GetArrayLength());
+        Assert.Equal("Stopped", status.GetProperty("engine").GetProperty("mode").GetString());
+        var certificate = status.GetProperty("scope").GetProperty("certificate");
+        Assert.Equal("Failed", certificate.GetProperty("status").GetString());
+        Assert.False(certificate.GetProperty("canStart").GetBoolean());
+        Assert.DoesNotContain("uruchomiony", await h.Command("start"));
+    }
+
     internal sealed class Host : IAsyncDisposable
     {
         internal readonly string Dir = Path.Combine(Path.GetTempPath(), "apex-scoped-host-" + Guid.NewGuid().ToString("N"));
@@ -184,6 +220,9 @@ public sealed class ScopedHostProcessTests
         ClientWebSocket? ws; CancellationTokenSource? peerLifetime; Task? peer; readonly SemaphoreSlim sendGate = new(1);
         internal bool HistoryEnabled = true; internal int Opens, Modifies, Closes; internal string OpenId = ""; internal bool LastCoverageRequired; internal string Fault = ""; internal bool ReleaseEarly;
         ClosedDto? early;
+        // A fixed synthetic price has a last-tick source clock, not the time a history
+        // request republishes it. Advance it only at the explicit connection/tick boundary.
+        internal QuoteDto Quote = new() { S = "US500", B = 4000, A = 4000.1, T = BridgeProtocol.ToUnixMs(DateTime.UtcNow), O = true, Ttc = 3600, Pv = 1 };
         string key = "", label = "APEX", transport = ""; Guid baseline; string epoch = "synthetic-start:1"; long revision;
         readonly AccountDto account = new() { Number = 78123, Broker = "Pepperstone Scope", Currency = "USD", IsLive = false, Hedging = true, Balance = 10000, Equity = 10000, FreeMargin = 10000 };
         readonly List<PositionDto> positions = new(); readonly List<ClosedDto> closed = new(); readonly List<OpeningDealEvidence> openings = new(); readonly List<ResultMsg> results = new();
@@ -206,6 +245,7 @@ public sealed class ScopedHostProcessTests
         internal async Task Connect(string exactLabel, bool withHistory = true)
         {
             await Disconnect(); label = exactLabel; HistoryEnabled = withHistory;
+            Quote.T = BridgeProtocol.ToUnixMs(DateTime.UtcNow);
             account.Hedging = Fault != "netting";
             if (Fault == "foreign" && positions.Count == 0) positions.Add(new PositionDto { Id = 99, Label = "foreign", Symbol = "US500", Units = 1, EntryTime = BridgeProtocol.ToUnixMs(DateTime.UtcNow) });
             ws = new ClientWebSocket(); peerLifetime = new CancellationTokenSource(TimeSpan.FromMinutes(4));
@@ -219,7 +259,7 @@ public sealed class ScopedHostProcessTests
         {
             await Send(new AccountMsg { Account = account, BrokerState = new BrokerStateMsg { BrokerEpoch = epoch, BrokerConnected = true } });
             await Send(new PositionsMsg { Items = positions.ToList(), PendingOrders = Fault == "pending" ? new() { new PendingOrderDto(87, "foreign") } : new(), Scoped = Frame() });
-            await Send(new QuotesMsg { Items = new() { new QuoteDto { S = "US500", B = 4000, A = 4000.1, T = BridgeProtocol.ToUnixMs(DateTime.UtcNow), O = true, Ttc = 3600, Pv = 1 } } });
+            await Send(new QuotesMsg { Items = new() { Quote } });
         }
         internal async Task Outage()
         {
