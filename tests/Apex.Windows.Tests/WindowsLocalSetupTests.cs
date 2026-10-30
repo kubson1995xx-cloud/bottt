@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Apex.Desktop.Naval;
+using Apex.Desktop.Services;
 using Xunit;
 
 namespace Apex.Windows.Tests;
@@ -54,24 +55,36 @@ public sealed class WindowsLocalSetupTests
         foreach (string forbidden in new[] { "receipt", "credential", "password", "apiKey", "accessToken", "privateKey", "executionAuthority" })
             Assert.DoesNotContain("\"" + forbidden + "\"", System.Text.Encoding.UTF8.GetString(bytes), StringComparison.OrdinalIgnoreCase);
 
-        var reader = new NavalPublicationReader(Path.Combine(directory, "naval-publication.json"), scope);
-        var service = new NavalReadService(reader, scope);
-        var first = await service.SnapshotAsync(scope, e.SourceClockUtc.AddDays(1), null, default);
-        var later = await service.SnapshotAsync(scope, e.SourceClockUtc.AddYears(10), null, default);
-        var restarted = await new NavalReadService(reader, scope).SnapshotAsync(scope, e.SourceClockUtc.AddYears(11), null, default);
-        foreach (var result in new[] { first, later, restarted })
+        // Build output is public input, not a runtime private-data location. Runner TEMP
+        // can have replace-child ancestors: exercise the passive service on an identical
+        // copy under the existing Task1 guard, without provisioning a profile or host.
+        string privateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ApexPresentationTests-" + Guid.NewGuid().ToString("N"));
+        try
         {
-            Assert.Equal(200, result.StatusCode);
-            Assert.Equal("AVAILABLE", result.Body.Availability);
-            Assert.Equal("NOT_CONFIGURED", result.Body.Broker.State);
-            Assert.Equal("UNKNOWN", result.Body.Broker.RuntimeReadiness);
-            Assert.Equal("UNKNOWN", result.Body.Broker.Coverage);
-            Assert.Null(result.Body.Broker.RealizedPnl); Assert.Null(result.Body.Broker.UnrealizedPnl);
-            Assert.All(result.Body.Sources, s => { Assert.True(s.Stale); Assert.Equal("UNKNOWN", s.Quality); Assert.Equal("UNKNOWN", s.Coverage); Assert.NotEqual("LIVE", s.Freshness); });
-            Assert.Equal(JsonSerializer.Serialize(c, NavalPublicationReader.Json), JsonSerializer.Serialize(result.Body.Checkpoint, NavalPublicationReader.Json));
-            Assert.Equal(e.Publication.FinancialRevision, result.Body.SnapshotVersion);
-            Assert.Equal(e.Publication.AsOfSequence, result.Body.AsOfSequence);
+            using var lease = WindowsPrivateData.Open(privateDirectory, AppContext.BaseDirectory);
+            string publication = Path.Combine(lease.Path, "naval-publication.json");
+            File.WriteAllBytes(publication, bytes);
+            var reader = new NavalPublicationReader(publication, scope);
+            var service = new NavalReadService(reader, scope);
+            var first = await service.SnapshotAsync(scope, e.SourceClockUtc.AddDays(1), null, default);
+            var later = await service.SnapshotAsync(scope, e.SourceClockUtc.AddYears(10), null, default);
+            var restarted = await new NavalReadService(reader, scope).SnapshotAsync(scope, e.SourceClockUtc.AddYears(11), null, default);
+            foreach (var result in new[] { first, later, restarted })
+            {
+                Assert.True(result.StatusCode == 200, result.Body.ReasonCode);
+                Assert.Equal("AVAILABLE", result.Body.Availability);
+                Assert.Equal("NOT_CONFIGURED", result.Body.Broker.State);
+                Assert.Equal("UNKNOWN", result.Body.Broker.RuntimeReadiness);
+                Assert.Equal("UNKNOWN", result.Body.Broker.Coverage);
+                Assert.Null(result.Body.Broker.RealizedPnl); Assert.Null(result.Body.Broker.UnrealizedPnl);
+                Assert.All(result.Body.Sources, s => { Assert.True(s.Stale); Assert.Equal("UNKNOWN", s.Quality); Assert.Equal("UNKNOWN", s.Coverage); Assert.NotEqual("LIVE", s.Freshness); });
+                Assert.Equal(JsonSerializer.Serialize(c, NavalPublicationReader.Json), JsonSerializer.Serialize(result.Body.Checkpoint, NavalPublicationReader.Json));
+                Assert.Equal(e.Publication.FinancialRevision, result.Body.SnapshotVersion);
+                Assert.Equal(e.Publication.AsOfSequence, result.Body.AsOfSequence);
+            }
+            Assert.Equal(bytes, File.ReadAllBytes(publication));
         }
+        finally { if (Directory.Exists(privateDirectory)) Directory.Delete(privateDirectory, true); }
         Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(directory, "naval-publication.json")));
     }
 
