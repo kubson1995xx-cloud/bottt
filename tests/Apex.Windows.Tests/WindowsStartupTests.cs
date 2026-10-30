@@ -29,6 +29,7 @@ public sealed class WindowsStartupTests
         internal readonly int Port = FreePort();
         internal readonly Dictionary<string, object?> Resources = new();
         internal readonly List<ProcessStartInfo> Launches = new();
+        internal readonly TaskCompletionSource ShellRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal readonly ConfigStore Store;
         internal Task<int>? Running;
         private readonly TextWriter previousOutput = Console.Out;
@@ -44,7 +45,8 @@ public sealed class WindowsStartupTests
         internal Task<int> Start(string[]? extra = null, Action<ProcessStartInfo>? launch = null, Action<string, object?>? observe = null)
         {
             var args = new[] { "--data", Root }.Concat(extra ?? Array.Empty<string>()).ToArray();
-            return Running = Task.Run(() => Program.Run(args, false, null, p => { Launches.Add(p); launch?.Invoke(p); }, Stop.Token,
+            return Running = Task.Run(() => Program.Run(args, false, null, p =>
+                { try { Launches.Add(p); launch?.Invoke(p); } finally { ShellRequested.TrySetResult(); } }, Stop.Token,
                 (stage, value) => { Resources[stage] = value; observe?.Invoke(stage, value); }));
         }
         internal async Task<JsonElement> Ready()
@@ -202,10 +204,13 @@ public sealed class WindowsStartupTests
         using var ws = new System.Net.WebSockets.ClientWebSocket();
         await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{h.Port}/bridge"), h.Stop.Token);
         Assert.Equal(System.Net.WebSockets.WebSocketState.Open, ws.State); ws.Abort();
+        Assert.All(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Where(x => x.Port == h.Port), x => Assert.Equal(IPAddress.Loopback, x.Address));
+        await h.ShellRequested.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        // HTTP/WS readiness can precede bridge/browser startup. Completed shutdown
+        // synchronizes all startup side effects before reading their collections/logs.
+        Assert.Equal(0, await h.Finish()); h.Released();
         Assert.Contains(Directory.GetFiles(Path.Combine(h.Root, "logi")), p => File.ReadAllText(p).Contains("TCP"));
         Assert.True(h.Launches.Count == 1, "Exactly one shell request required");
-        Assert.All(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Where(x => x.Port == h.Port), x => Assert.Equal(IPAddress.Loopback, x.Address));
-        Assert.Equal(0, await h.Finish()); h.Released();
     }
 
     [Fact, Trait("Gate", "Source")]
@@ -271,9 +276,12 @@ public sealed class WindowsStartupTests
         try
         {
             _ = h.Start(launch: _ => throw new System.ComponentModel.Win32Exception("private diagnostic"));
-            await h.Ready(); Assert.True(h.Launches.Count == 1, "Exactly one shell request required");
-            Assert.Contains($"http://127.0.0.1:{h.Port}/", error.ToString()); Assert.DoesNotContain("private diagnostic", error.ToString());
+            await h.Ready();
+            await h.ShellRequested.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            // Launcher completion precedes the fallback write; await the host too.
             Assert.Equal(0, await h.Finish()); h.Released();
+            Assert.True(h.Launches.Count == 1, "Exactly one shell request required");
+            Assert.Contains($"http://127.0.0.1:{h.Port}/", error.ToString()); Assert.DoesNotContain("private diagnostic", error.ToString());
         }
         finally { Console.SetError(old); }
     }
