@@ -3,7 +3,7 @@
 ## Werdykt niezależnego review: REQUEST CHANGES
 Raport `task-8a-delivery-review.md` zgłosił **3 Important, 0 Critical** w nowym weryfikatorze: re-manifested private-map/cache/replay payloads, unlisted case-alias w nested/outer inventory i niespójne frontend TAP log/hash/count references. Copy-only probes potwierdziły luki; review potwierdził też rzeczywisty czysty ZIP, jego SHA/CRC/inventory i zachowane testy. Nie stwierdzono tych zanieczyszczeń w obecnej paczce.
 
-Fix round1 jest aktywny (`task-8a-delivery-report.md` append), bez zmian finansowych/auth/sceny. Po RED→GREEN wymagany nowy ZIP z poprawionym shipped verifierem, zgodną source mapą i niezależnym readback. Stary ZIP zachować bez podmiany. Reuse testów tylko przy identycznych dowiedzionych runtime/assets; scoped re-review i parent acceptance nadal otwarte.
+Fix round1 kod `a72e0c0` ma controlled89/89, root18/18 i7/7 exactreviewchecks (control0,6mutantów1). Scoped re-review w toku: `task-8a-fix1-review.md`; brak odbioru. NowyZIP `/home/ubuntu/.hermes/cache/scratch/apex-task8a-fix1/run-20261030T151303Z-d2b504d1/APEX-Linux-Naval-fix1-corrected.zip`,1504950bytes,SHA`ea80280993fe40d20793c3568c4c68c17ba8d32032b646b604625a87bb4eb9dd`,CRC PASS/49files. Parent porównał383sourceinputs i old/newZIP: zmieniło się tylko5tooling/metadatafiles, runtime/assets/logi/docs są bajtowo identyczne. Dlatego wcześniejsze849/126/168/109packaged/100browser są reused, nie nowymwykonaniem. Honestengineeringresealprovenance w metadanych, oldZIP preserved. Odbiór i durablecopy dopiero po scopedreview.
 
 Poniższe dowody kandydata są autentyczne, ale **nie zamykają odbioru weryfikatora**.
 
