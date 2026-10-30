@@ -172,8 +172,15 @@ public sealed partial class WindowsLocalSetupTests
         try
         {
             using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(2) };
-            bool ready = false;
-            for (int i = 0; i < 200; i++) { Assert.False(process.HasExited, "Ready host exited (output withheld)"); try { using var r = await client.GetAsync("/"); ready = r.StatusCode == HttpStatusCode.Unauthorized; if (ready) break; } catch (HttpRequestException) { } await Task.Delay(50); }
+            bool ready = false; var readyDeadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < readyDeadline)
+            {
+                Assert.False(process.HasExited, "Ready host exited (output withheld)");
+                try { using var r = await client.GetAsync("/"); ready = r.StatusCode == HttpStatusCode.Unauthorized; if (ready) break; }
+                catch (HttpRequestException) { }
+                catch (TaskCanceledException) { } // A timeout is not readiness; keep the bounded admission probe.
+                await Task.Delay(50);
+            }
             Assert.True(ready, "Ready production host did not challenge anonymously");
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", secrets.Reader);
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/?view=naval")).StatusCode);
