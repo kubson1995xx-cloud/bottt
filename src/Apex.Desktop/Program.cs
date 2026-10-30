@@ -54,6 +54,11 @@ namespace Apex.Desktop
             // Jedna instancja na katalog danych – dwa procesy APEX nie mogą zarządzać tymi samymi kontami.
             FileStream lockFile;
             try { lockFile = new FileStream(Path.Combine(dataDir, "apex.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (Exception ex) when (OperatingSystem.IsWindows() && (ex is UnauthorizedAccessException or IOException))
+            {
+                Console.Error.WriteLine("HOST_DATA_UNAVAILABLE: Nie można otworzyć blokady prywatnego katalogu. Sprawdź uprawnienia, dysk i drugą instancję APEX; zachowaj istniejące dane.");
+                return 2;
+            }
             catch (IOException)
             {
                 Console.Error.WriteLine("APEX Desktop już działa (katalog danych jest zablokowany). Zamknij drugą instancję.");
