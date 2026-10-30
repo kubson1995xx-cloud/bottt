@@ -1,4 +1,18 @@
-# Task8A — pakowanie lokalne: BLOCKED, brak produktu ZIP
+# Task8A — rzeczywista paczka Linux, niezależny review w toku
+
+## Aktualny kandydat — poprzednie BLOCKED wpisy są historią
+Kod pakowania `ba29e41`. **ZIP istnieje, lecz Task8A nie jest jeszcze odebrany** — `task-8a-delivery-review.md` w toku. Wykonanie opisuje `task-8a-delivery-report.md` od124. Parent sprawdził383/383shippedinputhashes, rzeczywiste UnitTestResult i SHA/CRC ZIP-a.
+
+- ZIP: `/home/ubuntu/.hermes/cache/scratch/apex-naval-task8a/run-new-20261030T143435Z-da83b139/APEX-Linux-Naval-final.zip`.
+- Rozmiar1502408bytes, SHA256 `05918ff2e8a4e3040be8dae69d7ea92a352dccf6c1c24d5163f20b0bc017287b`, CRC PASS,49regularmembers/48outermanifestentries/4nestedartifacts.
+- TargetLinuxx64/glibc framework-dependent, wymaga Microsoft.AspNetCore.App8. Brak WindowsEXE/runtime acceptance.
+- Finalintegrated actual849/849bot,126/126platform,168/168Backtester; extracted-package109/109, frontend58/58,build4/4,panel18/18,controlledpackage52/52,notice14/14. To odrębnebramki, nie sztucznie scalonyrun.
+- FreshChrome145 z extractedDLL:100passingcheckrecords, nativeBasiccache, pięćwidoków/lazychunkparity/SVGminimal/H503textEmergencyStop/synthetic77onlyclose/durablelatch/restart/defaultzeroaccount. To niebroker/physicalGPU/phonebenchmark. 80packagedprocesses i3browserhosty zakończone, privatefixtures iisolatedcontexts usunięte według zachowanegoreadback.
+- Sealedmetadane uczciwie `sourceCommit=dacf8eb`, `sourceDirty=true`, exactsourceinputs. Późniejszycommit tychsamych źródeł nie upoważnia do podmiany ZIP metadata bez ponownychtestów.
+
+Następnie wymagany packagingreview, durablecopy poza scratch i parentacceptance. Nadal brak privateOKX/WS/trustedissuer/realDEMOE2E/WindowsCI/deployment/mobileTLS/profitability. Nie traktować lokalnego hosta historycznych danych jako uruchomionego bota OKX.
+
+## Historia — przerwany pierwszy run
 
 ## Aktualna dyspozycja
 Częściowa implementacja narzędzi, testów i instrukcji powstała w 15 plikach względem `b14fc3e`; nie jest odebrana ani opublikowana. Nie powstał produkcyjny ZIP. Nie dostarczać kontrolowanego dummy archiwum jako aplikacji.
