@@ -210,7 +210,18 @@ public sealed class NavalReadAccessTests
         {
             var r = await h.Send("/api/naval/snapshot", "operator", method); Assert.Equal(HttpStatusCode.MethodNotAllowed, r.StatusCode); Assert.Equal("application/json", r.Content.Headers.ContentType?.MediaType); Assert.Equal("no-store", r.Headers.CacheControl!.ToString());
         }
-        foreach (var path in new[] { "/api/naval/SNAPSHOT", "/api/naval/snapshot/", "/naval" }) Assert.Equal(HttpStatusCode.NotFound, (await h.Send(path, "operator")).StatusCode);
+        foreach (var path in new[] { "/api/naval/SNAPSHOT", "/api/naval/snapshot/" }) Assert.Equal(HttpStatusCode.NotFound, (await h.Send(path, "operator")).StatusCode);
+        using var redirect = await h.Send("/naval", "operator");
+        Assert.Equal(HttpStatusCode.Redirect, redirect.StatusCode);
+        Assert.Equal("/naval/", redirect.Headers.Location!.OriginalString);
+        Assert.Equal("no-store", redirect.Headers.CacheControl!.ToString());
+        Assert.Equal("DENY", redirect.Headers.GetValues("X-Frame-Options").Single());
+        Assert.Equal("nosniff", redirect.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal("no-referrer", redirect.Headers.GetValues("Referrer-Policy").Single());
+        Assert.Equal("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'", redirect.Headers.GetValues("Content-Security-Policy").Single());
+        Assert.False(redirect.Headers.Contains("Access-Control-Allow-Origin"));
+        Assert.Equal(HttpStatusCode.Forbidden, (await h.Send("/naval", "read")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await h.Send("/naval")).StatusCode);
     }
     [Fact]
     public async Task NavalReadAccess_HostHeadersAndCrossSite()
