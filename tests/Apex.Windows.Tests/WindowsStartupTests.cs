@@ -65,6 +65,8 @@ public sealed class WindowsStartupTests
         {
             using var file = new FileStream(Path.Combine(Root, "apex.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             Assert.DoesNotContain(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners(), p => p.Port == Port);
+            if (Resources.TryGetValue("services", out var service))
+                Assert.True(((Task?)typeof(NewsService).GetField("_worker", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(service))?.IsCompleted == true, "News worker survived host shutdown");
             if (Resources.TryGetValue("accounts", out var a))
                 Assert.True((bool)typeof(AccountManager).GetField("_disposed", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(a)!, "Account manager was not disposed");
         }
@@ -97,7 +99,8 @@ public sealed class WindowsStartupTests
     {
         await using var h = new Host();
         try { await h.Start(launch: _ => h.Stop.Cancel()); } catch (OperationCanceledException) { }
-        var request = Assert.Single(h.Launches);
+        Assert.True(h.Launches.Count == 1, "Exactly one shell request required");
+        var request = h.Launches[0];
         Assert.Equal($"http://127.0.0.1:{h.Port}/", request.FileName);
         Assert.True(request.UseShellExecute); Assert.Equal("", request.Arguments); Assert.Empty(request.ArgumentList);
         var uri = new Uri(request.FileName);
@@ -119,7 +122,7 @@ public sealed class WindowsStartupTests
             catch (HttpRequestException) { }
             finally { h.Stop.Cancel(); }
         }); } catch (OperationCanceledException) { }
-        Assert.True(reachable, "Browser was requested before the HTTP listener was ready"); Assert.Single(h.Launches); h.Released();
+        Assert.True(reachable, "Browser was requested before the HTTP listener was ready"); Assert.True(h.Launches.Count == 1, "Exactly one shell request required"); h.Released();
     }
 
     [Theory, Trait("Gate", "Source")]
@@ -137,7 +140,10 @@ public sealed class WindowsStartupTests
         await using var first = new Host(false); _ = first.Start(); await first.Ready();
         var before = File.ReadAllBytes(first.Store.Path_); var calls = new List<ProcessStartInfo>();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        Assert.Equal(2, await Program.Run(new[] { "--data", first.Root }, false, null, calls.Add, timeout.Token, null));
+        var previousError = Console.Error; using var error = new StringWriter(); Console.SetError(error);
+        try { Assert.Equal(2, await Program.Run(new[] { "--data", first.Root }, false, null, calls.Add, timeout.Token, null)); }
+        finally { Console.SetError(previousError); }
+        Assert.Contains("HOST_ALREADY_RUNNING", error.ToString());
         Assert.Empty(calls); Assert.Equal(before, File.ReadAllBytes(first.Store.Path_));
         await using var other = new Host();
         Assert.Equal(2, await other.Start(new[] { "--port", first.Port.ToString() }));
@@ -190,7 +196,7 @@ public sealed class WindowsStartupTests
         await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{h.Port}/bridge"), h.Stop.Token);
         Assert.Equal(System.Net.WebSockets.WebSocketState.Open, ws.State); ws.Abort();
         Assert.Contains(Directory.GetFiles(Path.Combine(h.Root, "logi")), p => File.ReadAllText(p).Contains("TCP"));
-        Assert.Single(h.Launches);
+        Assert.True(h.Launches.Count == 1, "Exactly one shell request required");
         Assert.All(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Where(x => x.Port == h.Port), x => Assert.Equal(IPAddress.Loopback, x.Address));
         Assert.Equal(0, await h.Finish()); h.Released();
     }
@@ -199,14 +205,38 @@ public sealed class WindowsStartupTests
     public async Task RestartNeverAutoStarts()
     {
         await using var h = new Host(false);
-        h.Store.Update(c => c.Accounts["cTrader:synthetic:1"] = new AccountSettings { AutoStart = true });
-        var before = File.ReadAllBytes(h.Store.Path_);
+        h.Store.Update(c => c.Accounts["cTrader:SyntheticStartup:1"] = new AccountSettings { AutoStart = true });
+        string state = Path.Combine(h.Root, "konta", "cTrader_SyntheticStartup_1", "stan");
+        Directory.CreateDirectory(state);
+        string control = Path.Combine(state, "desktop_control.json");
+        File.WriteAllText(control, "{\"EmergencyStopped\":true}");
+        var before = File.ReadAllBytes(h.Store.Path_); var latch = File.ReadAllBytes(control);
         for (int n = 0; n < 2; n++)
         {
             using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            var run = Program.Run(new[] { "--data", h.Root }, false, null, null, stop.Token, (stage, _) => { if (stage == "services") stop.Cancel(); });
-            Assert.Equal(0, await run); Assert.Equal(before, File.ReadAllBytes(h.Store.Path_));
-            using var file = new FileStream(Path.Combine(h.Root, "apex.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            h.Running = Task.Run(() => Program.Run(new[] { "--data", h.Root }, false, null, null, stop.Token, null));
+            await h.Ready();
+            using var ws = new System.Net.WebSockets.ClientWebSocket();
+            await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{h.Port}/bridge"), stop.Token);
+            async Task Send<T>(T msg) => await ws.SendAsync(System.Text.Encoding.UTF8.GetBytes(Apex.Core.Bridge.BridgeProtocol.Serialize(msg)), System.Net.WebSockets.WebSocketMessageType.Text, true, stop.Token);
+            var account = new Apex.Core.Bridge.AccountDto { Number = 1, Broker = "SyntheticStartup", Currency = "USD", Balance = 10000, Equity = 10000, FreeMargin = 10000 };
+            await Send(new Apex.Core.Bridge.HelloMsg { Platform = "cTrader", Key = h.Store.Config.PairingKey, Account = account });
+            var buffer = new byte[65536]; var welcome = await ws.ReceiveAsync(buffer, stop.Token);
+            using (var d = JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(buffer, 0, welcome.Count))) Assert.True(d.RootElement.GetProperty("accepted").GetBoolean());
+            await Send(new Apex.Core.Bridge.SymbolsMsg()); await Send(new Apex.Core.Bridge.AccountMsg { Account = account });
+            await Send(new Apex.Core.Bridge.PositionsMsg());
+            bool observed = false;
+            for (int i = 0; i < 100; i++)
+            {
+                var status = await h.Ready(); var accounts = status.GetProperty("data").GetProperty("accounts");
+                if (accounts.GetArrayLength() == 1 && accounts[0].GetProperty("engineReady").GetBoolean())
+                { Assert.Equal("EmergencyStopped", accounts[0].GetProperty("engine").GetProperty("mode").GetString()); observed = true; break; }
+                await Task.Delay(50);
+            }
+            Assert.True(observed, "No stopped engine observed from the synthetic local peer");
+            ws.Abort(); stop.Cancel(); Assert.Equal(0, await h.Running);
+            Assert.Equal(before, File.ReadAllBytes(h.Store.Path_)); Assert.Equal(latch, File.ReadAllBytes(control));
+            h.Released();
         }
     }
 
@@ -234,7 +264,7 @@ public sealed class WindowsStartupTests
         try
         {
             _ = h.Start(launch: _ => throw new System.ComponentModel.Win32Exception("private diagnostic"));
-            await h.Ready(); Assert.Single(h.Launches);
+            await h.Ready(); Assert.True(h.Launches.Count == 1, "Exactly one shell request required");
             Assert.Contains($"http://127.0.0.1:{h.Port}/", error.ToString()); Assert.DoesNotContain("private diagnostic", error.ToString());
             Assert.Equal(0, await h.Finish()); h.Released();
         }

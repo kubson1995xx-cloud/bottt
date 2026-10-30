@@ -18,6 +18,7 @@ namespace Apex.Desktop.Services
         private readonly ConfigStore _config;
         private readonly AppLog _log;
         private readonly string _cachePath;
+        private Task? _worker;
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
 
         public NewsService(NewsCalendar calendar, ConfigStore config, AppLog log)
@@ -35,7 +36,7 @@ namespace Apex.Desktop.Services
         public void Start(CancellationToken ct)
         {
             Http.DefaultRequestHeaders.UserAgent.ParseAdd("APEX-Trading-AI/1.0");
-            _ = Task.Run(async () =>
+            _worker = Task.Run(async () =>
             {
                 while (!ct.IsCancellationRequested)
                 {
@@ -44,6 +45,15 @@ namespace Apex.Desktop.Services
                     catch (TaskCanceledException) { break; }
                 }
             }, ct);
+        }
+
+        // The host cancels the owning token before awaiting this worker. Do not leave
+        // cache writes or HTTP work running after the private-data lock is released.
+        internal async Task StopAsync()
+        {
+            if (_worker == null) return;
+            try { await _worker.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
         }
 
         public async Task RefreshAsync(CancellationToken ct)
