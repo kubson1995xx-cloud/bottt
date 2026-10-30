@@ -31,6 +31,12 @@ namespace Apex.Desktop
 
         // Source-only native prompt adapter; production entry never supplies one.
         internal static async Task<int> Run(string[] args, bool trustedSyntheticComposition, Func<string, string, bool>? localAccessPrompt)
+            => await Run(args, trustedSyntheticComposition, localAccessPrompt, null, CancellationToken.None, null);
+
+        // Per-call source seams only; Main never supplies adapters or observations.
+        internal static async Task<int> Run(string[] args, bool trustedSyntheticComposition,
+            Func<string, string, bool>? localAccessPrompt, Action<ProcessStartInfo>? browserLauncher,
+            CancellationToken cancellation, Action<string, object?>? startupObserver)
         {
             Console.OutputEncoding = Encoding.UTF8;
             string dataDir;
@@ -117,7 +123,9 @@ namespace Apex.Desktop
             var news = new NewsCalendar();
             var newsService = new NewsService(news, config, log);
             var accounts = new AccountManager(config, news, log);
+            startupObserver?.Invoke("accounts", accounts);
             var bridge = new BridgeServer(accounts, config, log);
+            startupObserver?.Invoke("bridge", bridge);
             int port = int.TryParse(GetArg(args, "--port"), out var p) ? p : config.Config.HttpPort;
 
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args, ContentRootPath = AppContext.BaseDirectory, WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot") });
@@ -130,6 +138,7 @@ namespace Apex.Desktop
                 o.SerializerOptions.NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals;
             });
             var app = builder.Build();
+            startupObserver?.Invoke("app", app);
             app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 
             string token = config.Config.ApiToken;
@@ -295,7 +304,7 @@ namespace Apex.Desktop
             if (naval == null) log.Info($"Klucz parowania mostów: {config.Config.PairingKey}  | WebSocket: ws://127.0.0.1:{port}/bridge | TCP: 127.0.0.1:{config.Config.BridgeTcpPort}");
             else log.Info("Bridge configured.");
             log.Info("Handel na kontach LIVE: TRWALE WYŁĄCZONY (wersja DEMO).");
-            if (config.Config.OpenBrowserOnStart && !args.Contains("--no-browser")) OpenBrowser(url);
+            if (config.Config.OpenBrowserOnStart && !args.Contains("--no-browser")) OpenBrowser(url, browserLauncher);
 
             app.Lifetime.ApplicationStopping.Register(() =>
             {
@@ -304,20 +313,20 @@ namespace Apex.Desktop
                 accounts.Dispose();
                 log.Info("APEX Desktop zatrzymany.");
             });
-            await app.RunAsync();
+            await app.RunAsync(cancellation);
             lockFile.Dispose();
             return 0;
         }
 
-        private static void OpenBrowser(string url)
+        private static void OpenBrowser(string url, Action<ProcessStartInfo>? launcher)
         {
             try
             {
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
                     // Tryb aplikacji przeglądarki Edge (okno bez pasków – wygląda jak osobna aplikacja); w razie braku – domyślna przeglądarka.
-                    try { Process.Start(new ProcessStartInfo("msedge", $"--app={url}") { UseShellExecute = true }); }
-                    catch (System.ComponentModel.Win32Exception) { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+                    try { if (launcher != null) launcher(new ProcessStartInfo("msedge", $"--app={url}") { UseShellExecute = true }); else Process.Start(new ProcessStartInfo("msedge", $"--app={url}") { UseShellExecute = true }); }
+                    catch (System.ComponentModel.Win32Exception) { if (launcher != null) launcher(new ProcessStartInfo(url) { UseShellExecute = true }); else Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
                 }
             }
             catch (Exception) { /* brak przeglądarki nie zatrzymuje bota */ }
