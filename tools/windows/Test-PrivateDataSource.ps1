@@ -40,6 +40,7 @@ try {
     $privateExit = Invoke-Gate 'private-data' @('test','tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj','-c','Release','--no-build','--no-restore','--filter','FullyQualifiedName~WindowsPrivateDataTests','--logger',('trx;LogFileName=private-data-' + $Phase + '.trx'),'--results-directory',$evidence)
     Assert-Build 'restore-existing' @('restore','tests/Apex.Tests/Apex.Tests.csproj')
     Assert-Build 'build-existing' @('build','tests/Apex.Tests/Apex.Tests.csproj','-c','Release','--no-restore')
+    Assert-Build 'build-producer' @('build','tools/Apex.Backtester/Apex.Backtester.csproj','-c','Release')
     $accessExit = Invoke-Gate 'access-native' @('test','tests/Apex.Tests/Apex.Tests.csproj','-c','Release','--no-build','--no-restore','--filter','FullyQualifiedName~NavalReadAccess','--logger','trx;LogFileName=access-native.trx','--results-directory',$evidence)
     $counts = @()
     foreach ($file in (Get-ChildItem -LiteralPath $evidence -Filter '*.trx')) {

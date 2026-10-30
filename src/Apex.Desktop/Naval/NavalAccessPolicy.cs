@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Apex.Core.Naval;
+using Apex.Desktop.Services;
 using Microsoft.AspNetCore.Http;
 
 namespace Apex.Desktop.Naval;
@@ -97,7 +98,8 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
                 NavalPrivatePath.Check(options.PublicationPath, false, false, false);
                 if (Path.GetFullPath(options.PublicationPath).Equals(Path.GetFullPath(options.CredentialFilePath), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) throw new NavalAccessException("NAVAL_PATH_INVALID");
             }
-            using var stream = new FileStream(options.CredentialFilePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            using var stream = new FileStream(options.CredentialFilePath, FileMode.Open, FileAccess.Read, OperatingSystem.IsWindows() ? FileShare.Read : FileShare.Read | FileShare.Delete);
+            if (OperatingSystem.IsWindows()) WindowsPathSecurity.Validate(new FileInfo(options.CredentialFilePath), true);
             if (stream.Length > 65536) throw new NavalAccessException("NAVAL_CREDENTIAL_INVALID");
             using var memory = new MemoryStream(); var buffer = new byte[8192]; int count;
             while ((count = stream.Read(buffer, 0, buffer.Length)) != 0)
@@ -189,6 +191,7 @@ internal static class NavalPrivatePath
     {
         try
         {
+            if (OperatingSystem.IsWindows()) { CheckWindows(path, requireLeaf, checkLeafPermissions); return; }
             if (string.IsNullOrEmpty(path) || !Path.IsPathFullyQualified(path) || path.StartsWith("\\\\", StringComparison.Ordinal) || path.Contains('%') || path.Contains('*') || path.Contains('?') || path.Contains(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)) throw new NavalAccessException("NAVAL_PATH_INVALID");
             string full = Path.GetFullPath(path); if (full != path || Path.GetFileName(full).Length == 0) throw new NavalAccessException("NAVAL_PATH_INVALID");
             string baseDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(AppContext.BaseDirectory));
@@ -198,8 +201,6 @@ internal static class NavalPrivatePath
             foreach (string d in chain)
             {
                 if (!Directory.Exists(d) || (File.GetAttributes(d) & FileAttributes.ReparsePoint) != 0 || File.Exists(Path.Combine(d, ".naval-owner.lock")) || File.Exists(Path.Combine(d, ".naval-initialized")) || Directory.Exists(Path.Combine(d, ".git")) || File.Exists(Path.Combine(d, ".git")) || File.Exists(Path.Combine(d, "APEX.Trading.Demo.sln"))) throw new NavalAccessException("NAVAL_PATH_INVALID");
-                if (OperatingSystem.IsWindows()) CheckWindows(new DirectoryInfo(d), d == Path.GetDirectoryName(full));
-                else
                 {
                     var m = File.GetUnixFileMode(d);
                     if (!privateTraversal && (m & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0) throw new NavalAccessException("NAVAL_PERMISSIONS_INVALID");
@@ -211,8 +212,6 @@ internal static class NavalPrivatePath
             if (!File.Exists(full)) { if (requireLeaf) throw new NavalAccessException("NAVAL_CREDENTIAL_INVALID"); return; }
             if ((File.GetAttributes(full) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0) throw new NavalAccessException("NAVAL_PATH_INVALID");
             if (!checkLeafPermissions) return;
-            if (OperatingSystem.IsWindows()) CheckWindows(new FileInfo(full), true);
-            else
             {
                 var m = File.GetUnixFileMode(full); var allowed = UnixFileMode.UserRead | UnixFileMode.UserWrite;
                 if ((credential && m != allowed) || (!credential && ((m & ~allowed) != 0 || (m & UnixFileMode.UserRead) == 0))) throw new NavalAccessException("NAVAL_PERMISSIONS_INVALID");
@@ -222,22 +221,30 @@ internal static class NavalPrivatePath
         catch (Exception e) when (e is not OutOfMemoryException) { throw new NavalAccessException("NAVAL_PERMISSIONS_INVALID"); }
     }
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void CheckWindows(FileSystemInfo info, bool leaf)
+    private static void CheckWindows(string path, bool requireLeaf, bool checkLeafPermissions)
     {
-        FileSystemSecurity acl = info is DirectoryInfo directory ? directory.GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner) : ((FileInfo)info).GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
-        var descriptor = new RawSecurityDescriptor(acl.GetSecurityDescriptorBinaryForm(), 0);
-        if ((descriptor.ControlFlags & ControlFlags.DiscretionaryAclPresent) == 0 || descriptor.DiscretionaryAcl == null) throw new NavalAccessException("NAVAL_PERMISSIONS_INVALID");
-        var me = WindowsIdentity.GetCurrent().User!; var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null); var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-        bool Trusted(IdentityReference id) => id.Equals(me) || id.Equals(system) || id.Equals(admins);
-        var owner = acl.GetOwner(typeof(SecurityIdentifier));
-        if (owner == null || !Trusted(owner)) throw new NavalAccessException("NAVAL_PERMISSIONS_INVALID");
-        // Ancestors may be traversable/readable, but no untrusted modification rights. Private leaf/parent have no broad grants.
-        foreach (FileSystemAccessRule rule in acl.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+        var held = new List<WindowsPathSecurity.NativeObject>();
+        try
         {
-            if (rule.AccessControlType != AccessControlType.Allow || Trusted(rule.IdentityReference)) continue;
-            var modification = FileSystemRights.Write | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
-            bool privateTarget = leaf;
-            if (privateTarget || (rule.FileSystemRights & modification) != 0) throw new NavalAccessException("NAVAL_PERMISSIONS_INVALID");
+            string full = WindowsPrivateData.ValidateSyntax(path);
+            WindowsPathSecurity.ValidateVolume(Path.GetPathRoot(full)!);
+            string parent = Path.GetDirectoryName(full) ?? throw new WindowsDataException(WindowsPathSecurity.PathInvalid);
+            using var release = WindowsPathSecurity.Open(AppContext.BaseDirectory);
+            var chain = WindowsPrivateData.Components(parent);
+            for (int i = 0; i < chain.Count; i++)
+            {
+                var opened = WindowsPathSecurity.Open(chain[i]); held.Add(opened);
+                if (!opened.IsDirectory) throw new WindowsDataException(WindowsPathSecurity.PathInvalid);
+                WindowsPrivateData.CheckLocation(opened.Path, release.Path);
+                WindowsPathSecurity.Validate(opened, i == chain.Count - 1);
+            }
+            if (!File.Exists(full)) { if (requireLeaf) throw new NavalAccessException("NAVAL_CREDENTIAL_INVALID"); return; }
+            using var leaf = WindowsPathSecurity.Open(full);
+            if (leaf.IsDirectory) throw new WindowsDataException(WindowsPathSecurity.PathInvalid);
+            WindowsPrivateData.CheckLocation(leaf.Path, release.Path);
+            if (checkLeafPermissions) WindowsPathSecurity.Validate(leaf, true);
         }
+        catch (WindowsDataException ex) { throw new NavalAccessException(ex.Code == WindowsPathSecurity.PathInvalid ? "NAVAL_PATH_INVALID" : "NAVAL_PERMISSIONS_INVALID"); }
+        finally { foreach (var opened in held.AsEnumerable().Reverse()) opened.Dispose(); }
     }
 }

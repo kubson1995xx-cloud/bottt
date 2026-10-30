@@ -166,6 +166,7 @@ namespace Apex.Desktop.Services
 
         internal static string DefaultDataDirFromLocalAppData(string baseDir)
         {
+            if (OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(baseDir)) throw new WindowsDataException("HOST_DATA_UNAVAILABLE");
             if (string.IsNullOrWhiteSpace(baseDir)) baseDir = AppContext.BaseDirectory;
             return System.IO.Path.Combine(baseDir, "APEX Trading AI");
         }

@@ -30,8 +30,26 @@ namespace Apex.Desktop
         internal static async Task<int> Run(string[] args, bool trustedSyntheticComposition)
         {
             Console.OutputEncoding = Encoding.UTF8;
-            string dataDir = GetArg(args, "--data") ?? ConfigStore.DefaultDataDir();
-            Directory.CreateDirectory(dataDir);
+            string dataDir;
+            WindowsPrivateDataLease? privateData = null;
+            try
+            {
+                dataDir = GetArg(args, "--data") ?? ConfigStore.DefaultDataDir();
+                if (OperatingSystem.IsWindows())
+                {
+                    var executableDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+                    string releaseRoot = executableDirectory.Name.Equals("APEX-Desktop", StringComparison.OrdinalIgnoreCase) ? executableDirectory.Parent!.FullName : executableDirectory.FullName;
+                    privateData = WindowsPrivateData.Open(dataDir, releaseRoot);
+                    dataDir = privateData.Path;
+                }
+                else Directory.CreateDirectory(dataDir);
+            }
+            catch (WindowsDataException ex)
+            {
+                Console.Error.WriteLine(ex.Code + ": Wybierz prywatny katalog na lokalnym dysku poza paczką; sprawdź właściciela i uprawnienia. Istniejących danych nie naprawiono ani nie usunięto.");
+                return 2;
+            }
+            using var privateDataLease = privateData;
 
             // Jedna instancja na katalog danych – dwa procesy APEX nie mogą zarządzać tymi samymi kontami.
             FileStream lockFile;
@@ -46,8 +64,16 @@ namespace Apex.Desktop
             NavalRuntimeOptions? naval;
             try
             {
+                if (OperatingSystem.IsWindows()) privateData?.ValidateTree();
                 config = new ConfigStore(dataDir) { TrustedSyntheticComposition = trustedSyntheticComposition };
+                if (OperatingSystem.IsWindows()) privateData?.ValidateTree();
                 naval = NavalAccessPolicy.Load(config.Config.NavalRead);
+            }
+            catch (WindowsDataException ex)
+            {
+                Console.Error.WriteLine(ex.Code + ": Sprawdź prywatny katalog i uprawnienia; zachowaj istniejące dane.");
+                lockFile.Dispose();
+                return 2;
             }
             catch (NavalAccessException ex)
             {

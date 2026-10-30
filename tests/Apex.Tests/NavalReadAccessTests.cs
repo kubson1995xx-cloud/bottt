@@ -282,7 +282,7 @@ internal sealed class NavalProductionHost : IAsyncDisposable
         File.WriteAllText(CredentialPath, JsonSerializer.Serialize(new { schema = "naval-local-access-v1", principals = new[] { new { id = "operator", role = "Operator", secretSha256 = Hash(OperatorSecret), allowedScopeIds = new[] { "offline" } }, new { id = "reader", role = "ReadOnly", secretSha256 = Hash(ReadSecret), allowedScopeIds = new[] { "offline" } } } })); PrivateFile(CredentialPath);
         Configuration = JsonSerializer.SerializeToNode(new { HttpPort = Port, BridgeTcpPort = FreePort(), ApiToken = LegacyToken, PairingKey = "TEST-PAIRING", OpenBrowserOnStart = false, News = new { Enabled = false } })!.AsObject();
         if (enabled) Configuration["NavalRead"] = JsonSerializer.SerializeToNode(new { Enabled = true, PublicationPath = (string?)null, CredentialFilePath = CredentialPath, Scope = new { Id = "offline", PublicationScopeId = new string('a', 64), PortfolioId = new { PortfolioId = "test", ReportingCurrency = "USD" }, ConfigDigest = new string('b', 64), Accounts = new[] { new { Venue = "Offline", Environment = "Offline", AccountId = "test", QuoteCurrency = "USD" } } } });
-        Client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = new Uri($"http://127.0.0.1:{Port}"), Timeout = TimeSpan.FromSeconds(2) };
+        Client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { BaseAddress = new Uri($"http://127.0.0.1:{Port}"), Timeout = TimeSpan.FromSeconds(2) };
     }
     internal async Task Start(bool expectExit = false)
     {
@@ -298,7 +298,7 @@ internal sealed class NavalProductionHost : IAsyncDisposable
         for (int i = 0; i < 200; i++) { if (Process.HasExited) { if (expectExit) return; throw new InvalidOperationException("Production host exited before readiness (output withheld)"); } if (await Listening()) { if (expectExit) Assert.Fail("Enabled invalid config bound HTTP instead of exiting closed"); return; } await Task.Delay(50); }
         throw new TimeoutException("Production host readiness deadline");
     }
-    internal async Task<bool> Listening() { try { using var r = await Client.GetAsync("/"); return true; } catch (HttpRequestException) { return false; } }
+    internal async Task<bool> Listening() { try { using var r = await Client.GetAsync("/"); return true; } catch (HttpRequestException) { return false; } catch (TaskCanceledException) { return false; } }
     internal HttpRequestMessage Request(string path, string auth = "", string method = "GET")
     {
         var r = new HttpRequestMessage(new HttpMethod(method), path);
