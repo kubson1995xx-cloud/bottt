@@ -1,4 +1,15 @@
-# Task6A-H — zabezpieczony host odczytu, kandydat nieodebrany
+# Task6A-H — zabezpieczony host odczytu
+
+## Końcowy odbiór lokalny/Linux
+**ZAAKCEPTOWANY w zakresie lokalnego hosta odczytu**, kod `43b4af9`, po scoped re-review `task-6a-host-fix1-review.md` i final-DLL browser gate `task-6a-host-fix1-browser-report.md`. Jedyny Important exact decimal: ADDRESSED, spec/quality PASS, bez nowych Critical/Important. Końcowe source-bound840/840 Apex.Tests,103/103H target, solution/SDK0warnings/errors,3currentCLI→hostPASS; panel17/17 reused przy identycznych źródłach.
+
+Parent wykonał verifier final-browser z exit0: **129 named probe records,0 failed**,244inputs zgodne,63sanitizedresponses;3hosty i4konteksty posprzątane. NativeBasiccache/Readerisolation/originalpanel/CSP/textEmergencyStop+durablelatch i defaultregression potwierdzone. Oryginalny malformed-first decimal503/noeconomics, validcontrol200 z dokładnym highscalecheckpoint. To129records, nie129unit tests.
+
+Ruling raw/typed: bounded immutable construction przed Shape dopuszczone, ponieważ brak authority/sideeffects, limity działają, a wykazana luka precyzji jest zamknięta przed admission. Koszt błędnej decyzji i mechanizm zapisane poniżej; brak zwolnienia ze strict input validation.
+
+Odbiór nie obejmuje native Windows ACL/browser/package/cTrader, faktycznej provisioning użytkownika, private OKX/WS/brokera, remoteTLS/mobile/antirollback acrossrestart ani frontendReact/R3F. Host pozostaje opt-in/defaultdisabled; nie skonfigurowano rachunku ani realnych sekretów.
+
+Poniżej zachowana historia kandydata, otwartych wcześniej bramek i dowodów. Bieżący status ustala powyższa dyspozycja.
 
 ## Status
 Kod `a27258f`, baza `8b19b56`, gałąź `feature/apex-naval-command`. **Funkcjonalny kandydat jest zaimplementowany; Task6A-H nie jest jeszcze odebrany.** Trwają niezależny review nowej granicy auth/odczytu i odzyskanie brakującego testu prawdziwej przeglądarki.
