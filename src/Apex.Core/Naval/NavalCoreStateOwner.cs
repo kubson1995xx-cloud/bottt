@@ -45,6 +45,8 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
                 if(!File.Exists(marker))throw new InvalidDataException("Authority without initialization manifest");
                 using var doc=JsonDocument.Parse(raw);RequireProperties(doc.RootElement.GetProperty("Naval"),typeof(NavalPortfolioState));
                 foreach(var r in doc.RootElement.GetProperty("Naval").GetProperty("Reservations").EnumerateArray())RequireProperties(r,typeof(NavalReservation));
+                if(doc.RootElement.EnumerateObject().Count(p=>p.Name=="NavalReadJournal")>1)throw new InvalidDataException("Duplicate publication metadata");
+                if(doc.RootElement.TryGetProperty("NavalReadJournal",out var metadata)&&metadata.ValueKind!=JsonValueKind.Null)NavalReadJournal.RequireMetadata(metadata);
                 _state=JsonSerializer.Deserialize<EngineState>(raw,NavalJson.Options)??throw new InvalidDataException("Null authority");Validate(_state);
             }
         }
@@ -64,6 +66,7 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
                 candidate=NavalJson.Clone(candidate);
                 if(candidate.DurableRevision!=checked(expectedRevision+1))throw new InvalidDataException("Revision discontinuity");
                 candidate.Naval=Seal(candidate.Naval??throw new InvalidDataException("Missing Naval state"));
+                NavalReadJournal.ValidateTransition(_state,candidate);
                 Validate(candidate);_store.Set(StateKey,NavalJson.Serialize(candidate));_store.Flush();_state=candidate;return NavalCommitResult.Committed;
             }
             catch{_faulted=true;return NavalCommitResult.Faulted;}
@@ -75,7 +78,7 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
         NavalCashRiskPolicy.ValidateDefinition(_definition);
         var s=envelope.Naval??throw new InvalidDataException("Unconfigured authority");
         if(s.StateDigest!=Seal(s).StateDigest)throw new InvalidDataException("Naval state integrity digest mismatch");
-        var c=NavalJson.Clone(envelope);c.Naval=null;c.DurableRevision=0;c.SavedUtc=default;
+        var c=NavalJson.Clone(envelope);c.Naval=null;c.NavalReadJournal=null;c.DurableRevision=0;c.SavedUtc=default;
         if(NavalJson.Serialize(c)!=NavalJson.Serialize(new EngineState()))throw new InvalidDataException("CFD-populated envelope is not a Naval scope");
         if(s.Schema!="naval-cash-risk-v1"||s.Id!=_definition.Id||s.ConfigDigest!=_definition.Digest||s.Revision!=envelope.DurableRevision||s.Generation<0||s.Sequence<0||
             (s.Mode!="STOP"&&s.Mode!="RUNNING"))throw new InvalidDataException("Naval schema/config/scope/revision mismatch");
@@ -112,6 +115,7 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
         foreach(var f in s.Fills)
             if(f.Digest!=NavalJson.Hash(f.Fill)||f.Key!=FillKey(f.Fill)||!s.Reservations.Any(r=>r.Id==f.Fill.ReservationId&&r.Account==f.Fill.Account&&r.Intent.Instrument==f.Fill.Instrument))
                 throw new InvalidDataException("Fill identity mismatch");
+        NavalReadJournal.Validate(envelope,_definition);
     }
     internal static string FillKey(NavalFill f)=>NavalJson.Hash(new{f.Account.Venue,f.Account.Environment,f.Account.AccountId,f.Instrument,f.TradeId});
     public void Dispose(){lock(this){if(_disposed)return;_disposed=true;_lease.Dispose();}}

@@ -56,6 +56,7 @@ namespace Apex.Core.Engine
         public ExecutionTestCertificate? ExecutionTest { get; set; }
         public long DurableRevision { get; set; }
         public Apex.Core.Naval.NavalPortfolioState? Naval { get; set; }
+        public Apex.Core.Naval.NavalReadJournalState? NavalReadJournal { get; set; }
         public RecoveryBaseline? Baseline { get; set; }
         public List<OpenAdmission> OpenAdmissions { get; set; } = new();
         public bool LegacyScopeQuarantine { get; set; }

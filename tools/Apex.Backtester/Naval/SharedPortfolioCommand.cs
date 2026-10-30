@@ -21,10 +21,14 @@ internal static class SharedPortfolioCommand
         {
             var options=new Dictionary<string,string>();
             for(int i=0;i<args.Length;i+=2)
-                if(i+1>=args.Length||(args[i]!="--input"&&args[i]!="--state-dir"&&args[i]!="--output")||!options.TryAdd(args[i],args[i+1]))throw new ArgumentException("Unknown/duplicate/missing shared replay option");
-            if(options.Count!=3)throw new ArgumentException("Require --input FILE --state-dir DIR --output FILE");
+                if(i+1>=args.Length||(args[i]!="--input"&&args[i]!="--state-dir"&&args[i]!="--output"&&args[i]!="--publication")||!options.TryAdd(args[i],args[i+1]))throw new ArgumentException("Unknown/duplicate/missing shared replay option");
+            if(!options.ContainsKey("--input")||!options.ContainsKey("--state-dir")||!options.ContainsKey("--output"))throw new ArgumentException("Require --input FILE --state-dir DIR --output FILE [--publication FILE]");
             string input=Local(options["--input"]),state=Local(options["--state-dir"]),output=Local(options["--output"]);
             if(Path.GetRelativePath(input,output)=="."||SameOrWithin(output,state)||SameOrWithin(input,state))throw new ArgumentException("Input/output must be separate from authority directory");
+            string? publication=options.TryGetValue("--publication",out var export)?Local(export):null;
+            if(publication!=null&&(SameOrWithin(publication,state)||SameOrWithin(state,publication)||
+                SameOrWithin(publication,input)||SameOrWithin(input,publication)||SameOrWithin(publication,output)||SameOrWithin(output,publication)))
+                throw new ArgumentException("Publication must be disjoint from input/output/authority");
             if(new FileInfo(input).Length>10000000)throw new ArgumentException("Input exceeds bounded local replay size");
             byte[] bytes=File.ReadAllBytes(input);
             var manifest=JsonSerializer.Deserialize<SharedReplayInput>(bytes,Json)??throw new ArgumentException("Empty input");
@@ -34,6 +38,8 @@ internal static class SharedPortfolioCommand
             node["coreSha256"]=Hash(File.ReadAllBytes(typeof(NavalPortfolioCoordinator).Assembly.Location));
             node["backtesterSha256"]=Hash(File.ReadAllBytes(typeof(Program).Assembly.Location));
             Directory.CreateDirectory(Path.GetDirectoryName(output)!);File.WriteAllText(output,node.ToJsonString(Json));
+            if(publication!=null)SharedPublicationExport.Write(publication,replay.ReadPublication()??throw new InvalidOperationException("PRODUCER_NOT_INITIALIZED"),
+                node["inputSha256"]!.GetValue<string>(),node["coreSha256"]!.GetValue<string>(),node["backtesterSha256"]!.GetValue<string>(),replay.SourceClockUtc);
             Console.WriteLine(output);return 0;
         }
         catch(Exception e){Console.Error.WriteLine("OFFLINE shared replay refused: "+e.Message);return 2;}

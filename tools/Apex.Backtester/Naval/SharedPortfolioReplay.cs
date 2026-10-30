@@ -63,6 +63,8 @@ internal sealed class SharedPortfolioReplay : IDisposable
         return new{classification=Classification,configIdentity=_definition.Digest,initial,steps=output,final=_coordinator.Snapshot(),
             authority="one EngineState.Naval; synthetic complete observations echo the durable owner; no external broker reconciliation claimed"};
     }
+    internal NavalReadPublication? ReadPublication()=>_coordinator.ReadPublication();
+    internal DateTimeOffset SourceClockUtc=>_clock.UtcNow;
     private NavalReservation Find(string command)=>_owner.Read().Naval!.Reservations.Single(r=>r.Intent.CommandId==command);
     private NavalEvidenceReceipt Issue(SharedReplayStep step,NavalEvidenceKind kind)
     {
