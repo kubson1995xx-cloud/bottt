@@ -102,8 +102,8 @@ public sealed class WindowsPrivateDataTests
         using var f = new PrivateFixture(); string release = f.Directory("Long Release Package"), data = System.IO.Path.Combine(release, "data");
         Assert.Throws<WindowsDataException>(() => WindowsPrivateData.Open(data, release).Dispose()); Assert.False(Directory.Exists(data));
         var b = new StringBuilder(32768); Assert.NotEqual(0u, GetShortPathName(release, b, b.Capacity));
-        // NTFS may have 8.3 disabled: assert canonical case/long representation in either case.
         string alias = b.ToString();
+        Assert.False(alias.Equals(release, StringComparison.OrdinalIgnoreCase), "Native 8.3 alias fixture unavailable; alias coverage cannot be claimed");
         Assert.Throws<WindowsDataException>(() => WindowsPrivateData.Open(System.IO.Path.Combine(alias, "data"), release.ToUpperInvariant()).Dispose());
         string sibling = f.Directory("Long Release Package-Other"); using var lease = WindowsPrivateData.Open(sibling, release); Assert.False(lease.IsNew);
     }
