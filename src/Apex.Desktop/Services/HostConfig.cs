@@ -76,6 +76,17 @@ namespace Apex.Desktop.Services
             Config = Load();
         }
 
+        // First-run setup supplies final authenticated settings; never publish a legacy
+        // default config between the pending marker and the complete private profile.
+        internal ConfigStore(string dataDir, HostConfig initialConfig)
+        {
+            DataDir = dataDir;
+            Path_ = System.IO.Path.Combine(dataDir, "apex.config.json");
+            if (File.Exists(Path_) || !Directory.Exists(dataDir)) throw new InvalidDataException("Initial configuration target is not empty.");
+            Config = initialConfig;
+            Save();
+        }
+
         public string DataDir { get; }
         public string Path_ { get; }
         public HostConfig Config { get; private set; }

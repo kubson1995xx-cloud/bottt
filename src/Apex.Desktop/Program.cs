@@ -27,7 +27,10 @@ namespace Apex.Desktop
     {
         public static Task<int> Main(string[] args) => Run(args, trustedSyntheticComposition: false);
 
-        internal static async Task<int> Run(string[] args, bool trustedSyntheticComposition)
+        internal static Task<int> Run(string[] args, bool trustedSyntheticComposition) => Run(args, trustedSyntheticComposition, null);
+
+        // Source-only native prompt adapter; production entry never supplies one.
+        internal static async Task<int> Run(string[] args, bool trustedSyntheticComposition, Func<string, string, bool>? localAccessPrompt)
         {
             Console.OutputEncoding = Encoding.UTF8;
             string dataDir;
@@ -65,13 +68,31 @@ namespace Apex.Desktop
                 return 2;
             }
 
+            using var startupLock = lockFile;
             ConfigStore config;
             NavalRuntimeOptions? naval;
             try
             {
-                if (OperatingSystem.IsWindows()) privateData?.ValidateDirectories();
-                config = new ConfigStore(dataDir) { TrustedSyntheticComposition = trustedSyntheticComposition };
-                if (OperatingSystem.IsWindows()) privateData?.ValidateDirectories();
+                if (args.Contains("--show-local-access"))
+                {
+                    if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("HOST_LOCAL_SETUP_INCOMPLETE: Dostęp lokalny wymaga prywatnego profilu Windows."); return 2; }
+                    privateData?.ValidateDirectories();
+                    return WindowsLocalAccess.Show(dataDir, localAccessPrompt ?? WindowsLocalAccessPrompt.Show) ? 0 : 2;
+                }
+                if (OperatingSystem.IsWindows())
+                {
+                    privateData?.ValidateDirectories();
+                    var setup = WindowsLocalSetup.Ensure(dataDir, Path.Combine(AppContext.BaseDirectory, "presentation"));
+                    config = setup.Store;
+                    privateData?.ValidateDirectories();
+                    if (setup.NeedsCredentialPrompt && !WindowsLocalAccess.Show(dataDir, localAccessPrompt ?? WindowsLocalAccessPrompt.Show))
+                    {
+                        Console.Error.WriteLine("HOST_LOCAL_ACCESS_CANCELLED: Serwer nie został uruchomiony. Zachowano prywatny profil; dane dostępu wyświetlisz przez --show-local-access.");
+                        return 2;
+                    }
+                }
+                else config = new ConfigStore(dataDir);
+                config.TrustedSyntheticComposition = trustedSyntheticComposition;
                 naval = NavalAccessPolicy.Load(config.Config.NavalRead);
             }
             catch (WindowsDataException ex)
@@ -159,6 +180,10 @@ namespace Apex.Desktop
             string indexPath = Path.Combine(app.Environment.WebRootPath, "index.html");
             async Task RenderIndex(HttpContext ctx)
             {
+                // Enter has already applied the unchanged Operator document policy.
+                // Compare the literal nonsecret query, never reflect a target from input.
+                if (naval != null && ctx.Request.Path.Value == "/" && ctx.Request.QueryString.Value == "?view=naval")
+                { ctx.Response.Redirect("/naval/"); return; }
                 string html = await File.ReadAllTextAsync(indexPath);
                 html = html.Replace("__APEX_TOKEN__", naval == null ? token : "");
                 ctx.Response.ContentType = "text/html; charset=utf-8";
@@ -265,7 +290,7 @@ namespace Apex.Desktop
             bridge.StartTcp(cts.Token);
             newsService.Start(cts.Token);
 
-            string url = $"http://127.0.0.1:{port}/";
+            string url = $"http://127.0.0.1:{port}/" + (naval == null ? "" : "?view=naval");
             log.Info($"APEX Desktop {AccountManager.HostVersion} uruchomiony: {url}  (dane: {dataDir})");
             if (naval == null) log.Info($"Klucz parowania mostów: {config.Config.PairingKey}  | WebSocket: ws://127.0.0.1:{port}/bridge | TCP: 127.0.0.1:{config.Config.BridgeTcpPort}");
             else log.Info("Bridge configured.");

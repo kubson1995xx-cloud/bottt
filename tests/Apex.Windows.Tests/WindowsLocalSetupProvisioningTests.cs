@@ -44,7 +44,7 @@ public sealed partial class WindowsLocalSetupTests
     {
         public string Root { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ApexSetupTests-" + Guid.NewGuid().ToString("N"));
         public WindowsPrivateDataLease Lease { get; }
-        public SetupFixture() { Assert.True(OperatingSystem.IsWindows(), "Native Windows required"); Lease = WindowsPrivateData.Open(Root, AppContext.BaseDirectory); }
+        public SetupFixture() { Assert.True(OperatingSystem.IsWindows(), "Native Windows required"); Lease = WindowsPrivateData.Open(Root, AppContext.BaseDirectory); File.WriteAllText(Path.Combine(Root, "apex.lock"), ""); }
         public Dictionary<string, string> Snapshot() => Directory.GetFiles(Root, "*", SearchOption.AllDirectories).ToDictionary(p => Path.GetRelativePath(Root, p), p => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p))));
         public void Dispose() { Lease.Dispose(); Directory.Delete(Root, true); }
     }
