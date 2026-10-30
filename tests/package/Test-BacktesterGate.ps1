@@ -153,6 +153,68 @@ foreach ($fault in @('log-bytes','binding','missing-log','missing-ref','traversa
     Put $p ($f|ConvertTo-Json -Depth 6);$meta.frontendResultsSha256=Hash $p;Seal
     Case ('FrontendEvidence-'+$fault) { Reject { Verify } }
 }
+# I3-R1: every result-shaped line must count or fail explicitly, never disappear.
+# These controls use real shipped scripts and freshly bound log/metadata hashes.
+$flatResults=[ordered]@{
+    described=@{line='ok 1 - controlled';pass=$true}
+    bare=@{line='ok 1';pass=$true}
+    crlf=@{line='ok 1';pass=$true;crlf=$true}
+    wrongId=@{line='ok 2';pass=$false}
+    zeroId=@{line='ok 0';pass=$false}
+    leadingZeroId=@{line='ok 01';pass=$false}
+    negativeId=@{line='ok -1';pass=$false}
+    signedId=@{line='ok +1';pass=$false}
+    decimalId=@{line='ok 1.0';pass=$false}
+    attachedId=@{line='ok1';pass=$false}
+    underscoreId=@{line='ok_1';pass=$false}
+    overflowId=@{line='ok 999999999999999999999999';pass=$false}
+    missingId=@{line='ok';pass=$false}
+    missingIdDescription=@{line='ok - controlled';pass=$false}
+    unnumberedDescription=@{line='ok controlled';pass=$false}
+    noDashDescription=@{line='ok 1 controlled';pass=$false}
+    emptyDescription=@{line='ok 1 -';pass=$false}
+    tabSeparator=@{line="ok`t1";pass=$false}
+    doubleSpace=@{line='ok  1';pass=$false}
+    indented=@{line='  ok 1';pass=$false}
+    uppercase=@{line='OK 1';pass=$false}
+    failed=@{line='not ok 1';pass=$false}
+    malformedFailed=@{line='notok 1';pass=$false}
+    skipDirective=@{line='ok 1 - controlled # SKIP';pass=$false}
+    todoDirective=@{line='ok 1 - controlled # TODO';pass=$false}
+}
+foreach ($entry in $flatResults.GetEnumerator()) {
+    $shape=$entry.Value
+    foreach ($kind in @('tests','build')) {
+        Reset-Package
+        $p=Join-Path $package 'Weryfikacja/frontend-results.json';$f=Get-Content $p -Raw|ConvertFrom-Json
+        $log=Join-Path $package ('Weryfikacja/'+$f.$kind.log)
+        $text=[IO.File]::ReadAllText($log).Replace('ok 1 - controlled',$shape.line)
+        if ($shape.crlf) { $text=$text.Replace("`n","`r`n") }
+        Put $log $text;$f.$kind.logSha256=Hash $log
+        Put $p ($f|ConvertTo-Json -Depth 6);$meta.frontendResultsSha256=Hash $p;Seal
+        Case ('FlatTap-'+$kind+'-'+$entry.Key) {
+            if ($shape.pass) { & (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package }
+            else { Reject { & (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package } }
+        }
+    }
+}
+foreach ($line in @('ok 2','ok 2 - CONTROLLED_EXTRA_RECORD','ok 1','ok 1 - CONTROLLED_DUPLICATE','ok','ok +2','ok2','  ok 2','OK 2','notok 2')) {
+    Reset-Package
+    $p=Join-Path $package 'Weryfikacja/frontend-results.json';$f=Get-Content $p -Raw|ConvertFrom-Json
+    $log=Join-Path $package 'Weryfikacja/frontend-tests.txt'
+    Put $log ([IO.File]::ReadAllText($log).Replace('1..1',($line+"`n1..1")))
+    $f.tests.logSha256=Hash $log;Put $p ($f|ConvertTo-Json -Depth 6);$meta.frontendResultsSha256=Hash $p;Seal
+    Case ('FlatTap-Extra-'+$line) { Reject { & (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package } }
+}
+Case 'FlatTap-MixedBareDescribedSequentialPositive' {
+    Reset-Package
+    $p=Join-Path $package 'Weryfikacja/frontend-results.json';$f=Get-Content $p -Raw|ConvertFrom-Json
+    $log=Join-Path $package 'Weryfikacja/frontend-tests.txt'
+    $text=[IO.File]::ReadAllText($log).Replace('1..1',"ok 2`n1..2").Replace('# tests 1','# tests 2').Replace('# pass 1','# pass 2')
+    Put $log $text;$f.tests.total=2;$f.tests.passed=2;$f.tests.logSha256=Hash $log
+    Put $p ($f|ConvertTo-Json -Depth 6);$meta.frontendResultsSha256=Hash $p;Seal
+    & (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package
+}
 Case 'LinuxExplicitProductLayoutPositive' {
     Reset-Package
     Remove-Item (Join-Path $package 'APEX-Desktop/ApexDesktop.exe');Remove-Item (Join-Path $package 'Uruchom APEX.cmd')

@@ -30,13 +30,21 @@ function Read-ApexFrontendCounts([string]$Path) {
         $values[$name] = [int]$matches[0].Groups[1].Value
     }
     $plan = [regex]::Matches($text, '(?m)^1\.\.([0-9]+)\r?$')
-    $records = [regex]::Matches($text, '(?m)^ok ([0-9]+) - [^\r\n]+\r?$')
+    # Detect the whole result-shaped line family first, including unsupported
+    # spacing/case/IDs. Do not silently filter extra records by valid syntax.
+    $records = [regex]::Matches($text, '(?im)^[^\S\r\n]*(?:not[^\S\r\n]*)?ok[^\r\n]*\r?$')
     if ([regex]::Matches($text,'(?m)^TAP version 13\r?$').Count -ne 1 -or
         $values.tests -le 0 -or $values.pass -ne $values.tests -or
         $values.suites -ne 0 -or $values.fail -ne 0 -or $values.skipped -ne 0 -or $values.cancelled -ne 0 -or $values.todo -ne 0 -or
         $plan.Count -ne 1 -or [int]$plan[0].Groups[1].Value -ne $values.tests -or $records.Count -ne $values.tests -or
         $text -match '(?im)^\s*(not ok\b|Bail out!)|^\s*ok\b[^\r\n]*#\s*(SKIP|TODO)\b') { throw 'Incomplete/contradictory frontend TAP evidence' }
-    for ($i=0; $i -lt $records.Count; $i++) { if ([int]$records[$i].Groups[1].Value -ne $i+1) { throw 'Invalid frontend TAP test sequence' } }
+    for ($i=0; $i -lt $records.Count; $i++) {
+        # Supported flat records: canonical positive ID, bare or Node description.
+        # Other TAP shapes are refused rather than inferred from summary totals.
+        $record = [regex]::Match($records[$i].Value, '\Aok ([1-9][0-9]*)(?: - [^\r\n]+)?\r?\z')
+        if (-not $record.Success) { throw 'Unsupported/malformed frontend TAP result' }
+        if ([int]$record.Groups[1].Value -ne $i+1) { throw 'Invalid frontend TAP test sequence' }
+    }
     return [ordered]@{total=$values.tests;passed=$values.pass;failed=$values.fail;skipped=$values.skipped;cancelled=$values.cancelled;todo=$values.todo}
 }
 
