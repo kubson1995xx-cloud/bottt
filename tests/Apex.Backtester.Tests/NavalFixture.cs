@@ -10,7 +10,7 @@ namespace Apex.Backtester.Tests;
 // Jawne dane syntetyczne; żadnej interpretacji wyników jako evidence rynkowego.
 internal sealed class NavalFixture : IDisposable
 {
-    public string Root { get; } = Path.Combine(Environment.GetEnvironmentVariable("TMPDIR") ?? "/home/ubuntu/.hermes/cache/scratch", "naval-" + Guid.NewGuid().ToString("N"));
+    public string Root { get; } = Path.Combine(Environment.GetEnvironmentVariable("TMPDIR") ?? Path.GetTempPath(), "naval-" + Guid.NewGuid().ToString("N"));
     public string Manifest => Path.Combine(Root, "dataset.json");
     public DateTimeOffset Start { get; }
     public DateTimeOffset From => Start.AddDays(210);

@@ -209,7 +209,7 @@ public class NavalSharedPublicationTests
     static string Hash(string path)=>Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
     private sealed class Files:IDisposable
     {
-        internal readonly string Dir=Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")!,"publication-"+Guid.NewGuid().ToString("N"));
+        internal readonly string Dir=Path.Combine(Environment.GetEnvironmentVariable("TMPDIR") ?? Path.GetTempPath(),"publication-"+Guid.NewGuid().ToString("N"));
         internal string State=>Path.Combine(Dir,"state");internal string Authority=>Path.Combine(State,"naval-authority-v1.json");
         internal string Publication=>Path.Combine(Dir,"publication.json");internal string Result=>Path.Combine(Dir,"result.json");internal string Input=>Path.Combine(Dir,"input.json");
         internal Files(){Directory.CreateDirectory(Dir);}
