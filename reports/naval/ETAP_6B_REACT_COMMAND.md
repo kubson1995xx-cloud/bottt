@@ -1,10 +1,13 @@
-# Task6B — pięć podłączonych widoków NAVAL COMMAND, kandydat
+# Task6B — pięć podłączonych widoków NAVAL COMMAND, odbiór lokalny
 
-## Aktualny fix round1
-**Kod `f7c6595`, poprawki wykonane, scoped re-review w toku (`task-6b-fix1-review.md`). UI nadal NIEODEBRANE do werdyktu.** Zsynchronizowano stronę i exact reservation IDs listy/diagramu, wspólną selekcję, skip-focus i UNKNOWN przy braku checkpointu; README poprawiony. Parent wykonał retained verifier exit0: **36/36 frontend**, **3/3 build**, **6/6 actual host consumers**, **12/12 artifact copies** i **72 named browser records / 0 failed** na nowych JS/CSS i exact final published DLL. Real P→H dziewięć rezerwacji (dziewiąta Uncertain), page2 i mouse/Enter/Space, skip, jawny BACK i FORWARD oraz unavailable UNKNOWN potwierdzone. Te72 rekordy nie są unit tests. Wcześniejsze845/845 backendu i root17/17 użyte ponownie przy niezmienionych zależnościach, nie oznaczają nowego fullrunu UI. Dowody `/home/ubuntu/.hermes/cache/scratch/apex-naval-task6b-fix1/`.
+## Końcowy odbiór Task6B
+**ZAAKCEPTOWANY LOKALNIE/Linux**, kod `f7c6595`. Niezależny scoped re-review `task-6b-fix1-review.md`: I1, M1, M2 i M3 ADDRESSED; brakujący browser BACK/FORWARD proof CLOSED; spec i quality PASS, bez nowych Critical/Important. Parent zweryfikował źródła i artefakty retained verifierem exit0 przed przeglądem; reviewer niezależnie potwierdził zgodność finalnych bajtów. Odbiór obejmuje pięć Operator-only widoków read-only z SVG/CSS, nie R3F, prywatne konto lub handel.
+
+## Końcowe dowody poprawki
+**36/36 frontend**, **3/3 build tests**, **6/6 actual host consumers**, **12/12 artifact copies**, **72 named browser records / 0 failed**. Wspólna strona i exact IDs listy/diagramu, selekcja mouse/Enter/Space, skip-focus, jawny BACK/FORWARD i unavailable UNKNOWN potwierdzone. Real P→H kontrolowana scena zawiera dziewięć rezerwacji, dziewiąta Uncertain. Nowe JS/CSS i dokładny published Desktop DLL są zgodne z ostatnim browser run. 72 rekordy to nie unit tests. Retained **845/845** oraz root **17/17** dotyczą niezmienionego backendu/panelu i nie są nowym pełnym wykonaniem zmienionego UI. Dowody `/home/ubuntu/.hermes/cache/scratch/apex-naval-task6b-fix1/`.
 
 ## Historia kandydata
-Kod `6c0ff8c` plus integrated test update `e87e87b`, baza `5262aa2`. **UI jest zaimplementowane; NIEODEBRANE — review CHANGES REQUESTED, 1 Important.** I1 w `task-6b-react-command-review.md`: diagram floty nie podąża za paginacją listy i może pomijać widoczną niepewną rezerwację. Fix round1 w toku: wspólna strona/IDs listy i diagramu, adjacent skip-link/UNKNOWN counts oraz brakujący dowód browser back/forward; następnie scoped re-review. Brak Critical i nowego financial/auth defect. Pełny affected gate po authorized oczekiwaniu302 jest **845/845 PASS,0fail/skip**; parent wykonał retained verifier exit0 i potwierdził niezmienione źródła/artefakty frontendu. Poprzednie844/845 i obsolete404 pozostają wyłącznie historią. Root-firstBasic workflow i odrębne gate Windows/broker/R3F nie zostały zmienione.
+Wersja `6c0ff8c` z test-only `e87e87b` miała Important I1 (diagram pozostawał na pierwszej stronie); poprzednie 844/845 zawierało obsolete oczekiwanie `/naval`404. Test kontraktu302 i późniejsza poprawka `f7c6595` zamknęły te bramki. Poniższe candidate-era liczby i starsze browser runs są historią, nie dowodem końcowych bajtów poprawki.
 
 ## Dostawa
 - React/TS/Vite, pięć widoków Command Center, Tactical Radar, Fleet Operations, Trade Animations (inspektor historycznego lifecycle), Analytics Center.
@@ -13,7 +16,8 @@ Kod `6c0ff8c` plus integrated test update `e87e87b`, baza `5262aa2`. **UI jest z
 - Operator-only served read application; ReadOnly role nadal API-only. Żadnych nowych uprawnień/writerów lub broker commands. Sprawdzony workflow logowania zaczyna się od oryginalnego `/`: bezpośredni Basic challenge na `/naval/` nie obejmował Chrome protection space `/api/`, więc nie jest deklarowany jako działające logowanie.
 - Dane jawnie historyczne/synthetic/NO_BROKER_AUTHORITY; brakujące currentquotes/broker/P&L/protection/readiness/statistics UNKNOWN. Nie wyliczać z cashdelta rentowności.
 
-## Rzeczywiste dowody
+## Historyczne dowody kandydata przed fix round1
+Poniższe źródła32test/5host/254browserrecord odnoszą się do candidate-era i wcześniejszych artefaktów; końcowe dowody36/6/72 opisano wyżej. Reuse dotyczy tylko niezmienionych komponentów.
 Parent dopasował36/36 pozycji `final-proof.json` do source, lock hash i9screenshotów. Final manifest obejmuje JS/CSS/index identyczne w dist, stagedwebroot, Desktopoutput i publish. Zbudowany ekran wizualnie sprawdzony przez parenta: jawne synthetic/offline/noaccount labels, oryginalny fallback link.
 - Frontend units32/32; artifactbuildtests3/3; typecheck/build PASS.
 - Nowe produkcyjne hosttests5/5; rootpanel17/17; check/solutionSDKbuild0warnings/errors; publishPASS.
@@ -26,4 +30,4 @@ Zwykłe offline npm zawiodło przez brak packument. Rzeczywiste cached tgz/SRI/m
 ## Artefakty i bramki
 - `.superpowers/sdd/2026-10-29-apex-naval/task-6b-react-command-{brief,report,review}.md`.
 - `/home/ubuntu/.hermes/cache/scratch/apex-naval-task6b/dependency-recovery/` — exact commands/source maps/browser/build/publish/SRI (scratch może wygasnąć).
-- Wymagane naprawa I1, narrow browser back/forward i scoped re-review. Fullsuite845/845 jest już zielone dla kandydata; nie pozostaje aktualnym blockerem. Bez końcowego odbioru UI, R3F, Windows/native, ReadOnly UI/credentialdelivery, realuserprovisioning, privateOKX/broker/WS, remoteTLS/mobile i rentowności. Realaccount ani handlu nie podłączono.
+- I1, M1/M2/M3, narrow browser BACK/FORWARD i scoped re-review zostały zamknięte; Task6B lokalnie odebrany. Pozostają R3F, Windows/native, ReadOnly UI/credential delivery, real user provisioning, private OKX/broker/WS, remote TLS/mobile oraz dowód rentowności. Rachunku ani handlu nie podłączono.

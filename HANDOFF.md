@@ -1,9 +1,9 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
-## Bieżący punkt wznowienia Naval — Task6B FIX REVIEW / Task7 PRZYGOTOWANIE
+## Bieżący punkt wznowienia Naval — Task6B ZAAKCEPTOWANY LOKALNIE / Task7 PRZYGOTOWANIE
 
 - **Stan odzyskany z repo, nie starszej rozmowy:** HEAD `f7c6595`, czyste worktree. H został już zaakceptowany lokalnie; pięć widoków React jest zbudowanych i podłączonych. Nie wznawiać Task6A ani implementacji UI od zera. Niższe stare wpisy o aktywnym fix workerze są historią.
-- **Task6B fix round1 zakończony, scoped re-review W TOKU:** `sa-0-e7293c9c`, raport `task-6b-fix1-review.md`, diff `review-d5829c7..f7c6595.diff`. Parent wykonał retained verifier exit0: frontend36PASS/build3PASS/newhost6PASS,12artifactcopies, final-browser72records/0fail. Pełne845/845 jest reused przy niezmienionym backendzie, nie nowym fullrunem zmienionego UI. Czekamy na werdykt I1/M1/M2 i back/forward proof; konto/broker niepodłączone.
+- **Task6B ZAAKCEPTOWANY LOKALNIE/Linux**, kod `f7c6595`, review `task-6b-fix1-review.md`: I1/M1/M2/M3 ADDRESSED, BACK/FORWARD proof CLOSED, spec i quality PASS, bez nowych Critical/Important. Pięć Operator-only read widoków React/SVG jest podłączonych; ReadOnly nadal API-only i root-first Basic bez rozszerzenia auth. Parent verifier i independent readback potwierdziły frontend36PASS/build3PASS/host6PASS,12assetcopies i finalbrowser72records/0fail. Pełne845/845 reused na niezmienionych backend inputs, nie nowy fullrun UI. Raport `reports/naval/ETAP_6B_REACT_COMMAND.md`. Konto, broker, R3F, Windows i mobileTLS pozostają nieodebrane.
 - **Task7 przygotowanie briefu, bez kodu/instalacji:** `sa-0-c804974f`, `task-7-naval-scene-brief.md`; lazy R3F/Three tylko na zaakceptowanych faktach, SVG/list/fallback i EmergencyStop niezależne. Przed implementacją wymagany zakres i rzeczywisty offline dependency gate, nie udawane animacje handlu.
 - **Dostęp modelu sprawdzony:** pierwsze konto Codex rate-limited; drugie aktywne, realny `gpt-6.1-sol/openai-codex` probe zwrócił `CODEX_READY`. Bez OpenRouter/provider fallback. Po wyczerpaniu całej dozwolonej puli zachować stan i zgłosić blokadę, nie ukrywać jej zmianą dostawcy.
 
