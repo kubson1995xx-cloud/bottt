@@ -61,6 +61,8 @@ function Read-ApexPresentationJson([string]$Path, [int]$MaximumBytes) {
     $quotas.MaxDepth=64; $quotas.MaxStringContentLength=$MaximumBytes; $quotas.MaxArrayLength=$MaximumBytes
     $reader=[System.Runtime.Serialization.Json.JsonReaderWriterFactory]::CreateJsonReader($bytes,$quotas)
     try { $doc=New-Object System.Xml.XmlDocument; $doc.Load($reader) } finally { $reader.Dispose() }
+    # Check before ConvertFrom-Json/return can pipeline-unwrap a singleton array (PS5.1 too).
+    if ($doc.DocumentElement.GetAttribute('type') -cne 'object') { throw 'Presentation object root required' }
     foreach ($node in $doc.SelectNodes('//*[@type="object"]')) {
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($child in $node.ChildNodes) { if (-not $seen.Add($child.LocalName)) { throw 'Presentation duplicate JSON property' } }
@@ -85,19 +87,19 @@ function Test-ApexPresentation([string]$Directory) {
         $m=Read-ApexPresentationJson (Join-Path $Directory 'presentation.json') 65536
         Assert-ApexPresentationFields $m @('schema','publicationSha256','inputSha256','coreSha256','backtesterSha256','scope')
         if ($m.schema -isnot [string] -or $m.schema -cne 'apex-presentation-v1') { throw 'Presentation schema invalid' }
-        foreach ($n in @('publicationSha256','inputSha256','coreSha256','backtesterSha256')) { if ($m.$n -isnot [string] -or $m.$n -cnotmatch '^[a-f0-9]{64}$') { throw 'Presentation hash invalid' } }
+        foreach ($n in @('publicationSha256','inputSha256','coreSha256','backtesterSha256')) { if ($m.$n -isnot [string] -or $m.$n -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Presentation hash invalid' } }
         $path=Join-Path $Directory 'naval-publication.json'
         if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $m.publicationSha256) { throw 'Presentation publication hash mismatch' }
         $e=Read-ApexPresentationJson $path 33554432
         Assert-ApexPresentationFields $e @('schema','temporalClassification','sourceClockUtc','sourceFreshness','provenance','publication','contentSha256')
-        if ($e.schema -cne 'naval-shared-publication-export-v1' -or $e.temporalClassification -cne 'HISTORICAL_OFFLINE_CHECKPOINT' -or $e.sourceFreshness -cne 'UNKNOWN' -or $e.contentSha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Presentation historical export required' }
+        if ($e.schema -cne 'naval-shared-publication-export-v1' -or $e.temporalClassification -cne 'HISTORICAL_OFFLINE_CHECKPOINT' -or $e.sourceFreshness -cne 'UNKNOWN' -or $e.contentSha256 -isnot [string] -or $e.contentSha256 -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Presentation historical export required' }
         Assert-ApexPresentationFields $e.provenance @('inputSha256','coreSha256','backtesterSha256')
         foreach ($n in @('inputSha256','coreSha256','backtesterSha256')) { if ($e.provenance.$n -isnot [string] -or $e.provenance.$n -cne $m.$n) { throw 'Presentation provenance mismatch' } }
         Assert-ApexPresentationFields $m.scope @('Id','PublicationScopeId','PortfolioId','ConfigDigest','Accounts')
         Assert-ApexPresentationFields $m.scope.PortfolioId @('PortfolioId','ReportingCurrency')
         foreach ($n in @('Id','PublicationScopeId','ConfigDigest')) { if ($m.scope.$n -isnot [string] -or $m.scope.$n.Length -eq 0) { throw 'Presentation scope string required' } }
         $j=$e.publication.journal; $c=$j.checkpoint
-        if ($m.scope.Id -cne 'presentation' -or $m.scope.PublicationScopeId -isnot [string] -or $m.scope.PublicationScopeId -cne $j.scopeId -or $m.scope.ConfigDigest -isnot [string] -or $m.scope.ConfigDigest -cnotmatch '^[a-fA-F0-9]{64}$' -or $m.scope.ConfigDigest -cne $c.configDigest -or $m.scope.PortfolioId.PortfolioId -isnot [string] -or $m.scope.PortfolioId.PortfolioId -cne $c.portfolioId.portfolioId -or $m.scope.PortfolioId.ReportingCurrency -isnot [string] -or $m.scope.PortfolioId.ReportingCurrency -cne $c.portfolioId.reportingCurrency) { throw 'Presentation foreign scope' }
+        if ($m.scope.Id -cne 'presentation' -or $m.scope.PublicationScopeId -isnot [string] -or $m.scope.PublicationScopeId -cne $j.scopeId -or $m.scope.ConfigDigest -isnot [string] -or $m.scope.ConfigDigest -cnotmatch '\A[a-fA-F0-9]{64}\z' -or $m.scope.ConfigDigest -cne $c.configDigest -or $m.scope.PortfolioId.PortfolioId -isnot [string] -or $m.scope.PortfolioId.PortfolioId -cne $c.portfolioId.portfolioId -or $m.scope.PortfolioId.ReportingCurrency -isnot [string] -or $m.scope.PortfolioId.ReportingCurrency -cne $c.portfolioId.reportingCurrency) { throw 'Presentation foreign scope' }
         if ($m.scope.Accounts -isnot [array] -or $m.scope.Accounts.Count -eq 0 -or $m.scope.Accounts.Count -ne @($c.accounts).Count) { throw 'Presentation account inventory invalid' }
         $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         for ($i=0;$i -lt $m.scope.Accounts.Count;$i++) {

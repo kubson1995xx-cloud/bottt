@@ -302,6 +302,75 @@ foreach ($fault in @('scope-id-array','account-venue-array','account-environment
         Refuse-Presentation
     }
 }
+# F1: check raw root shape, before the PowerShell pipeline can unwrap arrays.
+foreach ($shape in @('singleton-array','multiple-array','empty-array','string','number','boolean','null')) {
+    Case ('presentation-metadata-root-'+$shape) {
+        Reset-Presentation
+        $path=Join-Path $presentation 'presentation.json'; $text=[IO.File]::ReadAllText($path)
+        switch ($shape) {
+            'singleton-array' { $text='['+$text+']' }
+            'multiple-array' { $text='['+$text+','+$text+']' }
+            'empty-array' { $text='[]' }
+            'string' { $text='"metadata"' }
+            'number' { $text='1' }
+            'boolean' { $text='true' }
+            'null' { $text='null' }
+        }
+        Put $path $text; Refuse-Presentation
+    }
+}
+Case 'presentation-export-root-singleton-array' {
+    Reset-Presentation
+    $path=Join-Path $presentation 'naval-publication.json'
+    Put $path ('['+[IO.File]::ReadAllText($path)+']'); Rehash-Presentation; Refuse-Presentation
+}
+# F2: matching cross-file values still must have exact SHA256 syntax.
+foreach ($field in @('publicationSha256','inputSha256','coreSha256','backtesterSha256')) {
+    Case ('presentation-metadata-final-LF-'+$field) {
+        Reset-Presentation
+        $m=Get-Content (Join-Path $presentation 'presentation.json') -Raw|ConvertFrom-Json
+        $m.$field += "`n"; Presentation-Json 'presentation.json' $m; Refuse-Presentation
+    }
+}
+foreach ($field in @('inputSha256','coreSha256','backtesterSha256')) {
+    Case ('presentation-provenance-final-LF-'+$field) {
+        Reset-Presentation
+        $p=Get-Content (Join-Path $presentation 'naval-publication.json') -Raw|ConvertFrom-Json
+        $m=Get-Content (Join-Path $presentation 'presentation.json') -Raw|ConvertFrom-Json
+        $p.provenance.$field += "`n"; $m.$field=$p.provenance.$field
+        Presentation-Json 'naval-publication.json' $p; Presentation-Json 'presentation.json' $m
+        Rehash-Presentation; Refuse-Presentation
+    }
+}
+foreach ($shape in @('final-LF','array','number')) {
+    Case ('presentation-content-digest-'+$shape) {
+        Reset-Presentation
+        $p=Get-Content (Join-Path $presentation 'naval-publication.json') -Raw|ConvertFrom-Json
+        switch ($shape) {
+            'final-LF' { $p.contentSha256 += "`n" }
+            'array' { $p.contentSha256=@($p.contentSha256) }
+            'number' { $p.contentSha256=1 }
+        }
+        Presentation-Json 'naval-publication.json' $p; Rehash-Presentation; Refuse-Presentation
+    }
+}
+foreach ($casing in @('lower','upper','mixed','final-LF')) {
+    Case ('presentation-config-digest-'+$casing) {
+        Reset-Presentation
+        $p=Get-Content (Join-Path $presentation 'naval-publication.json') -Raw|ConvertFrom-Json
+        $m=Get-Content (Join-Path $presentation 'presentation.json') -Raw|ConvertFrom-Json
+        $digest=$m.scope.ConfigDigest.ToLowerInvariant()
+        switch ($casing) {
+            'upper' { $digest=$digest.ToUpperInvariant() }
+            'mixed' { $digest=$digest.Substring(0,32).ToUpperInvariant()+$digest.Substring(32) }
+            'final-LF' { $digest += "`n" }
+        }
+        $m.scope.ConfigDigest=$digest; $p.publication.journal.checkpoint.configDigest=$digest
+        Presentation-Json 'naval-publication.json' $p; Presentation-Json 'presentation.json' $m; Rehash-Presentation
+        # Helper lexical/casing contract only, not a re-canonicalized typed export.
+        if ($casing -eq 'final-LF') { Refuse-Presentation } else { Test-ApexPresentation $presentation | Out-Null }
+    }
+}
 [IO.File]::WriteAllText((Join-Path $Scratch 'results.json'),($results.ToArray()|ConvertTo-Json -Depth 6))
 $fail=@($results|Where-Object {-not $_.pass}).Count
 Write-Output "Controlled package gates: $($results.Count) cases, $fail failed; NOT product totals or native runtime proof"
