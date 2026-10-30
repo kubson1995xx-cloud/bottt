@@ -1,4 +1,9 @@
-# Task8A — paczka Linux istnieje, poprawki weryfikatora w toku
+# Task8A — paczka Linux istnieje, residual TAP check w naprawie
+
+## Scoped review round1
+I1 i I2 ADDRESSED; I3 częściowo niezamknięty (`task-8a-fix1-review.md`). Jedyny residual Important I3-R1: parser pomija dodatkowy bare numbered TAP result `ok 59`, akceptując59recordsvsplan58 przy rehashed logach. Obecny ZIP ma autentyczne spójne wyniki; wada dotyczy fail-closed validatora.
+
+Fix round2 aktywny: tylko parser i regresje, exact original bare/described/positive controls, nowy helper/source-bound reseal bez zmiany runtime/servedbytes i bez fikcyjnych nowych unit/browserruns. Odbiór lokalnej dostawy nadal wstrzymany do scoped re-review.
 
 ## Werdykt niezależnego review: REQUEST CHANGES
 Raport `task-8a-delivery-review.md` zgłosił **3 Important, 0 Critical** w nowym weryfikatorze: re-manifested private-map/cache/replay payloads, unlisted case-alias w nested/outer inventory i niespójne frontend TAP log/hash/count references. Copy-only probes potwierdziły luki; review potwierdził też rzeczywisty czysty ZIP, jego SHA/CRC/inventory i zachowane testy. Nie stwierdzono tych zanieczyszczeń w obecnej paczce.
