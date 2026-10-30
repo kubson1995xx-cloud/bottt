@@ -237,13 +237,25 @@ public sealed class NavalReadAccessTests
         Assert.Equal(HttpStatusCode.Redirect, redirect.StatusCode);
         Assert.Equal("/naval/", redirect.Headers.Location!.OriginalString);
         Assert.True(redirect.Headers.CacheControl!.NoStore);
-        foreach (string query in new[] { "", "?view=Naval", "?view=naval&next=https://evil.test", "?view=naval&view=naval", "?view=%6eaval", "?view=//evil.test", "?VIEW=naval", "?view=naval/", "?next=naval" })
+        foreach (string query in new[] { "", "?view=Naval", "?view=naval&next=https://evil.test", "?view=naval&view=naval", "?view=//evil.test", "?VIEW=naval", "?view=naval/", "?next=naval" })
         {
             using var response = await h.Send("/" + query, "operator");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.Null(response.Headers.Location);
             string html = await response.Content.ReadAsStringAsync();
             Assert.Contains("name=\"apex-token\" content=\"\"", html);
             Assert.True(!html.Contains(h.ReadSecret) && !html.Contains(h.OperatorSecret) && !html.Contains(h.LegacyToken));
+        }
+        // HttpClient canonicalizes %6e to n before sending. Preserve the negative
+        // request bytes on the wire instead of accidentally testing the exact query.
+        using (var raw = new TcpClient())
+        {
+            await raw.ConnectAsync(IPAddress.Loopback, h.Port);
+            byte[] request = Encoding.ASCII.GetBytes($"GET /?view=%6eaval HTTP/1.1\r\nHost: 127.0.0.1:{h.Port}\r\nAuthorization: Basic " + Convert.ToBase64String(Encoding.ASCII.GetBytes("operator:" + h.OperatorSecret)) + "\r\nConnection: close\r\n\r\n");
+            await raw.GetStream().WriteAsync(request);
+            using var reader = new StreamReader(raw.GetStream());
+            string response = await reader.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(response.StartsWith("HTTP/1.1 200", StringComparison.Ordinal), "Nonliteral raw query must not redirect");
+            Assert.False(response.Contains("Location:", StringComparison.OrdinalIgnoreCase));
         }
         using var alias = await h.Send("/index.html?view=naval", "operator"); Assert.Equal(HttpStatusCode.OK, alias.StatusCode); Assert.Null(alias.Headers.Location);
         await using var old = new NavalProductionHost(false); await old.Start();

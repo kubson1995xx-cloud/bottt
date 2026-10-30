@@ -141,7 +141,7 @@ public sealed partial class WindowsLocalSetupTests
         Assert.Throws<WindowsDataException>(() => Call("WindowsLocalAccess", "Show", f.Root, new Func<string, string, bool>((_, _) => throw new Exception("Must not prompt"))));
     }
     [Fact, Trait("Gate", "Source")]
-    public void PlaintextNeverReachesOutputOrDocuments()
+    public async Task PlaintextNeverReachesOutputOrDocuments()
     {
         using var f = new SetupFixture(); Ensure(f.Root); var secrets = Secrets(f.Root); var before = f.Snapshot();
         Assert.True((bool)Call("WindowsLocalAccess", "Show", f.Root, new Func<string, string, bool>((login, secret) => login == "operator" && secret == secrets.Operator))!); Same(before, f);
@@ -150,6 +150,40 @@ public sealed partial class WindowsLocalSetupTests
             string text = Encoding.UTF8.GetString(File.ReadAllBytes(path));
             Assert.True(!text.Contains(secrets.Operator) && !text.Contains(secrets.Reader), "Plaintext leaked to a file (content withheld)");
         }
+        int port = FreeSetupPort();
+        new ConfigStore(f.Root).Update(c => { c.HttpPort = port; c.BridgeTcpPort = 0; c.OpenBrowserOnStart = false; });
+        var repo = new DirectoryInfo(AppContext.BaseDirectory);
+        while (repo != null && !File.Exists(Path.Combine(repo.FullName, "APEX.Trading.Demo.sln"))) repo = repo.Parent;
+        Assert.NotNull(repo);
+        string desktop = Path.Combine(repo!.FullName, "src", "Apex.Desktop", "bin", "Release", "net8.0");
+        var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = desktop };
+        start.ArgumentList.Add(Path.Combine(desktop, "ApexDesktop.dll")); start.ArgumentList.Add("--data"); start.ArgumentList.Add(f.Root); start.ArgumentList.Add("--no-browser");
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync(); var stderr = process.StandardError.ReadToEndAsync();
+        var documents = new List<string>();
+        try
+        {
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(2) };
+            bool ready = false;
+            for (int i = 0; i < 200; i++) { Assert.False(process.HasExited, "Ready host exited (output withheld)"); try { using var r = await client.GetAsync("/"); ready = r.StatusCode == HttpStatusCode.Unauthorized; if (ready) break; } catch (HttpRequestException) { } await Task.Delay(50); }
+            Assert.True(ready, "Ready production host did not challenge anonymously");
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", secrets.Reader);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/?view=naval")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/naval/snapshot?scope=presentation")).StatusCode);
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.ASCII.GetBytes("operator:" + secrets.Operator)));
+            using var redirect = await client.GetAsync("/?view=naval"); Assert.Equal(HttpStatusCode.Redirect, redirect.StatusCode); Assert.Equal("/naval/", redirect.Headers.Location!.OriginalString);
+            foreach (string path in new[] { "/", "/naval/", "/app.js", "/api/naval/snapshot?scope=presentation" })
+            {
+                using var response = await client.GetAsync(path); Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                string text = await response.Content.ReadAsStringAsync(); documents.Add(text);
+                if (path == "/") Assert.Contains("name=\"apex-token\" content=\"\"", text);
+            }
+        }
+        finally { if (!process.HasExited) process.Kill(true); await process.WaitForExitAsync(); }
+        string publicText = string.Join("\n", documents) + await stdout + await stderr;
+        foreach (string secret in new[] { secrets.Operator, secrets.Reader })
+            Assert.True(!publicText.Contains(secret) && !publicText.Contains(Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(secret))).ToLowerInvariant()), "Credential material in host output/documents (content withheld)");
+        Assert.DoesNotContain("Authorization:", publicText, StringComparison.OrdinalIgnoreCase);
     }
     [Fact, Trait("Gate", "Source")]
     public async Task SetupCancelledKeepsReadyPrivateStateWithoutListener()

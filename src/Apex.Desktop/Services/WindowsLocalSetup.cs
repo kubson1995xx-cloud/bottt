@@ -151,7 +151,7 @@ internal static class WindowsLocalSetup
         NavalAccessPolicy.Fields(s.GetProperty("PortfolioId"), new[] { "PortfolioId", "ReportingCurrency" });
         foreach (var a in s.GetProperty("Accounts").EnumerateArray()) NavalAccessPolicy.Fields(a, new[] { "Venue", "Environment", "AccountId", "QuoteCurrency" });
         var scope = JsonSerializer.Deserialize<NavalReadScopeOptions>(s.GetRawText(), Strict) ?? throw Incomplete();
-        if (scope.Id != "presentation" || !LowerHash(scope.PublicationScopeId) || !LowerHash(scope.ConfigDigest) || scope.PortfolioId == null || scope.Accounts is not { Length: > 0 }) throw Incomplete();
+        if (scope.Id != "presentation" || !NavalAccessPolicy.Hex(scope.PublicationScopeId) || !NavalAccessPolicy.Hex(scope.ConfigDigest) || scope.PortfolioId == null || scope.Accounts is not { Length: > 0 }) throw Incomplete();
         return scope;
     }
     private static NavalReadScope ToScope(NavalReadScopeOptions s) => new(s.Id!, s.PublicationScopeId!, s.PortfolioId!, s.ConfigDigest!, s.Accounts!);
