@@ -1,6 +1,6 @@
 // The only runtime GPU imports. No Canvas wrapper, remote assets, or economics.
 import {Component} from 'react';import type {ReactNode} from 'react';
-import {createRoot,extend,events,unmountComponentAtNode} from '@react-three/fiber';import type {RootStore,ThreeEvent} from '@react-three/fiber';
+import {createRoot,extend,events,unmountComponentAtNode,_roots} from '@react-three/fiber';import type {RootStore,ThreeEvent} from '@react-three/fiber';
 import {WebGLRenderer,Group,Mesh,BoxGeometry,ConeGeometry,RingGeometry,MeshBasicMaterial,DoubleSide,OrthographicCamera} from 'three';
 import type {SceneFrame,SceneCue,VisualPrefs} from './model.ts';import {sceneBudget} from './model.ts';import {createFrameDriver} from './SceneViewport.tsx';import type {SceneHandle} from './SceneViewport.tsx';
 export type {SceneHandle} from './SceneViewport.tsx';
@@ -11,7 +11,7 @@ class SceneBoundary extends Component<{children:ReactNode;fail:()=>void},{failed
 export async function mountScene(canvas:HTMLCanvasElement,initial:SceneFrame,initialVisual:VisualPrefs,onSelect:(id:string)=>void,onFailure:(code:string)=>void):Promise<SceneHandle>{
  let disposed=false,deliberate=false,failed=false,disposePromise:Promise<void>|null=null;
  let latest=initial,visual=initialVisual,cue:SceneCue|null=null,selectionStart=-Infinity,selected=initial.selectedId;
- let store:RootStore|null=null;const root=createRoot(canvas);let gl:CspRenderer|null=null;
+ let store:RootStore|null=null,root:ReturnType<typeof createRoot>|null=null,context:WebGL2RenderingContext|null=null;let gl:CspRenderer|null=null;
  const group=new Group(),ships:Group[]=[],rings:Mesh[]=[],hulls:Mesh[]=[];
  const geometries=[new BoxGeometry(1,.18,.42),new ConeGeometry(.23,.42,3),new RingGeometry(.47,.51,24),new RingGeometry(.15,.18,16),new RingGeometry(1.7,1.72,48),new RingGeometry(1.2,1.22,48)];
  const materials=['#398b9b','#ffc278','#516675','#85e2ed','#173443','#547d8c','#439eae'].map(color=>new MeshBasicMaterial({color,side:DoubleSide}));
@@ -45,10 +45,18 @@ export async function mountScene(canvas:HTMLCanvasElement,initial:SceneFrame,ini
   frame.units.forEach((u,i)=>{const ship=ships[i];ship.visible=true;ship.position.set((i%4-1.5)*1.9,0,Math.floor(i/4)*1.7+(frame.kind==='radar'?1.8:-.7));ship.userData.reservationId=u.id;ship.children.forEach(m=>{m.userData.reservationId=u.id;});const mat=u.uncertain?materials[1]:u.stage==='Rejected'||u.stage==='Terminal'?materials[2]:materials[0];hulls[i].material=mat;(ship.children[1] as Mesh).material=mat;rings[i].material=u.uncertain?materials[1]:materials[3];rings[i].visible=u.id===selected||!!cue?.unitIds.includes(u.id);});ships.forEach((s,i)=>{if(i>=frame.units.length)s.visible=false;});stations.forEach(s=>s.visible=frame.kind==='radar');radarRings.forEach(s=>s.visible=frame.kind==='radar');
   driver.wake(prefs.reduced?0:Math.max(cue?cue.startedAtMs+600:0,changedSelection?selectionStart+180:0));
  };
+ const localResources=()=>{group.clear();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());gl?.dispose();store=null;gl=null;};
  const dispose=()=>{if(disposePromise)return disposePromise;disposed=true;deliberate=true;cue=null;driver.dispose();observer?.disconnect();observer=null;canvas.removeEventListener('webglcontextlost',lost);canvas.removeEventListener('webglcontextrestored',restored);if(store){store.getState().events.enabled=false;store.getState().events.disconnect?.();}
-  disposePromise=new Promise<void>((resolve,reject)=>{const deadline=setTimeout(()=>reject(Error('CLEANUP_FAILED')),1000);unmountComponentAtNode(canvas,()=>{clearTimeout(deadline);try{group.clear();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());gl?.dispose();store=null;gl=null;resolve();}catch{reject(Error('CLEANUP_FAILED'));}});});return disposePromise;
+  const registration=root?_roots.get(canvas):null;
+  // Fiber 9.6.1 cannot complete unmount without a scene. Before scene setup
+  // configure has installed no events/XR and render has never been called:
+  // only our raw context, primitives and empty root registration are owned.
+  if(!root||(!store&&registration&&!registration.store.getState().scene)){
+   disposePromise=Promise.resolve().then(()=>{try{localResources();}finally{if(context&&!context.isContextLost()){context.getExtension('WEBGL_lose_context')?.loseContext();if(!context.isContextLost())throw Error('CLEANUP_FAILED');}context=null;}if(registration)_roots.delete(canvas);}).catch(()=>{throw Error('CLEANUP_FAILED');});return disposePromise;
+  }
+  disposePromise=new Promise<void>((resolve,reject)=>{const deadline=setTimeout(()=>reject(Error('CLEANUP_FAILED')),1000);unmountComponentAtNode(canvas,()=>{clearTimeout(deadline);try{localResources();context=null;resolve();}catch{reject(Error('CLEANUP_FAILED'));}});});return disposePromise;
  };
- try{const s=size();if(!s)throw Error('ZERO_SIZE_FAILED');const context=canvas.getContext('webgl2',{antialias:false,alpha:false,powerPreference:'low-power'});if(!context){fail('NO_WEBGL2');throw Error('NO_WEBGL2');}gl=new CspRenderer({canvas,context,antialias:false,alpha:false,powerPreference:'low-power'});gl.setClearColor('#071722');
+ try{const s=size();if(!s)throw Error('ZERO_SIZE_FAILED');context=canvas.getContext('webgl2',{antialias:false,alpha:false,powerPreference:'low-power'});if(!context){fail('NO_WEBGL2');throw Error('NO_WEBGL2');}gl=new CspRenderer({canvas,context,antialias:false,alpha:false,powerPreference:'low-power'});gl.setClearColor('#071722');root=createRoot(canvas);
   await root.configure({gl,frameloop:'never',dpr:s.dpr,size:s.size,orthographic:true,camera:{position:[0,7,10],zoom:Math.min(s.size.width/9.5,s.size.height/6.5),near:.1,far:50},events,shadows:false,onCreated:()=>driver.wake()});
   store=root.render(<SceneBoundary fail={()=>fail('RENDER_FAILED')}><primitive object={group} dispose={null} onClick={(e:ThreeEvent<MouseEvent>)=>{if(disposed||failed)return;const id:unknown=e.object.userData.reservationId;if(typeof id==='string'&&latest.units.some(u=>u.id===id)){e.stopPropagation();onSelect(id);}}}/></SceneBoundary>);
   observer=new ResizeObserver(resize);observer.observe(canvas);update(initial,null,initialVisual);
