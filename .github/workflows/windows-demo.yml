@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'full-delivery packages; task1-source/task2-source validate only the named source prerequisite'
+        description: 'full-delivery packages; task1-source/task2-source/task3-source validate only the named source prerequisite'
         type: choice
-        options: [full-delivery, task1-source, task2-source]
+        options: [full-delivery, task1-source, task2-source, task3-source]
         default: full-delivery
       phase:
         description: 'Source evidence label only; RED failures still fail the run'
@@ -132,5 +132,31 @@ jobs:
             ${{ runner.temp }}/apex-task2-source-${{ github.run_id }}-${{ github.run_attempt }}/*.log
             ${{ runner.temp }}/apex-task2-source-${{ github.run_id }}-${{ github.run_attempt }}/*.trx
             ${{ runner.temp }}/apex-task2-source-${{ github.run_id }}-${{ github.run_attempt }}/public-presentation/*.json
+          if-no-files-found: error
+          retention-days: 30
+  nativeLocalSetup:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'task3-source' && github.ref == 'refs/heads/feature/apex-naval-command'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Native Task3 setup and DPAPI source tests only (PowerShell 5.1)
+        shell: powershell
+        env:
+          TASK3_PHASE: ${{ inputs.phase }}
+        run: ./tools/windows/Test-LocalSetupSource.ps1 -Phase $env:TASK3_PHASE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Task3-Windows-Source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/apex-task3-source-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+            ${{ runner.temp }}/apex-task3-source-${{ github.run_id }}-${{ github.run_attempt }}/*.log
+            ${{ runner.temp }}/apex-task3-source-${{ github.run_id }}-${{ github.run_attempt }}/*.trx
+            ${{ runner.temp }}/apex-task3-source-${{ github.run_id }}-${{ github.run_attempt }}/public-presentation/*.json
+            ${{ runner.temp }}/apex-task3-source-${{ github.run_id }}-${{ github.run_attempt }}/sdk-selection/global.json
           if-no-files-found: error
           retention-days: 30

@@ -227,6 +227,29 @@ public sealed class NavalReadAccessTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await h.Send("/naval")).StatusCode);
     }
     [Fact]
+    public async Task NavalReadAccess_ExactAuthenticatedRootNavalRedirect()
+    {
+        await using var h = new NavalProductionHost(); await h.Start();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await h.Send("/?view=naval")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await h.Send("/?view=naval", "read")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await h.Send("/?view=naval", "invalid")).StatusCode);
+        using var redirect = await h.Send("/?view=naval", "operator");
+        Assert.Equal(HttpStatusCode.Redirect, redirect.StatusCode);
+        Assert.Equal("/naval/", redirect.Headers.Location!.OriginalString);
+        Assert.True(redirect.Headers.CacheControl!.NoStore);
+        foreach (string query in new[] { "", "?view=Naval", "?view=naval&next=https://evil.test", "?view=naval&view=naval", "?view=%6eaval", "?view=//evil.test", "?VIEW=naval", "?view=naval/", "?next=naval" })
+        {
+            using var response = await h.Send("/" + query, "operator");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode); Assert.Null(response.Headers.Location);
+            string html = await response.Content.ReadAsStringAsync();
+            Assert.Contains("name=\"apex-token\" content=\"\"", html);
+            Assert.True(!html.Contains(h.ReadSecret) && !html.Contains(h.OperatorSecret) && !html.Contains(h.LegacyToken));
+        }
+        using var alias = await h.Send("/index.html?view=naval", "operator"); Assert.Equal(HttpStatusCode.OK, alias.StatusCode); Assert.Null(alias.Headers.Location);
+        await using var old = new NavalProductionHost(false); await old.Start();
+        Assert.Equal(HttpStatusCode.OK, (await old.Send("/?view=naval")).StatusCode);
+    }
+    [Fact]
     public async Task NavalReadAccess_HostHeadersAndCrossSite()
     {
         await using var h = new NavalProductionHost(); await h.Start();

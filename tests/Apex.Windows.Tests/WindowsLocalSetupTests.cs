@@ -10,8 +10,8 @@ using Xunit;
 
 namespace Apex.Windows.Tests;
 
-// Task2 parser prerequisite only: no first-run provisioning, auth or production host seam.
-public sealed class WindowsLocalSetupTests
+// Accepted Task2 parser prerequisite; Task3 provisioning tests are in the partial class.
+public sealed partial class WindowsLocalSetupTests
 {
     private static (string Directory, byte[] Bytes, NavalReadScope Scope) Presentation()
     {
