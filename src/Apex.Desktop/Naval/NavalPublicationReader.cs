@@ -118,7 +118,44 @@ internal sealed class NavalPublicationReader : INavalPublicationReader
     }
     private sealed class DecimalString : JsonConverter<decimal>
     {
-        public override decimal Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o) => r.TokenType == JsonTokenType.String && decimal.TryParse(r.GetString(), NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal v) ? v : throw new JsonException();
+        public override decimal Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o)
+        {
+            if (r.TokenType != JsonTokenType.String) throw new JsonException();
+            string text = r.GetString()!;
+            if (!ExactlyRepresentable(text.AsSpan()) || !decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal value)) throw new JsonException();
+            return value;
+        }
+        private static bool ExactlyRepresentable(ReadOnlySpan<char> text)
+        {
+            // Decimal.TryParse can round excess precision (even to zero) while returning true.
+            // Validate the exact base-10 coefficient/scale first, without a growing big integer
+            // or canonical-string equality. Work is linear in the already bounded input token.
+            int start = text.Length > 0 && text[0] is '+' or '-' ? 1 : 0;
+            int point = -1, digits = 0;
+            for (int i = start; i < text.Length; i++)
+            {
+                if (text[i] is >= '0' and <= '9') digits++;
+                else if (text[i] == '.' && point < 0) point = i;
+                else return false;
+            }
+            if (digits == 0) return false;
+            int end = text.Length;
+            if (point >= 0)
+            {
+                // Only fractional trailing zeros can be discarded without changing the value.
+                while (end > point + 1 && text[end - 1] == '0') end--;
+                if (end - point - 1 > 28) return false;
+            }
+            decimal coefficient = 0;
+            try
+            {
+                for (int i = start; i < end; i++)
+                    if (i != point) coefficient = checked(coefficient * 10 + (text[i] - '0'));
+            }
+            catch (OverflowException) { return false; }
+            // Integer-only arithmetic above is exact and enforces the 96-bit coefficient bound.
+            return true;
+        }
         public override void Write(Utf8JsonWriter w, decimal v, JsonSerializerOptions o) => w.WriteStringValue(v.ToString(CultureInfo.InvariantCulture));
     }
 }

@@ -17,6 +17,99 @@ using Xunit;
 namespace Apex.Tests;
 public sealed class NavalReadEndpointTests
 {
+    // These exercise the production converter: TryParse success alone must not admit rounded values.
+    [Theory]
+    [InlineData("0.0000000000000000000000000001", "0.0000000000000000000000000001")]
+    [InlineData("-0.0000000000000000000000000001", "-0.0000000000000000000000000001")]
+    [InlineData("0.1234567890123456789012345678", "0.1234567890123456789012345678")]
+    [InlineData("-0.1234567890123456789012345678", "-0.1234567890123456789012345678")]
+    [InlineData("79228162514264337593543950335", "79228162514264337593543950335")]
+    [InlineData("-79228162514264337593543950335", "-79228162514264337593543950335")]
+    [InlineData("79228162514264337593543950335.0000", "79228162514264337593543950335")]
+    [InlineData("7.9228162514264337593543950335", "7.9228162514264337593543950335")]
+    [InlineData("10039.160000000000000000000000000000000000000000", "10039.16")]
+    [InlineData("+0001.2300", "1.23")]
+    [InlineData("+.5", "0.5")]
+    [InlineData("1.", "1")]
+    [InlineData("-000.000000000000000000000000000000000000", "0")]
+    public void NavalReadEndpoint_DecimalAdmissionPreservesExactValues(string raw, string expected)
+    {
+        decimal actual = JsonSerializer.Deserialize<decimal>(JsonSerializer.Serialize(raw), Apex.Desktop.Naval.NavalPublicationReader.Json);
+        Assert.Equal(decimal.Parse(expected, CultureInfo.InvariantCulture), actual);
+    }
+    [Theory]
+    [InlineData("10039.16000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001")]
+    [InlineData("-10039.16000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001")]
+    [InlineData("0.12345678901234567890123456781")]
+    [InlineData("-0.12345678901234567890123456781")]
+    [InlineData("0.00000000000000000000000000001")]
+    [InlineData("-0.00000000000000000000000000001")]
+    [InlineData("0.00000000000000000000000000005")]
+    [InlineData("79228162514264337593543950336")]
+    [InlineData("-79228162514264337593543950336")]
+    [InlineData("79228162514264337593543950335.1")]
+    [InlineData("-79228162514264337593543950335.1")]
+    [InlineData("7.9228162514264337593543950336")]
+    [InlineData("1e-28")]
+    [InlineData("1,000")]
+    [InlineData(" 1")]
+    [InlineData("1\u0000")]
+    public void NavalReadEndpoint_DecimalAdmissionRejectsInexactOrInvalidValues(string raw)
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<decimal>(JsonSerializer.Serialize(raw), Apex.Desktop.Naval.NavalPublicationReader.Json));
+    }
+    [Fact]
+    public void NavalReadEndpoint_DecimalAdmissionHandlesLongValuePreservingZeroPadding()
+    {
+        string raw = "+" + new string('0', 4096) + "1.25" + new string('0', 4096);
+        Assert.Equal(1.25m, JsonSerializer.Deserialize<decimal>(JsonSerializer.Serialize(raw), Apex.Desktop.Naval.NavalPublicationReader.Json));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<decimal>(JsonSerializer.Serialize(raw + "1"), Apex.Desktop.Naval.NavalPublicationReader.Json));
+    }
+    [Theory]
+    [InlineData("cash")]
+    [InlineData("equity")]
+    [InlineData("reservationQuantity")]
+    [InlineData("fillPrice")]
+    [InlineData("fillFee")]
+    [InlineData("journalFee")]
+    public async Task NavalReadEndpoint_ChecksumValidInexactNestedDecimalsNeverAdmitted(string field)
+    {
+        await using var h = new NavalProductionHost(); await NavalHostPublication.Cli(h);
+        string path = NavalHostPublication.PathFor(h); var n = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode Target(JsonNode envelope)
+        {
+            var j = envelope["publication"]!["journal"]!; var cp = j["checkpoint"]!;
+            return field switch
+            {
+                "cash" => cp["accounts"]![0]!["cash"]!,
+                "equity" => cp["historicalLiquidationEquity"]!,
+                "reservationQuantity" => cp["fleets"]![0]!["reservations"]![0]!["reservation"]!,
+                "fillPrice" or "fillFee" => cp["fleets"]![0]!["fills"]![0]!["fill"]!,
+                _ => j["batches"]!.AsArray().SelectMany(b => b!["facts"]!.AsArray()).First(f => f!["fill"] != null)!["fill"]!["fill"]!
+            };
+        }
+        string key = field switch { "cash" or "equity" => "amount", "reservationQuantity" => "quantity", "fillPrice" => "price", _ => "fee" };
+        Target(n)[key] = decimal.Parse(Target(n)[key]!.GetValue<string>(), CultureInfo.InvariantCulture).ToString("F28", CultureInfo.InvariantCulture);
+        NavalHostPublication.RehashJournal(n);
+        // Freeze a valid typed control at the greatest scale its coefficient supports. Extra
+        // nonzero precision then rounds to identical typed checksum bytes on the defective reader.
+        n = JsonSerializer.SerializeToNode(JsonSerializer.Deserialize<Apex.Desktop.Naval.NavalPublicationEnvelope>(n.ToJsonString(), NavalHostPublication.Json), NavalHostPublication.Json)!;
+        string control = n.ToJsonString(); string controlAmount = Target(n)[key]!.GetValue<string>();
+        Target(n)[key] = controlAmount + new string('0', 70) + "1";
+        string malformed = n.ToJsonString();
+        Assert.Equal(JsonNode.Parse(control)!["contentSha256"]!.GetValue<string>(), n["contentSha256"]!.GetValue<string>());
+        Assert.Equal(JsonNode.Parse(control)!["publication"]!["journal"]!["integrityDigest"]!.GetValue<string>(), n["publication"]!["journal"]!["integrityDigest"]!.GetValue<string>());
+        File.WriteAllText(path, malformed); await h.Start();
+        // Readiness touches only root; malformed is the first Naval capture, not cached fallback.
+        using var response = await h.Send("/api/naval/snapshot", "read");
+        var error = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        File.WriteAllText(path, control); var good = await Get(h, "/api/naval/snapshot");
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(control)!["publication"]!["journal"]!["checkpoint"], good["checkpoint"]));
+        NavalProductionHost.Evidence("decimal-pair-" + field + "-" + Guid.NewGuid().ToString("N"), new { field, control = JsonNode.Parse(control), malformed = JsonNode.Parse(malformed), malformedStatus = (int)response.StatusCode, validStatus = 200, malformedResponse = error, validResponse = good });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("PUBLICATION_INVALID", error["reasonCode"]!.GetValue<string>());
+        Assert.Null(error["checkpoint"]); Assert.Null(error["financialRevision"]); Assert.Null(error["broker"]!["equity"]);
+    }
     [Fact]
     public async Task NavalReadEndpoint_TestExportMatchesProducerChecksum()
     {
