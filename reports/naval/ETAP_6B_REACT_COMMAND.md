@@ -1,7 +1,7 @@
 # Task6B — pięć podłączonych widoków NAVAL COMMAND, kandydat
 
 ## Status
-Kod `6c0ff8c`, baza `5262aa2`. **UI jest zaimplementowane; NIEODEBRANE.** Niezależny review nowej granicy frontend/store/decoder/static hosting trwa. Oddzielnie aktualizowane jest jedno stare oczekiwanie testowe `/naval`404, sprzeczne z wymaganym przekierowaniem302; pełna dotychczasowa seria jest uczciwie czerwona844/845.
+Kod `6c0ff8c` plus integrated test update `e87e87b`, baza `5262aa2`. **UI jest zaimplementowane; NIEODEBRANE do niezależnego review.** Pełny affected gate po authorized oczekiwaniu302 jest **845/845 PASS,0fail/skip**; parent wykonał retained verifier exit0 i potwierdził niezmienione źródła/artefakty frontendu. Poprzednie844/845 i obsolete404 pozostają wyłącznie historią. Root-firstBasic workflow i odrębne gate Windows/broker/R3F nie zostały zmienione.
 
 ## Dostawa
 - React/TS/Vite, pięć widoków Command Center, Tactical Radar, Fleet Operations, Trade Animations (inspektor historycznego lifecycle), Analytics Center.
