@@ -32,7 +32,14 @@ function Reset-Package {
     foreach ($suite in @('bot','platform','backtester')) { Copy-Item $fixture (Join-Path $package ('Weryfikacja/'+$suite+'.trx')) -Force -ErrorAction SilentlyContinue; if (-not (Test-Path (Join-Path $package ('Weryfikacja/'+$suite+'.trx')))) { New-Item -ItemType Directory -Force (Join-Path $package 'Weryfikacja') | Out-Null; Copy-Item $fixture (Join-Path $package ('Weryfikacja/'+$suite+'.trx')) } }
     $inputs=@{schema='apex-source-inputs-v1';files=@(@{path='package-lock.json';bytes=1;sha256=('1'*64)},@{path='frontend/naval/package-lock.json';bytes=1;sha256=('2'*64)})}
     Put (Join-Path $package 'Weryfikacja/source-inputs.json') ($inputs|ConvertTo-Json -Depth 5)
-    Put (Join-Path $package 'Weryfikacja/frontend-results.json') (@{schema='apex-frontend-tests-v1';tests=@{total=1;passed=1;failed=0};build=@{total=1;passed=1;failed=0};typecheckExit=0;buildExit=0}|ConvertTo-Json -Depth 5)
+    $tap="TAP version 13`nok 1 - controlled`n1..1`n# tests 1`n# suites 0`n# pass 1`n# fail 0`n# cancelled 0`n# skipped 0`n# todo 0`n"
+    Put (Join-Path $package 'Weryfikacja/frontend-tests.txt') $tap
+    Put (Join-Path $package 'Weryfikacja/frontend-build-tests.txt') $tap
+    Put (Join-Path $package 'Weryfikacja/frontend-results.json') (@{schema='apex-frontend-tests-v1';tests=@{total=1;passed=1;failed=0;log='frontend-tests.txt';logSha256=(Hash (Join-Path $package 'Weryfikacja/frontend-tests.txt'))};build=@{total=1;passed=1;failed=0;log='frontend-build-tests.txt';logSha256=(Hash (Join-Path $package 'Weryfikacja/frontend-build-tests.txt'))};typecheckExit=0;buildExit=0}|ConvertTo-Json -Depth 5)
+    foreach ($name in @('INSTALACJA_WINDOWS.md','PROCEDURA_DEMO_PEPPERSTONE.md','PODLACZENIE_PLATFORM.md','INSTRUKCJA_PANELU.md','KONFIGURACJA.md','OGRANICZENIA_I_STATUS.md','WYNIKI_TESTOW.md','PRZEGLAD_BEZPIECZENSTWA.md','METODOLOGIA_TESTOW.md','BACKTESTER.md','NAVAL_READ_PUBLICATION.md','NAVAL_DELIVERY_VPS.md','NAVAL_OFFLINE.md','NAVAL_SHARED_OFFLINE.md','README.md','RAPORT_BADAN.md','NAVAL_FRONTEND.md')) { Put (Join-Path $package ('Dokumentacja/'+$name)) 'CONTROLLED_NOT_PRODUCT' }
+    Put (Join-Path $package 'MT5-opcjonalny/ApexBridge.mq5') 'CONTROLLED_NOT_PRODUCT'
+    Copy-Item (Join-Path $Source 'tools/windows/Smoke-Windows.ps1') (Join-Path $package 'Weryfikacja')
+    foreach ($name in @('Sprawdz-Pakiet.ps1','TestEvidence.ps1')) { Copy-Item (Join-Path $Source ('tools/windows/'+$name)) $package }
     $script:meta=@{schema='apex-build-v2';sourceCommit=('a'*40);sourceDirty=$true;target='win-x64';deploymentMode='self-contained';requiredRuntime='included';demoOnly=$true;botTestsRun=$true;platformTestsRun=$true;backtesterTestsRun=$true;panelTestsRun=$true;frontendTestsRun=$true;frontendBuildVerified=$true;brokerTested=$false;windowsRuntimeTested=$false;navalReadDefaultEnabled=$false;task7Acceptance='accepted-local-linux';sourceInputsSha256=(Hash (Join-Path $package 'Weryfikacja/source-inputs.json'));rootLockSha256=('1'*64);navalLockSha256=('2'*64);navalManifestSha256=(Hash (Join-Path $naval 'build-manifest.json'));frontendResultsSha256=(Hash (Join-Path $package 'Weryfikacja/frontend-results.json'));tools=@{node='v26.8.1';npm='11.19.0';dotnet='8.0.427';powershell='7.6.9'};testCounts=@{bot=@{total=1;passed=1;failed=0};platform=@{total=1;passed=1;failed=0};backtester=@{total=1;passed=1;failed=0}}}
 }
 function Seal {
@@ -51,7 +58,7 @@ Case 'RealShippedVerifierDoesNotSelfReject' {
     Seal; Verify
 }
 Case 'KnownFakeSentinelInInnocuousManifestedFileRefused' {
-    Reset-Package;Put (Join-Path $package 'innocuous.txt') 'FAKE_TASK8A_SECRET_SENTINEL_NOT_A_CREDENTIAL';Seal
+    Reset-Package;Put (Join-Path $package 'Dokumentacja/README.md') 'FAKE_TASK8A_SECRET_SENTINEL_NOT_A_CREDENTIAL';Seal
     $refusal='';try {Verify} catch {$refusal=$_.Exception.Message}
     if ($refusal -cne 'Known test secret sentinel in package') {throw 'Sentinel content guard not reached'}
 }
@@ -83,6 +90,77 @@ foreach ($bad in @('apex.config.json','state.json','desktop_control.json','autho
     Reset-Package;Put (Join-Path $package $bad) 'CONTROLLED_EXCLUDED_DATA_NOT_REAL';Seal
     Case ('SecretOrUserDataOrArchiveOrCacheEvenWhenManifested-'+$bad) { Reject { Verify } }
 }
+# Review I1-I3 behavioral regressions. All additions are controlled, never executable.
+foreach ($bad in @('naval-local-access.json','APEX-Desktop/wwwroot/cache/session.json','APEX-Desktop/replay.exe','APEX-Desktop/OtherProduct.dll','Dokumentacja/extra.md','Weryfikacja/unapproved.txt','APEX-Desktop/wwwroot/extra.js')) {
+    Reset-Package; Put (Join-Path $package $bad) '{"schema":"naval-local-access-v1","principals":[]}'; Seal
+    Case ('ExplicitShippedLayout-'+$bad) { Reject { Verify } }
+}
+Case 'PrivateMapSchemaInAllowedDocumentNotBasename' {
+    Reset-Package; Put (Join-Path $package 'Dokumentacja/README.md') '{"schema":"naval-local-access-v1","principals":[]}'; Seal
+    $refusal='';try { Verify } catch { $refusal=$_.Exception.Message }
+    if ($refusal -cne 'Private access-map document in package') { throw 'Schema content guard not reached' }
+}
+Case 'PrivateMapSchemaLargerThanSentinelWindow' {
+    Reset-Package
+    Put (Join-Path $package 'Dokumentacja/README.md') ('{"schema":"naval-local-access-v1","principals":[],"padding":"'+('x'*8388608)+'"}')
+    Seal; Reject { Verify }
+}
+Case 'EmptyCacheDirectoryRefused' { Reset-Package; New-Item -ItemType Directory (Join-Path $package 'APEX-Desktop/wwwroot/cache')|Out-Null; Seal; Reject { Verify } }
+Case 'MissingRequiredDocumentation' { Reset-Package; Remove-Item (Join-Path $package 'Dokumentacja/NAVAL_DELIVERY_VPS.md'); Seal; Reject { Verify } }
+Case 'NestedUnlistedExactCasePair' {
+    Reset-Package; Seal
+    Put (Join-Path $naval 'assets/INDEX-TEST.js') 'CONTROLLED_UNLISTED_ALIAS'
+    Reject { Test-ApexNavalAssets $naval }; Reject { Verify }
+}
+Case 'NestedManifestCaseCollision' {
+    Reset-Package; Put (Join-Path $naval 'assets/INDEX-TEST.js') 'CONTROLLED_ALIAS'
+    $m=Get-Content (Join-Path $naval 'build-manifest.json') -Raw|ConvertFrom-Json
+    $m.artifacts+=@{path='assets/INDEX-TEST.js';bytes=16;sha256=(Hash (Join-Path $naval 'assets/INDEX-TEST.js'))}
+    Put (Join-Path $naval 'build-manifest.json') ($m|ConvertTo-Json -Depth 6)
+    Reject { Test-ApexNavalAssets $naval }
+}
+Case 'OuterUnlistedExactCasePair' { Reset-Package; Seal; Put (Join-Path $package 'Dokumentacja/readme.md') 'CONTROLLED_ALIAS'; Reject { Verify } }
+Case 'OuterDeclaredSpellingMustBeExact' {
+    Reset-Package; Seal; $p=Join-Path $package 'Dokumentacja/README.md'; Move-Item $p (Join-Path $package 'Dokumentacja/readme.md'); Reject { Verify }
+}
+foreach ($fault in @('log-bytes','binding','missing-log','missing-ref','traversal-ref','wrong-allowed-ref','absolute-ref','case-ref','tap-fail','tap-skip','tap-cancel','tap-todo','tap-duplicate-counter','tap-missing-counter','tap-missing-plan','tap-missing-results','tap-count-contradiction','declared-skip','declared-cancel','declared-todo')) {
+    Reset-Package
+    $p=Join-Path $package 'Weryfikacja/frontend-results.json';$f=Get-Content $p -Raw|ConvertFrom-Json
+    $log=Join-Path $package 'Weryfikacja/frontend-tests.txt';$text=[IO.File]::ReadAllText($log)
+    switch ($fault) {
+        'log-bytes' { Put $log 'CONTROLLED_NO_TEST_RESULTS' }
+        'binding' { $f.tests.logSha256='0'*64 }
+        'missing-log' { Remove-Item $log }
+        'missing-ref' { $f.tests.PSObject.Properties.Remove('log') }
+        'traversal-ref' { $f.tests.log='../frontend-tests.txt' }
+        'wrong-allowed-ref' { $f.tests.log='frontend-build-tests.txt';$f.tests.logSha256=Hash (Join-Path $package ('Weryfikacja/'+$f.tests.log)) }
+        'absolute-ref' { $f.tests.log=$log }
+        'case-ref' { $f.tests.log='FRONTEND-TESTS.txt' }
+        'tap-fail' { $text=$text.Replace('# fail 0','# fail 1') }
+        'tap-skip' { $text=$text.Replace('# skipped 0','# skipped 1') }
+        'tap-cancel' { $text=$text.Replace('# cancelled 0','# cancelled 1') }
+        'tap-todo' { $text=$text.Replace('# todo 0','# todo 1') }
+        'tap-duplicate-counter' { $text+="# tests 1`n" }
+        'tap-missing-counter' { $text=$text.Replace("# skipped 0`n",'') }
+        'tap-missing-plan' { $text=$text.Replace("1..1`n",'') }
+        'tap-missing-results' { $text=$text.Replace("ok 1 - controlled`n",'') }
+        'tap-count-contradiction' { $text=$text.Replace('# tests 1','# tests 2').Replace('# pass 1','# pass 2') }
+        'declared-skip' { $f.tests|Add-Member skipped 1 }
+        'declared-cancel' { $f.tests|Add-Member cancelled 1 }
+        'declared-todo' { $f.tests|Add-Member todo 1 }
+    }
+    if ($fault -like 'tap-*') { Put $log $text; $f.tests.logSha256=Hash $log }
+    Put $p ($f|ConvertTo-Json -Depth 6);$meta.frontendResultsSha256=Hash $p;Seal
+    Case ('FrontendEvidence-'+$fault) { Reject { Verify } }
+}
+Case 'LinuxExplicitProductLayoutPositive' {
+    Reset-Package
+    Remove-Item (Join-Path $package 'APEX-Desktop/ApexDesktop.exe');Remove-Item (Join-Path $package 'Uruchom APEX.cmd')
+    foreach ($p in @('APEX-Desktop/ApexDesktop.dll','APEX-Desktop/ApexDesktop.deps.json','APEX-Desktop/Apex.Core.dll','Uruchom APEX.sh')) { Put (Join-Path $package $p) 'CONTROLLED_NOT_PRODUCT' }
+    Put (Join-Path $package 'APEX-Desktop/ApexDesktop.runtimeconfig.json') '{"runtimeOptions":{"tfm":"net8.0","frameworks":[{"name":"Microsoft.AspNetCore.App","version":"8.0.0"}]}}'
+    $meta.target='linux-x64';$meta.deploymentMode='framework-dependent';$meta.requiredRuntime='Microsoft.AspNetCore.App 8';Seal;Verify
+}
+Case 'LinuxRequiredCoreAssembly' { Remove-Item (Join-Path $package 'APEX-Desktop/Apex.Core.dll'); Seal; Reject { Verify } }
 Case 'NonemptyDestinationAndExistingZipRefused' {
     $dest=Join-Path $Scratch 'no-overwrite';New-Item -ItemType Directory -Path $dest|Out-Null;Put (Join-Path $dest 'keep.txt') 'KEEP'
     Reject { & (Join-Path $Source 'tools/windows/Zbuduj-APEX.ps1') -Wyjscie $dest }

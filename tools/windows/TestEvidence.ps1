@@ -18,6 +18,28 @@ function Read-ApexTestCounts([string]$Path) {
     return [ordered]@{ total = [int]$c.total; passed = [int]$c.passed; failed = [int]$c.failed }
 }
 
+# The shipped frontend uses Node's flat TAP test reporter (no test suites).
+# Require one complete summary, a matching plan and actual passing test records.
+function Read-ApexFrontendCounts([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'Missing frontend TAP log' }
+    $text = [IO.File]::ReadAllText($Path)
+    $values = @{}
+    foreach ($name in @('tests','suites','pass','fail','skipped','cancelled','todo')) {
+        $matches = [regex]::Matches($text, ('(?m)^# '+$name+' ([0-9]+)\r?$'))
+        if ($matches.Count -ne 1) { throw 'Missing/duplicate frontend TAP counter' }
+        $values[$name] = [int]$matches[0].Groups[1].Value
+    }
+    $plan = [regex]::Matches($text, '(?m)^1\.\.([0-9]+)\r?$')
+    $records = [regex]::Matches($text, '(?m)^ok ([0-9]+) - [^\r\n]+\r?$')
+    if ([regex]::Matches($text,'(?m)^TAP version 13\r?$').Count -ne 1 -or
+        $values.tests -le 0 -or $values.pass -ne $values.tests -or
+        $values.suites -ne 0 -or $values.fail -ne 0 -or $values.skipped -ne 0 -or $values.cancelled -ne 0 -or $values.todo -ne 0 -or
+        $plan.Count -ne 1 -or [int]$plan[0].Groups[1].Value -ne $values.tests -or $records.Count -ne $values.tests -or
+        $text -match '(?im)^\s*(not ok\b|Bail out!)|^\s*ok\b[^\r\n]*#\s*(SKIP|TODO)\b') { throw 'Incomplete/contradictory frontend TAP evidence' }
+    for ($i=0; $i -lt $records.Count; $i++) { if ([int]$records[$i].Groups[1].Value -ne $i+1) { throw 'Invalid frontend TAP test sequence' } }
+    return [ordered]@{total=$values.tests;passed=$values.pass;failed=$values.fail;skipped=$values.skipped;cancelled=$values.cancelled;todo=$values.todo}
+}
+
 # Exact bounded Vite inventory, also used on dist/staging/build/publish/extraction.
 function Test-ApexNavalAssets([string]$NavalRoot) {
     $root = [IO.Path]::GetFullPath($NavalRoot)
@@ -27,28 +49,34 @@ function Test-ApexNavalAssets([string]$NavalRoot) {
     $manifestPath = Join-Path $root 'build-manifest.json'
     $m = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
     if ($m.schema -cne 'naval-build-v1' -or @($m.artifacts).Count -lt 3) { throw 'Invalid Naval inventory schema' }
-    $listed = @{}
+    $listed = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $folded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($a in $m.artifacts) {
         $p = [string]$a.path
-        if ($p -cnotmatch '^(index\.html|assets/[A-Za-z0-9_-]+\.(js|css))$' -or $listed.ContainsKey($p) -or $a.sha256 -cnotmatch '^[a-f0-9]{64}$' -or "$($a.bytes)" -notmatch '^\d+$') { throw 'Invalid/duplicate Naval inventory path/hash' }
+        if ($p -cnotmatch '^(index\.html|assets/[A-Za-z0-9_-]+\.(js|css))$' -or -not $folded.Add($p) -or $a.sha256 -cnotmatch '^[a-f0-9]{64}$' -or "$($a.bytes)" -notmatch '^\d+$') { throw 'Invalid/duplicate Naval inventory path/hash' }
         $file = Join-Path $root $p
         if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -ne $a.bytes -or (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $a.sha256) { throw 'Missing or stale Naval asset' }
-        $listed[$p] = $true
+        [void]$listed.Add($p)
     }
-    if (-not $listed.ContainsKey('index.html') -or @($listed.Keys | Where-Object { $_ -cmatch '^assets/.+\.js$' }).Count -eq 0 -or @($listed.Keys | Where-Object { $_ -cmatch '^assets/.+\.css$' }).Count -eq 0) { throw 'Incomplete Naval inventory' }
+    if (-not $listed.Contains('index.html') -or @($listed | Where-Object { $_ -cmatch '^assets/.+\.js$' }).Count -eq 0 -or @($listed | Where-Object { $_ -cmatch '^assets/.+\.css$' }).Count -eq 0) { throw 'Incomplete Naval inventory' }
     $prefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    foreach ($n in $nodes | Where-Object { $_.FullName -ne $root }) {
+    $actualFolded = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $actual = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($n in $nodes | Where-Object { $_.FullName -cne $root }) {
         $p = $n.FullName.Substring($prefix.Length).Replace('\','/')
+        if (-not $actualFolded.Add($p)) { throw 'Case-colliding Naval path' }
         if ($n.PSIsContainer) { if ($p -cne 'assets') { throw 'Unexpected Naval directory' }; continue }
-        if ($p -cne 'build-manifest.json' -and -not $listed.ContainsKey($p)) { throw 'Unlisted Naval asset' }
+        [void]$actual.Add($p)
+        if ($p -cne 'build-manifest.json' -and -not $listed.Contains($p)) { throw 'Unlisted Naval asset' }
         if ($p -cmatch '\.js$') {
             # Vite local lazy targets, including template-literal imports/preload maps.
             foreach ($match in [regex]::Matches([IO.File]::ReadAllText($n.FullName), '(?:\./)?(chunk-[A-Za-z0-9_-]+\.js)')) {
-                if (-not $listed.ContainsKey('assets/' + $match.Groups[1].Value)) { throw 'Missing dynamic-import target' }
+                if (-not $listed.Contains('assets/' + $match.Groups[1].Value)) { throw 'Missing dynamic-import target' }
             }
         }
     }
+    foreach ($p in $listed) { if (-not $actual.Contains($p)) { throw 'Naval declared spelling differs from actual path' } }
     $html = [IO.File]::ReadAllText((Join-Path $root 'index.html'))
-    foreach ($match in [regex]::Matches($html, '(?:src|href)="/naval/([^"]+)"')) { if (-not $listed.ContainsKey($match.Groups[1].Value)) { throw 'Missing Naval entry target' } }
+    foreach ($match in [regex]::Matches($html, '(?:src|href)="/naval/([^"]+)"')) { if (-not $listed.Contains($match.Groups[1].Value)) { throw 'Missing Naval entry target' } }
     return [ordered]@{sha256=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant(); artifacts=$listed.Count}
 }
