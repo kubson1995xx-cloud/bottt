@@ -2,7 +2,7 @@
 
 ## Granica produktu
 
-Publikacja jest wyłącznie **OFFLINE_SHARED_CAPITAL / SYNTHETIC_NOT_RESEARCH / NO_BROKER_AUTHORITY**. To historyczny checkpoint wspólnego kapitału syntetycznego i ograniczony dziennik zaakceptowanych operacji. Nie jest brokerowym kontem, notowaniem live, księgą wyniku ani potwierdzeniem zlecenia. Nie nadaje uprawnień do START, wystawiania receiptów ani execution. Nie dodano tras HTTP, konfiguracji Desktop, auth ani UI.
+Publikacja jest wyłącznie **OFFLINE_SHARED_CAPITAL / SYNTHETIC_NOT_RESEARCH / NO_BROKER_AUTHORITY**. To historyczny checkpoint wspólnego kapitału syntetycznego i ograniczony dziennik zaakceptowanych operacji. Nie jest brokerowym kontem, notowaniem live, księgą wyniku ani potwierdzeniem zlecenia. Nie nadaje uprawnień do START, wystawiania receiptów ani execution. Producent P nie dodaje auth ani UI; kandydat pasywnego hosta H jest opisany niżej i pozostaje **nieodebrany** do czasu prawdziwego testu przeglądarki.
 
 `EngineState.Naval` nadal jest jedynym źródłem cash, filli, rezerwacji i zobowiązań. Nullable `EngineState.NavalReadJournal` jest metadanymi **tej samej rewizji i tego samego Set+Flush**, a nie drugim finansowym plikiem/ledgerem. CFD zachowuje SchemaVersion5 i domyślne null obu pól Naval. StateDigest starego `NavalPortfolioState` nie obejmuje nowego pola envelope i nie został zmieniony.
 
@@ -64,6 +64,86 @@ Command zwraca2 przy awarii eksportu, nawet jeśli ekonomia została wcześniej 
 
 Eksport nigdy nie staje się live-fresh od mtime, reload, poll lub zegara hosta. P przyjmuje logical sourceClockUtc; hostEpoch, observed/served times oraz freshness/age policy wymagają późniejszego H. DurableMode RUNNING po restarcie nie daje runtime readiness ani START.
 
-## Nadal nieodebrane
+## Kandydat Task6A-H — lokalny pasywny host (nie acceptance)
 
-Task6A-H/endpoints i pasywny reader bez writer lease; rozwiązanie operator-token bootstrap `/` i izolowanej roli read-only; React/TS/Vite pięć podłączonych widoków i anulowanie fetch/account-generation; R3F; prywatny OKX/WS/recovery/real broker fill/settlement/settled-result/statistics; realne DEMO/LIVE, Windows durability/ACL/cTrader E2E oraz VPS/mobile TLS/auth. Linux synthetic proof nie zastępuje tych bramek. Niezależny bounded review i decyzja rodzica pozostają osobnym krokiem; ta dokumentacja nie deklaruje acceptance.
+Implementacja w istniejącym `ApexDesktop.dll` jest opt-in. **Nie włączono jej w żadnej konfiguracji użytkownika i nie dostarczono prawdziwych poświadczeń.** Status i dokładne artefakty: [raport H](../.superpowers/sdd/2026-10-29-apex-naval/task-6a-host-report.md) (lokalny artefakt SDD; katalog jest gitignored). Nie ma nowego UI, drugiego listenera, writer endpointu ani prawa do handlu Naval.
+
+### Konfiguracja bez sekretów
+
+Opcjonalne pole `HostConfig.NavalRead` w `apex.config.json` ma dokładną pisownię poniżej. Brak sekcji albo `Enabled=false` zachowuje stary lokalny panel, token bootstrap i brak tras Naval. Tryb domyślny nie jest wdrożeniem odizolowanej roli ReadOnly. Nie wystawiaj go czytelnikowi jako alternatywnej anonimowej bramy Operator.
+
+| Pole | Kontrakt |
+|---|---|
+| `Enabled` | Wymagany bool, domyślnie false w obiekcie opcji. |
+| `CredentialFilePath` | Dla enabled: pełna stała lokalna ścieżka do istniejącego prywatnego pliku digestów. |
+| `PublicationPath` | Pełna stała lokalna ścieżka eksportu; null/brak oznacza świadomie niepodłączone konto. Nieistniejący wskazany plik jest awarią503, nie pustym kontem. |
+| `Scope` | Dla enabled kompletny obiekt `Id`, `PublicationScopeId`, `PortfolioId`, `ConfigDigest`, `Accounts`. |
+| `Scope.Id` | Selector1..64 ASCII alfanumeryczne/`-`/`_`, ordinal, jedyny obsługiwany zakres. |
+| `Scope.PublicationScopeId` | Dokładne64 hex z zaakceptowanego P; bez zmiany case lub naprawy. |
+| `Scope.PortfolioId` | Obiekt Core: `PortfolioId`, `ReportingCurrency`. |
+| `Scope.ConfigDigest` | Dokładny64-hex digest konfiguracji producenta. |
+| `Scope.Accounts` | Niepusta lista różnych pełnych tożsamości Core: `Venue`, `Environment`, `AccountId`, `QuoteCurrency`; całe członkostwo publikacji, bez redakcji pojedynczego konta pod wspólnym cursorem. |
+
+Nowa sekcja i zagnieżdżone obiekty odrzucają nieznane, zduplikowane i brakujące wymagane pola przed permissive deserializacją starego configu. Nie zmieniono zgodności starych CFD configów. Opcje runtime i mapę ról kopiuje się raz przed AccountManager, TCP bridge, news i HTTP bind. Błąd daje exit2 z zamkniętym kodem `NAVAL_CONFIG_INVALID`, `NAVAL_CREDENTIAL_INVALID`, `NAVAL_PATH_INVALID`, `NAVAL_PERMISSIONS_INVALID` albo `HOST_CONFIG_INVALID`, bez JSON-u, ścieżki i wyjątku. Host nie tworzy pliku credential/publication ani nowej authority.
+
+Obie ścieżki muszą być poza source/webroot/publish/package/authority. Nie są przyjmowane z żądania, env ani argumentu roli. Brak URI/UNC, relatywnej ścieżki, rozszerzania zmiennych, globów i komponentów symlink/reparse; brak fallback search. Kontrole rodziców odrzucają `.naval-owner.lock` i `.naval-initialized` **bez otwierania locka**. Właściciel wdrożenia nadal odpowiada za lokalny filesystem i jawnie rozdzielony katalog eksportu.
+
+Unix: prywatny bezpośredni katalog0700; credentials0600; publication0400 lub0600. Dostępne dla obcej grupy/świata writable ancestors są odrzucane. Ancestor pod wcześniejszym0700 nie jest dostępny dla innego UID i nie zwiększa uprawnień (np. prywatny Hermes scratch); ten sam użytkownik OS/root jest zaufany. Nie ma wyjątku omijającego prawa na `/tmp`. Windows: używane są istniejące API ACL, kontrola ownera, DACL i wszystkich dziedziczonych grantów; prywatne cele tylko aktualny użytkownik/SYSTEM/Administrators, bez obcych modyfikacji ancestorów. Nieudowodnione ACL są odrzucane. **Brak natywnego wykonania Windows — nie potwierdzono zgodności typowych katalogów Windows, działania ACL ani browser cache na Windows.**
+
+### Prywatny plik `naval-local-access-v1`
+
+To opis schematu, nie fixture do wdrożenia i nie provisioning:
+
+- Dokładnie `schema: "naval-local-access-v1"` i `principals` (1..16).
+- Każdy principal ma dokładnie `id` (unikalny identyfikator1..64 ASCII alfanumeryczne/`-`/`_`), `role` (`Operator` albo `ReadOnly`), `secretSha256` (64 **lowercase** hex SHA256 dokładnego sekretu ASCII) i `allowedScopeIds` (dla H dokładnie jedyny skonfigurowany selector, bez duplikatów).
+- Co najmniej jeden Operator i jeden ReadOnly; brak powtórzonych digestów również między rolami. Nieznane/duplikowane/brakujące/null pola, nadmiar64KiB i depth>8 są błędem.
+- Sekret wejściowy: kanoniczny **unpadded base64url dokładnie32 losowych bajtów**, czyli43 ASCII. Nie ludzki password, stary ApiToken ani PairingKey. Administrator musi pozyskać entropię z prywatnego bezpiecznego narzędzia. Plik przechowuje wyłącznie digest, nie reusable plaintext.
+- Operator: przeglądarkowy/native HTTP Basic, login=`id`, password=sekret. ReadOnly: Bearer w nagłówku klienta. Basic z credentialem ReadOnly nie staje się Operatorem, Bearer Operatora nie zastępuje Basic. Role/granty pochodzą wyłącznie z prywatnej mapy serwera.
+- Authorization≤4096 ASCII; dokładnie jedna poprawna wartość, bez combined/multiple. Kandydat ma walidację kanonicznego kodowania przed SHA256 i fixed-time porównanie bajtów digestu. Niepusty `X-Apex-Token` w enabled jest odrzucany; pusty legacy nagłówek panelu jest dozwolony.
+- Mapa jest zamrożona do restartu. Prywatna atomowa wymiana pliku + restart służy rotacji/revocation; GET nie reloaduje mapy. Brak API zarządzania credentialami.
+
+Sekret nigdy nie trafia do HTML/meta/JS/bootstrap, URL, query/fragment, commita, logu, raportu ani screenshot/trace. Testy używają wyłącznie efemerycznych RNG sekretów i digestów w prywatnym scratch, konstruują Authorization w procesie testowym i usuwają procesy/pliki w cleanup. Realne dane administrator przekazuje przez prywatny manager/prompt — nigdy przez chat.
+
+### Granica wejścia i stary panel
+
+Pozostaje IPv4 loopback i dokładny Host `127.0.0.1:<efektywny-port>` lub `localhost:<efektywny-port>`, istniejący CSP, DENY, nosniff i no-referrer. Enabled dodaje no-store również do błędów. Brak CORS i zaufania do forwarded host/user/role.
+
+W enabled anonymous/nieprawidłowy credential daje401. Root/static/legacy challenge to `Basic realm="APEX Local Operator", charset="UTF-8"`; dwa zasoby Naval challenge Bearer. ReadOnly ma wyłącznie dokładne dwa GET-y poniżej; root, raw index, assets, legacy APIs, zapisy i nieznane ścieżki dają403, a usunięcie Bearera wraca do401, nigdy HTML-u Operatora. Operator dostaje stary panel z **pustym meta apex-token** zarówno na `/`, jak i `/index.html`. Nie ma sekretu JS ani token fallbacku. Same-origin przeglądarka ma używać natywnego Basic cache; to wymaga osobnego rzeczywistego testu, nie dowodu HttpClient/VM.
+
+Tylko dokładne `/bridge` zachowuje osobne natywne pairing hello i loopback/no-Origin. Każdy HTTP Authorization albo Origin na tej ścieżce daje403; `/bridge/...` i case aliases nie omijają entry policy. TCP pairing nie jest zastępowane web credentialem. Startup log w enabled nie drukuje PairingKey. Uprzywilejowane stare `/api/status` pozostaje starym kontraktem Operatora; nie jest DTO Naval.
+
+Dla unsafe legacy metod Basic nie omija CSRF: obcy/null Origin, inny port i `Sec-Fetch-Site: cross-site` dają403 przed wykonaniem. Dokładny same-origin albo natywny klient bez browser headers może użyć Basic; POST nadal wymaga application/json (inaczej415). Stary `emergency` na oryginalnej account route nie zależy od czytelności publikacji. Nie dodano Naval START/command/receipt/issuer/financial endpointu.
+
+### Dwa kontrakty GET
+
+- `GET /api/naval/snapshot?scope=<selector>&requestGeneration=<correlation>`.
+- `GET /api/naval/events?scope=<selector>&hostEpoch=<snapshot-hostEpoch>&cursor=<canonical>&limit=<1..100>&requestGeneration=<correlation>`.
+
+Scope pominięty wybiera jedyny skonfigurowany. Obcy selector lub poprawnie zakodowany obcy scope cursora →403 przed file capture/ReadPage. Nieznane/duplikowane query →400. Opcjonalne requestGeneration1..64 ASCII alfanumeryczne/`-`/`_` jest tylko echem korelacji, nie principalem, licznikiem ani ochroną nowego UI. Events wymaga hostEpoch GUID-N i kanonicznego Core cursora; limit domyślnie100, kanoniczny integer1..100. Brak/malformed →400. Nie ma aliases `/naval`, case/trailing-slash resource aliases ani zapisów; Operator nieznana Naval route404, non-GET na istniejącym zasobie405 (`Allow: GET`), ReadOnly403, anonymous401.
+
+Dedicated JSON ma schemaVersion `naval-host-read-v1`, hostEpoch, scope, requestGeneration, servedUtc, observedUtc, availability/reasonCode, classification/temporalClassification, epoch/scopeId, sourceGeneration/sourceSequence, snapshotVersion/asOfSequence/financialRevision, sources i broker. Counter/revision/generation oraz decimal money/quantity nadal są **stringami**, nie JS Number. `snapshotVersion=FinancialRevision`; `asOfSequence=LastSequence`, bez wersji odświeżania.
+
+Snapshot dodaje dokładny immutable checkpoint, oldestAvailableSequence i zakodowany cursor na head. Events dodaje publiczne Core `page`, `nextCursorEncoded` oraz top-level gap/resetRequired/batches. `page.nextCursor` zachowuje Core `{epoch,scopeId,sequence}`; batche są earliest-first ściśle po cursorze, niezmienione/atomowe; pusty sukces nie przesuwa pozycji. Publiczny `NavalReadJournal.ReadPage` jest jedynym paging algorytmem.
+
+| Stan | HTTP / treść |
+|---|---|
+| Poprawna historyczna publikacja |200, pełny odłączony capture; nigdy broker READY. |
+| Inny journal epoch / cursor ahead / retention gap |200, page gap/reset=true, brak batchy. |
+| Inny hostEpoch |409 `HOST_EPOCH_CHANGED`, gap/reset=true, brak batchy, wymagany nowy snapshot. |
+| PublicationPath null |Snapshot200 `NOT_CONFIGURED / NO_PUBLICATION_CONFIGURED`, checkpoint/cursor/finanse null; events200 `SNAPSHOT_UNAVAILABLE`, page null/reset=true. Nie tworzy sztucznego epoch/sequence0. |
+| Skonfigurowany brak/uszkodzenie/permissions/hash/schema/identity/oversize |503 UNKNOWN, zamknięty reason, brak last-good money, ścieżek i exception text. Błąd skonfigurowanego źródła ma pierwszeństwo przed hostEpoch409. |
+| Proven conflict/backward/lineage replacement |503 `PUBLICATION_CONFLICT`, `PUBLICATION_BACKWARD` albo `PUBLICATION_LINEAGE_CHANGED`, latch do restartu. |
+
+`sources[0]` opisuje `OFFLINE_PUBLICATION`: sourceClockUtc, najnowsze nie-null CaptureUtc/ReceiveUtc, ReconciledUtc, ostatni CommittedUtc, ageSeconds jako nullable decimal string, UNKNOWN quality/coverage, HISTORICAL albo UNKNOWN freshness, zawsze stale=true. Nieznane/przyszłe/regresywne czasy nie dają świeżości. observedUtc jest pierwszą akceptacją danej publikacji; poll/mtime/zmieniony export provenance/sourceClock przy tym samym committed payload nie resetuje go ani source metadata. Source age może rosnąć wraz z servedUtc. Broker zawsze NOT_CONFIGURED, accountId/balance/equity/P&L/statistics null, quality/coverage/runtimeReadiness UNKNOWN. DurableMode RUNNING i syntetyczny cash nie są realnym saldem ani gotowością.
+
+### Passive capture, ingest i ograniczenia
+
+Każdy autoryzowany GET czyta jeden bounded file handle read-only/share Read|Delete (32MiB/depth64), bez retry finansowej operacji, watcherów, sidecar DB, napraw i writer lease. Atomic rename daje stary albo nowy pełny capture. Reader ma własne prywatne DTO envelope/serializer, a nie zależność od Backtester ani reflection do jego API. Surowe pola są rekurencyjnie porównywane z pełną typed canonical shape **przed dopuszczeniem**, również getter-only UNKNOWN/null, brakujące/unknown/duplicate pola i literalne enumy. Digest to dokładne typed ordered pretty UTF8 content P, nie ad-hoc sort kluczy. Publiczne ReadPage waliduje accepted Core journal i trzy naprawione semantyczne przypadki P; host nie replikuje księgi ani financial validatora.
+
+Jedna bramka service obejmuje capture/ingest/response. Identyczna publikacja jest idempotentna nawet po rebuild provenance. Większa rewizja wymaga monotonic source generation/sequence i identycznego canonical retained overlap. Ten sam revision z innym payload, zmieniony overlapping event/baseline, rollback lub nowy lineage nie udaje pustego success. Przejściowy zły capture może odzyskać poprawny nonconflicting source; dowiedziony conflict pozostaje latched. Restart zmienia tylko hostEpoch; nie zapisuje ekonomii ani zabezpieczenia anti-rollback między restartami. Zaufany lokalny writer/OS user/admin pozostaje granicą — checksum nie jest podpisem ani broker provenance.
+
+### Dowody i bramki, których nie wolno utożsamiać
+
+Real production-process tests uruchamiają `ApexDesktop.dll`, nie SyntheticHostEntry, i przechodzą przez prawdziwy digest loader. Obejmują CLI→HTTP, held real owner + odmowę drugiego ownera, authority bytes/file set, snapshot/page/restart/gap/corrupt/conflict i legacy EmergencyStop. Node VM empty-token test sprawdza jedynie konstrukcję requestu. Dokładne RED/GREEN/TRX/source hashes/build/HTTP są w raporcie H. **Prawdziwe przeglądarkowe Basic cache + pusty meta + stary panel/EmergencyStop są BLOCKED przez brak dostępnego lokalnego runtime — H nie jest odebrane.**
+
+Nadal osobno: bounded independent H review/akceptacja rodzica; prywatny provisioning i Windows ACL/browser/native cTrader E2E; prywatny OKX/WS/history/fill/finality/settlement/statystyki; jakakolwiek zatwierdzona realna transakcja DEMO; mobile/VPS/TLS/gateway/device lifecycle; React/TS/Vite pięć podłączonych widoków, anulowanie fetch/account-generation/reducer fencing i R3F. Nie wykonano installu, remote CI, zmiany usług/konfiguracji użytkownika, brokerowego połączenia, commita ani push.

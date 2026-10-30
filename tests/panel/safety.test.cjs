@@ -8,8 +8,9 @@ const { parseHTML } = require('linkedom');
 const root = path.resolve(__dirname, '../..');
 const www = path.join(root, 'src/Apex.Desktop/wwwroot');
 
-function panel() {
-  const { window, document } = parseHTML(fs.readFileSync(path.join(www, 'index.html'), 'utf8'));
+function panel(emptyToken = false) {
+  const html = fs.readFileSync(path.join(www, 'index.html'), 'utf8');
+  const { window, document } = parseHTML(emptyToken ? html.replace('__APEX_TOKEN__', '') : html);
   const calls = [];
   const storage = new Map();
   const timers = [];
@@ -38,6 +39,23 @@ function selectAccount(p, overrides = '') {
     S.host = S.data.host; S.account = S.data.data.accounts[0].key; S.lastOk = Date.now();
     ${overrides}`);
 }
+
+test('empty enabled-mode meta keeps legacy JSON requests without injecting a credential (VM only)', async () => {
+  const p = panel(true);
+  await new Promise(setImmediate);
+  await p.run(`api('/api/status')`);
+  await p.run(`api('/api/accounts/x/command', {action:'emergency'})`);
+  const get = p.calls.find(c => c.url === '/api/status');
+  const post = p.calls.find(c => c.opts?.body && JSON.parse(c.opts.body).action === 'emergency');
+  assert.ok(get); assert.ok(post);
+  for (const call of [get, post]) {
+    assert.equal(call.opts.headers['X-Apex-Token'], '');
+    assert.equal(call.opts.headers.Authorization, undefined);
+    assert.notEqual(call.opts.credentials, 'omit');
+  }
+  assert.equal(post.opts.headers['Content-Type'], 'application/json');
+  // Native Basic challenge/cache/network/CSP are intentionally not claimed by this VM test.
+});
 
 test('API HTTP error is an error, not a successful command', async () => {
   const p = panel();

@@ -13,6 +13,7 @@ using Apex.Core.Engine;
 using Apex.Desktop.Bridge;
 using Apex.Desktop.Runtime;
 using Apex.Desktop.Services;
+using Apex.Desktop.Naval;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -41,7 +42,25 @@ namespace Apex.Desktop
                 return 2;
             }
 
-            var config = new ConfigStore(dataDir) { TrustedSyntheticComposition = trustedSyntheticComposition };
+            ConfigStore config;
+            NavalRuntimeOptions? naval;
+            try
+            {
+                config = new ConfigStore(dataDir) { TrustedSyntheticComposition = trustedSyntheticComposition };
+                naval = NavalAccessPolicy.Load(config.Config.NavalRead);
+            }
+            catch (NavalAccessException ex)
+            {
+                Console.Error.WriteLine(ex.Code);
+                lockFile.Dispose();
+                return 2;
+            }
+            catch (Exception ex) when (ex is InvalidDataException or JsonException or UnauthorizedAccessException or IOException)
+            {
+                Console.Error.WriteLine("HOST_CONFIG_INVALID");
+                lockFile.Dispose();
+                return 2;
+            }
             var log = new AppLog(Path.Combine(dataDir, "logi"));
             var news = new NewsCalendar();
             var newsService = new NewsService(news, config, log);
@@ -67,23 +86,25 @@ namespace Apex.Desktop
             // Bezpieczeństwo: tylko lokalny host (ochrona przed DNS rebinding), token API, nagłówki ochronne.
             app.Use(async (ctx, next) =>
             {
-                string host = ctx.Request.Host.Value ?? "";
-                if (!allowedHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
-                {
-                    ctx.Response.StatusCode = 403;
-                    return;
-                }
                 var h = ctx.Response.Headers;
                 h["X-Content-Type-Options"] = "nosniff";
                 h["X-Frame-Options"] = "DENY";
                 h["Referrer-Policy"] = "no-referrer";
                 h["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
-                if (ctx.Request.Path.StartsWithSegments("/api"))
+                if (naval != null) h["Cache-Control"] = "no-store";
+                string host = ctx.Request.Host.Value ?? "";
+                if (!allowedHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
+                {
+                    await NavalAccessPolicy.Error(ctx, 403);
+                    return;
+                }
+                if (naval != null && !await naval.Access.Enter(ctx)) return;
+                if (ctx.Request.Path.StartsWithSegments("/api") && (naval == null || !ctx.Request.Path.StartsWithSegments("/api/naval")))
                 {
                     string got = ctx.Request.Headers["X-Apex-Token"].ToString();
                     var a = Encoding.UTF8.GetBytes(got);
                     var b = Encoding.UTF8.GetBytes(token);
-                    if (a.Length != b.Length || !CryptographicOperations.FixedTimeEquals(a, b))
+                    if (naval == null && (a.Length != b.Length || !CryptographicOperations.FixedTimeEquals(a, b)))
                     {
                         ctx.Response.StatusCode = 401;
                         return;
@@ -98,18 +119,26 @@ namespace Apex.Desktop
                 await next();
             });
 
-            app.Map("/bridge", bridge.HandleWebSocketAsync);
+            app.Map("/bridge", async ctx =>
+            {
+                if (naval != null && ctx.Request.Path.Value != "/bridge") { ctx.Response.StatusCode = 404; return; }
+                await bridge.HandleWebSocketAsync(ctx);
+            });
 
             string indexPath = Path.Combine(app.Environment.WebRootPath, "index.html");
-            app.MapGet("/", async ctx =>
+            async Task RenderIndex(HttpContext ctx)
             {
                 string html = await File.ReadAllTextAsync(indexPath);
-                html = html.Replace("__APEX_TOKEN__", token);
+                html = html.Replace("__APEX_TOKEN__", naval == null ? token : "");
                 ctx.Response.ContentType = "text/html; charset=utf-8";
                 ctx.Response.Headers["Cache-Control"] = "no-store";
                 await ctx.Response.WriteAsync(html);
-            });
+            }
+            app.MapGet("/", RenderIndex);
+            if (naval != null) app.MapGet("/index.html", RenderIndex);
             app.UseStaticFiles();
+            if (naval != null)
+                NavalReadEndpoints.MapNavalReadEndpoints(app, new NavalReadService(new NavalPublicationReader(naval.PublicationPath, naval.Scope), naval.Scope), naval.Access);
 
             app.MapGet("/api/status", () => Results.Json(new
             {
@@ -204,7 +233,8 @@ namespace Apex.Desktop
 
             string url = $"http://127.0.0.1:{port}/";
             log.Info($"APEX Desktop {AccountManager.HostVersion} uruchomiony: {url}  (dane: {dataDir})");
-            log.Info($"Klucz parowania mostów: {config.Config.PairingKey}  | WebSocket: ws://127.0.0.1:{port}/bridge | TCP: 127.0.0.1:{config.Config.BridgeTcpPort}");
+            if (naval == null) log.Info($"Klucz parowania mostów: {config.Config.PairingKey}  | WebSocket: ws://127.0.0.1:{port}/bridge | TCP: 127.0.0.1:{config.Config.BridgeTcpPort}");
+            else log.Info("Bridge configured.");
             log.Info("Handel na kontach LIVE: TRWALE WYŁĄCZONY (wersja DEMO).");
             if (config.Config.OpenBrowserOnStart && !args.Contains("--no-browser")) OpenBrowser(url);
 

@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using Apex.Core.Bridge;
 using Apex.Core.Engine;
 using Apex.Core.Risk;
+using Apex.Desktop.Naval;
 
 namespace Apex.Desktop.Services
 {
@@ -29,6 +30,8 @@ namespace Apex.Desktop.Services
     /// <summary>Konfiguracja aplikacji (plik apex.config.json w katalogu danych).</summary>
     public sealed class HostConfig
     {
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public NavalReadOptions? NavalRead { get; set; }
         public int HttpPort { get; set; } = 5077;
         public int BridgeTcpPort { get; set; } = 5078;
         public string PairingKey { get; set; } = "";
@@ -82,7 +85,9 @@ namespace Apex.Desktop.Services
             HostConfig cfg;
             if (File.Exists(Path_))
             {
-                try { cfg = JsonSerializer.Deserialize<HostConfig>(File.ReadAllText(Path_), Json)
+                try { string raw = File.ReadAllText(Path_);
+                    NavalAccessPolicy.ValidateRawConfig(raw);
+                    cfg = JsonSerializer.Deserialize<HostConfig>(raw, Json)
                     ?? throw new InvalidDataException("Pusty obiekt konfiguracji."); }
                 catch (JsonException ex)
                 {
