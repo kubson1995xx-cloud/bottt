@@ -1,4 +1,11 @@
-# Task8A — rzeczywista paczka Linux, niezależny review w toku
+# Task8A — paczka Linux istnieje, poprawki weryfikatora w toku
+
+## Werdykt niezależnego review: REQUEST CHANGES
+Raport `task-8a-delivery-review.md` zgłosił **3 Important, 0 Critical** w nowym weryfikatorze: re-manifested private-map/cache/replay payloads, unlisted case-alias w nested/outer inventory i niespójne frontend TAP log/hash/count references. Copy-only probes potwierdziły luki; review potwierdził też rzeczywisty czysty ZIP, jego SHA/CRC/inventory i zachowane testy. Nie stwierdzono tych zanieczyszczeń w obecnej paczce.
+
+Fix round1 jest aktywny (`task-8a-delivery-report.md` append), bez zmian finansowych/auth/sceny. Po RED→GREEN wymagany nowy ZIP z poprawionym shipped verifierem, zgodną source mapą i niezależnym readback. Stary ZIP zachować bez podmiany. Reuse testów tylko przy identycznych dowiedzionych runtime/assets; scoped re-review i parent acceptance nadal otwarte.
+
+Poniższe dowody kandydata są autentyczne, ale **nie zamykają odbioru weryfikatora**.
 
 ## Aktualny kandydat — poprzednie BLOCKED wpisy są historią
 Kod pakowania `ba29e41`. **ZIP istnieje, lecz Task8A nie jest jeszcze odebrany** — `task-8a-delivery-review.md` w toku. Wykonanie opisuje `task-8a-delivery-report.md` od124. Parent sprawdził383/383shippedinputhashes, rzeczywiste UnitTestResult i SHA/CRC ZIP-a.
