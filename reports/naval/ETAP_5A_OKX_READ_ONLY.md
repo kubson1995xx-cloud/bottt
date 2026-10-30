@@ -1,7 +1,7 @@
 # Task5A — adapter OKX EEA DEMO tylko do odczytu
 
 ## Status
-Kod `11fd206`, baza `52731cb`, gałąź `feature/apex-naval-command`. **Implementacja zakończona, niezależny review w toku; etap jeszcze nieodebrany.**
+Kod `11fd206`, baza `52731cb`, gałąź `feature/apex-naval-command`. **Review: REQUEST_CHANGES — 6 Important i 1 Minor odtworzone na końcowym DLL. Etap NIEODEBRANY.** Raport `task-5a-okx-read-review.md` wykazał: pomijanie wspólnego UID quota przy bootstrap różnych bindings, brak wykrycia konfliktu pending ordId w stronicowaniu, ignorowanie actual tradeQuoteCcy w diagnostyce, porównanie cash/bills z różnych interwałów, cichą utratę precyzji derived decimal i malformed Unicode wymykający się Failed-read contract. Minor dotyczy pending Limit=1 z pustą stroną. Brak Critical i ujawnionego write/Core authority bypass. W toku jedna fala poprawek z nowymi behavioral regresjami, następnie wymagany scoped re-review. Zachowane 105 zielonych testów nie obejmowały tych przypadków.
 
 Nowa biblioteka `src/Apex.Adapters.Okx/` jest odłączona od Core, Desktop, backtestera i brokera. Nie ma consumer/solution registration, kluczy, magazynu sekretów, order writes ani nowej authority. Dotychczasowy polski panel i cTrader pozostają bez zmian.
 
