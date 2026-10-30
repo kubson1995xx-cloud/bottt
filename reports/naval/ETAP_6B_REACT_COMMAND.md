@@ -1,6 +1,9 @@
 # Task6B — pięć podłączonych widoków NAVAL COMMAND, kandydat
 
-## Status
+## Aktualny fix round1
+**Kod `f7c6595`, poprawki wykonane, scoped re-review w toku (`task-6b-fix1-review.md`). UI nadal NIEODEBRANE do werdyktu.** Zsynchronizowano stronę i exact reservation IDs listy/diagramu, wspólną selekcję, skip-focus i UNKNOWN przy braku checkpointu; README poprawiony. Parent wykonał retained verifier exit0: **36/36 frontend**, **3/3 build**, **6/6 actual host consumers**, **12/12 artifact copies** i **72 named browser records / 0 failed** na nowych JS/CSS i exact final published DLL. Real P→H dziewięć rezerwacji (dziewiąta Uncertain), page2 i mouse/Enter/Space, skip, jawny BACK i FORWARD oraz unavailable UNKNOWN potwierdzone. Te72 rekordy nie są unit tests. Wcześniejsze845/845 backendu i root17/17 użyte ponownie przy niezmienionych zależnościach, nie oznaczają nowego fullrunu UI. Dowody `/home/ubuntu/.hermes/cache/scratch/apex-naval-task6b-fix1/`.
+
+## Historia kandydata
 Kod `6c0ff8c` plus integrated test update `e87e87b`, baza `5262aa2`. **UI jest zaimplementowane; NIEODEBRANE — review CHANGES REQUESTED, 1 Important.** I1 w `task-6b-react-command-review.md`: diagram floty nie podąża za paginacją listy i może pomijać widoczną niepewną rezerwację. Fix round1 w toku: wspólna strona/IDs listy i diagramu, adjacent skip-link/UNKNOWN counts oraz brakujący dowód browser back/forward; następnie scoped re-review. Brak Critical i nowego financial/auth defect. Pełny affected gate po authorized oczekiwaniu302 jest **845/845 PASS,0fail/skip**; parent wykonał retained verifier exit0 i potwierdził niezmienione źródła/artefakty frontendu. Poprzednie844/845 i obsolete404 pozostają wyłącznie historią. Root-firstBasic workflow i odrębne gate Windows/broker/R3F nie zostały zmienione.
 
 ## Dostawa

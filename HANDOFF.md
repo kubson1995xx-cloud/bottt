@@ -1,6 +1,11 @@
 # HANDOFF – APEX Trading AI (repozytorium `bottt`)
 
-## Bieżący punkt wznowienia Naval — Task6A-H ZAAKCEPTOWANY LOKALNIE / Task6B UI IMPLEMENTACJA
+## Bieżący punkt wznowienia Naval — Task6B FIX REVIEW / Task7 PRZYGOTOWANIE
+
+- **Stan odzyskany z repo, nie starszej rozmowy:** HEAD `f7c6595`, czyste worktree. H został już zaakceptowany lokalnie; pięć widoków React jest zbudowanych i podłączonych. Nie wznawiać Task6A ani implementacji UI od zera. Niższe stare wpisy o aktywnym fix workerze są historią.
+- **Task6B fix round1 zakończony, scoped re-review W TOKU:** `sa-0-e7293c9c`, raport `task-6b-fix1-review.md`, diff `review-d5829c7..f7c6595.diff`. Parent wykonał retained verifier exit0: frontend36PASS/build3PASS/newhost6PASS,12artifactcopies, final-browser72records/0fail. Pełne845/845 jest reused przy niezmienionym backendzie, nie nowym fullrunem zmienionego UI. Czekamy na werdykt I1/M1/M2 i back/forward proof; konto/broker niepodłączone.
+- **Task7 przygotowanie briefu, bez kodu/instalacji:** `sa-0-c804974f`, `task-7-naval-scene-brief.md`; lazy R3F/Three tylko na zaakceptowanych faktach, SVG/list/fallback i EmergencyStop niezależne. Przed implementacją wymagany zakres i rzeczywisty offline dependency gate, nie udawane animacje handlu.
+- **Dostęp modelu sprawdzony:** pierwsze konto Codex rate-limited; drugie aktywne, realny `gpt-6.1-sol/openai-codex` probe zwrócił `CODEX_READY`. Bez OpenRouter/provider fallback. Po wyczerpaniu całej dozwolonej puli zachować stan i zgłosić blokadę, nie ukrywać jej zmianą dostawcy.
 
 - Zaakceptowane źródła badań: `43d5bbf` na `feature/apex-naval-command`. Task1–2 zaakceptowane; Task3 dane/model SPOT i badania zakończone po review R1/R2. Zachowany latest affected gate122/122 PASS; nie powtarzać go bez zmienionej zależności.
 - **Raport rzeczywistych wyników `reports/naval/WYNIKI_TASK3.md`, maszynowy skrót `reports/naval/task3-summary.json`.** Parent niezależnie uzgodnił121/121actual kont cashflow→cash→tradenet i fee; zweryfikował hash raportu i budżet. Worker independentDecimal audit odtworzył również equity/DD/lowstress/roczne/per-symbol/CSV i489source/data/provenancehash.
