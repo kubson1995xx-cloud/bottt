@@ -1,7 +1,7 @@
 # Task6A-P — trwały dziennik publikacji OFFLINE
 
 ## Status
-Kod `c58390f`, baza `a8f1b8e` (zmiana względem poprzedniej bazy `1f53901` była wyłącznie w HANDOFF). **Implementacja zakończona, bounded independent review w toku; etap jeszcze nieodebrany.**
+Kod `c58390f`, baza `a8f1b8e` (zmiana względem poprzedniej bazy `1f53901` była wyłącznie w HANDOFF). **Review: CHANGES REQUIRED — 3 Important present-metadata validation defects, etap NIEODEBRANY.** Raport `task-6a-producer-review.md` odtworzył powtórzone fill facts, coverage final sprzeczne z dołączoną rezerwacją i niedozwolone mode/resultcode na prywatnych checksum-valid kopiach. Nie wykazano duplicate cash posting ani zwykłego Append generującego takie dane. W toku bounded fix round1 walidatora z actual owner/CLI regresjami; później wymagany scoped re-review. Wcześniejsze zielone wyniki pozostają dowodem kandydata, nie odbiorem brakujących przypadków.
 
 Dziennik jest nullable metadanymi tej samej trwałej transakcji EngineState, a nie drugą księgą finansową. Dostarcza typed facts/checkpoint, pasywny odłączony `ReadPublication()`, epoch/cursor/gap i retencję 512 batchy bez przycinania finansowych zobowiązań/dedupe. Stare authority bez journal nie ma rekonstruowanej historii; pierwszy rzeczywisty commit zakłada baseline. Historyczny RUNNING nie udaje bieżącej gotowości.
 
