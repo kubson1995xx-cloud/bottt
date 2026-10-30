@@ -169,7 +169,9 @@ public sealed class WindowsPrivateDataTests
     {
         using var f = new PrivateFixture();
         string path = kind switch {
-            "relative" => System.IO.Path.GetRelativePath(Environment.CurrentDirectory, System.IO.Path.Combine(f.Root, "data")),
+            // GetRelativePath across runner D: and profile C: returns an absolute
+            // path, so use an unambiguously relative, unique path instead.
+            "relative" => ".\\apex-relative-" + Guid.NewGuid().ToString("N"),
             "traversal" => System.IO.Path.Combine(f.Root, "parent", "..", "data"),
             "ads" => System.IO.Path.Combine(f.Root, "data:stream"),
             "device" => "\\\\?\\" + System.IO.Path.Combine(f.Root, "data"),

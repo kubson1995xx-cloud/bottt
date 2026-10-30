@@ -64,9 +64,9 @@ namespace Apex.Desktop
             NavalRuntimeOptions? naval;
             try
             {
-                if (OperatingSystem.IsWindows()) privateData?.ValidateTree();
+                if (OperatingSystem.IsWindows()) privateData?.ValidateDirectories();
                 config = new ConfigStore(dataDir) { TrustedSyntheticComposition = trustedSyntheticComposition };
-                if (OperatingSystem.IsWindows()) privateData?.ValidateTree();
+                if (OperatingSystem.IsWindows()) privateData?.ValidateDirectories();
                 naval = NavalAccessPolicy.Load(config.Config.NavalRead);
             }
             catch (WindowsDataException ex)

@@ -14,7 +14,9 @@ namespace Apex.Desktop.Services;
 [SupportedOSPlatform("windows")]
 internal static class WindowsPathSecurity
 {
-    private const uint ReadControlAndAttributes = 0x00020080;
+    // Metadata-only handles do not participate in Windows file sharing checks.
+    // READ_DATA / LIST_DIRECTORY makes the no-delete-sharing lease effective.
+    private const uint ReadControlAndAttributes = 0x00020081;
     internal const string PathInvalid = "HOST_DATA_PATH_INVALID";
     internal const string PermissionsInvalid = "HOST_DATA_PERMISSIONS_INVALID";
     internal const string Unavailable = "HOST_DATA_UNAVAILABLE";

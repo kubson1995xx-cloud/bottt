@@ -125,12 +125,7 @@ internal sealed class WindowsPrivateDataLease : IDisposable
         if (disposed) throw new WindowsDataException(WindowsPathSecurity.Unavailable);
         try
         {
-            foreach (var item in held.Values)
-            {
-                using var current = WindowsPathSecurity.Open(item.Object.Path);
-                if (!current.SameIdentity(item.Object)) throw new WindowsDataException(WindowsPathSecurity.PathInvalid);
-                WindowsPathSecurity.Validate(current, item.Private);
-            }
+            ValidateDirectories();
             int count = 0;
             void Visit(string directory, int depth)
             {
@@ -158,6 +153,18 @@ internal sealed class WindowsPrivateDataLease : IDisposable
         }
         catch (WindowsDataException) { throw; }
         catch (Exception e) when (e is not OutOfMemoryException) { throw new WindowsDataException(WindowsPathSecurity.Unavailable); }
+    }
+    // Recheck the leased directories during startup without reopening the lock
+    // file we now exclusively own. Open() already checked every existing file.
+    internal void ValidateDirectories()
+    {
+        if (disposed) throw new WindowsDataException(WindowsPathSecurity.Unavailable);
+        foreach (var item in held.Values)
+        {
+            using var current = WindowsPathSecurity.Open(item.Object.Path);
+            if (!current.SameIdentity(item.Object)) throw new WindowsDataException(WindowsPathSecurity.PathInvalid);
+            WindowsPathSecurity.Validate(current, item.Private);
+        }
     }
     public void Dispose()
     {
