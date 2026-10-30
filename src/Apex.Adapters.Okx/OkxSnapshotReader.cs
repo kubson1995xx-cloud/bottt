@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Numerics;
 namespace Apex.Adapters.Okx;
 
 /// <summary>REST recapture is a detached, partial observation; never a recovery checkpoint or ledger.</summary>
@@ -36,11 +37,16 @@ public sealed class OkxSnapshotReader
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(caller, budget.Token);
         var ct = linked.Token; bool held = false;
         void CheckBudget() { ct.ThrowIfCancellationRequested(); if (client.Clock.GetUtcNow() - start >= TimeSpan.FromSeconds(120)) throw new OperationCanceledException(ct); }
-        void ReadFailure(string? error) { reasons.Add(error ?? "ReadFailed"); status = OkxCollectionStatus.Incomplete; if (coverage != OkxCoverage.Conflict) coverage = OkxCoverage.Gap; }
+        void ReadFailure(string? error)
+        {
+            reasons.Add(error ?? "ReadFailed"); status = OkxCollectionStatus.Incomplete;
+            if (error == "PendingOrderIdentityConflict") { coverage = OkxCoverage.Conflict; reasons.Add("SnapshotMoved"); }
+            else if (coverage != OkxCoverage.Conflict) coverage = OkxCoverage.Gap;
+        }
         async Task<PageCollection<T>> Pages<T>(string endpoint, OkxPageRequest query, Func<OkxPageRequest, CancellationToken, Task<OkxRead<T>>> read, Func<T, string> cursor, Func<T, DateTimeOffset?> ts, Func<T, DateTimeOffset?>? ft = null)
         {
             CheckBudget();
-            var p = await OkxReadPager.Collect(endpoint, query, async (q, t) => { CheckBudget(); return await read(q, t).ConfigureAwait(false); }, cursor, ts, ft, ct).ConfigureAwait(false);
+            var p = await OkxReadPager.Collect(endpoint, query, async (q, t) => { CheckBudget(); return await read(q, t).ConfigureAwait(false); }, cursor, ts, ft, ct, endpoint == "/api/v5/trade/orders-pending" ? cursor : null).ConfigureAwait(false);
             trace.AddRange(p.Trace); if (p.Error != null) ReadFailure(p.Error); return p;
         }
         try
@@ -97,10 +103,10 @@ public sealed class OkxSnapshotReader
             foreach (var fill in fills)
             {
                 var instrument = instruments.FirstOrDefault(i => i.InstId == fill.InstId);
-                if (!balanceCurrencies.Contains(fill.FeeCcy) || instrument != null && (!balanceCurrencies.Contains(instrument.BaseCcy) || !balanceCurrencies.Contains(instrument.QuoteCcy))) reasons.Add("MissingBalanceCurrency");
+                if (!balanceCurrencies.Contains(fill.FeeCcy) || instrument != null && !balanceCurrencies.Contains(instrument.BaseCcy) || !string.IsNullOrEmpty(fill.TradeQuoteCcy) && !balanceCurrencies.Contains(fill.TradeQuoteCcy)) reasons.Add("MissingBalanceCurrency");
             }
-            try { diagnostics = DiagnoseCash(balanceA, balanceB, bills, reasons); cashflows = DiagnoseFills(fills, bills, instruments, reasons); }
-            catch (OverflowException) { reasons.Add("DiagnosticArithmeticOverflow"); }
+            diagnostics = DiagnoseCash(balanceA, balanceB, bills, reasons);
+            cashflows = DiagnoseFills(fills, bills, instruments, reasons);
             CheckBudget(); return Result();
         }
         catch (OperationCanceledException)
@@ -136,10 +142,23 @@ public sealed class OkxSnapshotReader
             if (rows.Length == 0) reasons.Add("MissingBillsForCurrency");
             else
             {
-                sum = 0m; chain = true; foreach (var row in rows) sum = checked(sum + row.BalChg.Value);
-                for (int i = 1; i < rows.Length; i++) { if (rows[i - 1].Ts.Utc == rows[i].Ts.Utc) { chain = null; reasons.Add("AmbiguousBillChronology"); } else if (rows[i].Bal.Value != checked(rows[i - 1].Bal.Value + rows[i].BalChg.Value)) { chain = false; reasons.Add("BillChainMismatch"); } }
+                sum = 0m; chain = true; foreach (var row in rows) sum = Exact(sum, row.BalChg.Value, '+', reasons);
+                for (int i = 1; i < rows.Length; i++)
+                {
+                    if (rows[i - 1].Ts.Utc == rows[i].Ts.Utc) { chain = null; reasons.Add("AmbiguousBillChronology"); }
+                    else
+                    {
+                        var expected = Exact(rows[i - 1].Bal.Value, rows[i].BalChg.Value, '+', reasons);
+                        if (!expected.HasValue || !rows[i].Bal.Value.HasValue) chain = null;
+                        else if (rows[i].Bal.Value != expected) { chain = false; reasons.Add("BillChainMismatch"); }
+                    }
+                }
             }
-            decimal? difference = checked(last - first); if (difference.HasValue && sum.HasValue && difference != sum) reasons.Add("CashBillMismatch");
+            // History ends no later than preflight; these balances are captured afterward.
+            // Neither request/receive time nor uTime establishes shared event-sequence anchors.
+            // Keep the two deltas independent, even when they happen to be equal.
+            decimal? difference = Exact(last, first, '-', reasons);
+            reasons.Add("CashBillReconciliationUnavailable");
             output.Add(new(ccy, first, last, sum, difference, chain));
         }
         return output.ToImmutable();
@@ -154,18 +173,59 @@ public sealed class OkxSnapshotReader
             bool linked = bills.Any(b => b.BillId == fill.BillId && b.TradeId == fill.TradeId && b.OrdId == fill.OrdId && b.InstId == fill.InstId);
             if (!linked) reasons.Add("MissingFillBillLink");
             decimal? baseChange = null, quoteChange = null;
+            string? actualQuote = string.IsNullOrEmpty(fill.TradeQuoteCcy) ? null : fill.TradeQuoteCcy;
+            // Catalog quote metadata is not a conversion rate or settlement contract.
+            // Only the same, explicitly returned trading quote has established price units here.
+            bool knownQuoteUnits = actualQuote == instrument.QuoteCcy && instrument.TradeQuoteCcyList.Contains(actualQuote, StringComparer.Ordinal);
+            if (!knownQuoteUnits) reasons.Add("AmbiguousTradeQuoteSemantics");
             if (fill.Side is "buy" or "sell")
             {
                 baseChange = fill.Side == "buy" ? fill.FillSz.Value : -fill.FillSz.Value;
-                quoteChange = checked(fill.FillPx.Value * fill.FillSz.Value * (fill.Side == "buy" ? -1m : 1m));
-                if (fill.FeeCcy == instrument.BaseCcy) baseChange = checked(baseChange + fill.Fee.Value);
-                else if (fill.FeeCcy == instrument.QuoteCcy) quoteChange = checked(quoteChange + fill.Fee.Value);
-                else reasons.Add("ThirdCurrencyFee");
+                if (knownQuoteUnits)
+                {
+                    quoteChange = Exact(fill.FillPx.Value, fill.FillSz.Value, '*', reasons);
+                    if (fill.Side == "buy") quoteChange = -quoteChange; // Negation is exact for decimal's symmetric range.
+                }
+                if (fill.FeeCcy == instrument.BaseCcy) baseChange = Exact(baseChange, fill.Fee.Value, '+', reasons);
+                else if (fill.FeeCcy == actualQuote) quoteChange = Exact(quoteChange, fill.Fee.Value, '+', reasons);
+                else reasons.Add(actualQuote == null ? "FeeCurrencyRelationshipUnknown" : "ThirdCurrencyFee");
             }
             // A bill's fee is NOT added: it is a separate observation of the same economics.
-            output.Add(new(fill.InstId, fill.TradeId, instrument.BaseCcy, instrument.QuoteCcy, baseChange, quoteChange, fill.Fee.Value, fill.FeeCcy, linked));
+            output.Add(new(fill.InstId, fill.TradeId, instrument.BaseCcy, actualQuote, baseChange, quoteChange, fill.Fee.Value, fill.FeeCcy, linked));
         }
         foreach (var bill in bills.Where(b => b.Type == "2")) if (!fills.Any(f => f.BillId == bill.BillId && f.TradeId == bill.TradeId && f.OrdId == bill.OrdId && f.InstId == bill.InstId)) reasons.Add("MissingBillFillLink");
         return output.ToImmutable();
+    }
+
+    // checked(decimal) detects overflow, but still rounds/underflows. Work in exact
+    // coefficient/scale integers and construct a decimal only if no information is lost.
+    private static decimal? Exact(decimal? left, decimal? right, char operation, HashSet<string> reasons)
+    {
+        if (!left.HasValue || !right.HasValue) return null;
+        static (BigInteger N, int Scale) Parts(decimal value)
+        {
+            var bits = decimal.GetBits(value);
+            var n = (BigInteger)(uint)bits[0] | ((BigInteger)(uint)bits[1] << 32) | ((BigInteger)(uint)bits[2] << 64);
+            return (bits[3] < 0 ? -n : n, (bits[3] >> 16) & 255);
+        }
+        var a = Parts(left.Value); var b = Parts(right.Value);
+        int scale = operation == '*' ? a.Scale + b.Scale : Math.Max(a.Scale, b.Scale);
+        BigInteger n;
+        if (operation == '*') n = a.N * b.N;
+        else
+        {
+            var x = a.N * BigInteger.Pow(10, scale - a.Scale);
+            var y = b.N * BigInteger.Pow(10, scale - b.Scale);
+            n = operation switch { '+' => x + y, '-' => x - y, _ => throw new ArgumentOutOfRangeException(nameof(operation)) };
+        }
+        while (scale > 0 && n % 10 == 0) { n /= 10; scale--; }
+        var magnitude = BigInteger.Abs(n); var max = (BigInteger.One << 96) - 1;
+        if (scale > 28 || magnitude > max)
+        {
+            reasons.Add("DiagnosticArithmeticPrecisionLoss");
+            if (magnitude > max * BigInteger.Pow(10, scale)) reasons.Add("DiagnosticArithmeticOverflow");
+            return null;
+        }
+        return new decimal(unchecked((int)(uint)(magnitude & uint.MaxValue)), unchecked((int)(uint)((magnitude >> 32) & uint.MaxValue)), unchecked((int)(uint)((magnitude >> 64) & uint.MaxValue)), n.Sign < 0, (byte)scale);
     }
 }

@@ -134,9 +134,6 @@ public sealed class OkxEeaDemoReadClient : IAsyncDisposable
         var err = Validate(config.Rows[0]); if (err != null) return poison = err;
         baseline ??= config.Rows[0];
         validatedLane = lanes.GetOrAdd("uid:" + baseline.Uid, _ => new Lane());
-        await validatedLane.Gate.WaitAsync(ct).ConfigureAwait(false);
-        try { var next = Clock.GetUtcNow() + TimeSpan.FromMilliseconds(600); if (validatedLane.Next < next) validatedLane.Next = next; }
-        finally { validatedLane.Gate.Release(); }
         bootstrapConfig = config; ready = true; return null;
     }
     private string? Validate(OkxAccountConfigDto c)
@@ -154,13 +151,14 @@ public sealed class OkxEeaDemoReadClient : IAsyncDisposable
         var uri = new Uri("https://eea.okx.com:443" + exact, UriKind.Absolute);
         if (uri.Host != "eea.okx.com" || uri.Scheme != "https" || uri.Port != 443 || uri.PathAndQuery != exact || uri.Fragment.Length != 0) return Fail<T>(endpoint, "InvalidRequest", priv, logicalStart);
         var lane = priv ? lanes.GetOrAdd("binding:" + lease!.BindingId, _ => new Lane()) : publicLane;
-        var uidLane = priv ? validatedLane : null;
+        // An expected identity can only RESTRICT bootstrap traffic. It is not account
+        // authority: baseline/ready are still set only after exact config validation.
+        var uidLane = priv ? validatedLane ?? lanes.GetOrAdd("uid:" + scope!.ExpectedUid, _ => new Lane()) : null;
         bool uidHeld = false;
         await lane.Gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // Keep both binding and UID serialization: a second client's bootstrap must not
-            // run beside an already validated read on the same credential binding.
+            // Always lock binding then UID, including bootstrap for different bindings.
             if (uidLane != null) { await uidLane.Gate.WaitAsync(ct).ConfigureAwait(false); uidHeld = true; }
             for (int attempt = 0; attempt < 3; attempt++)
             {
@@ -195,7 +193,9 @@ public sealed class OkxEeaDemoReadClient : IAsyncDisposable
                         try
                         {
                             hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-                            var parsed = OkxJson.Parse<T>(bytes, maxRows, attemptLinked.Token, endpoint == "/api/v5/public/instruments");
+                            var parsed = OkxJson.Parse<T>(bytes, maxRows, attemptLinked.Token,
+                                publicCatalog: endpoint == "/api/v5/public/instruments",
+                                singleton: endpoint is TimePath or ConfigPath or "/api/v5/account/balance" or "/api/v5/trade/order");
                             attemptLinked.Token.ThrowIfCancellationRequested();
                             if (Clock.GetUtcNow() - logicalStart >= TimeSpan.FromSeconds(30)) return Fail<T>(endpoint, "Timeout", priv, requestTime, hash);
                             if (Clock.GetUtcNow() - requestTime >= TimeSpan.FromSeconds(10)) throw new OperationCanceledException(attemptLinked.Token);

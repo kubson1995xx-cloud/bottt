@@ -25,7 +25,7 @@ public sealed class OkxRead<T>
 }
 public sealed record OkxPageTrace(string Endpoint, OkxPageRequest Query, int PageIndex, int RowCount, string? ResponseSha256, DateTimeOffset? EarliestTs, DateTimeOffset? LatestTs, DateTimeOffset? EarliestFillTime, DateTimeOffset? LatestFillTime, bool Exhausted, bool BoundaryReached, string? ErrorCode);
 public sealed record OkxCurrencyDiagnostic(string Currency, decimal? CashBefore, decimal? CashAfter, decimal? BillChange, decimal? CashDifference, bool? ChainConsistent);
-public sealed record OkxFillCashflowDiagnostic(string InstId, string TradeId, string BaseCurrency, string QuoteCurrency, decimal? BaseChange, decimal? QuoteChange, decimal? SignedFee, string FeeCurrency, bool BillLinked);
+public sealed record OkxFillCashflowDiagnostic(string InstId, string TradeId, string BaseCurrency, string? QuoteCurrency, decimal? BaseChange, decimal? QuoteChange, decimal? SignedFee, string FeeCurrency, bool BillLinked);
 [System.Text.Json.Serialization.JsonConverter(typeof(OkxSnapshotExportGuard))]
 public sealed class OkxReadSnapshot
 {

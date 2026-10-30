@@ -6,7 +6,7 @@ namespace Apex.Adapters.Okx;
 internal sealed class OkxParseException : Exception { internal OkxParseException() : base("InvalidPayload") { } }
 internal static class OkxJson
 {
-    internal static (string Code, ImmutableArray<T> Rows) Parse<T>(byte[] bytes, int? maxRows, CancellationToken ct, bool publicCatalog = false)
+    internal static (string Code, ImmutableArray<T> Rows) Parse<T>(byte[] bytes, int? maxRows, CancellationToken ct, bool publicCatalog = false, bool singleton = false)
     {
         using var doc = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 64 });
         Check(doc.RootElement, ct);
@@ -15,7 +15,7 @@ internal static class OkxJson
         if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) throw new OkxParseException();
         if (code != "0") return (code, []);
         if (maxRows.HasValue && data.GetArrayLength() > maxRows.Value) throw new OkxParseException();
-        if ((typeof(T) == typeof(OkxTimeDto) || typeof(T) == typeof(OkxAccountConfigDto) || typeof(T) == typeof(OkxBalanceDto) || typeof(T) == typeof(OkxOrderDto) && maxRows == 1) && data.GetArrayLength() != 1) throw new OkxParseException();
+        if (singleton && data.GetArrayLength() != 1) throw new OkxParseException();
         var rows = ImmutableArray.CreateBuilder<T>();
         foreach (var row in data.EnumerateArray()) { ct.ThrowIfCancellationRequested(); rows.Add((T)Row(typeof(T), row, publicCatalog)); }
         return (code, rows.ToImmutable());
@@ -23,15 +23,29 @@ internal static class OkxJson
     private static void Check(JsonElement value, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (value.ValueKind == JsonValueKind.Object) { var names = new HashSet<string>(StringComparer.Ordinal); foreach (var p in value.EnumerateObject()) { if (!names.Add(p.Name)) throw new OkxParseException(); Check(p.Value, ct); } }
+        if (value.ValueKind == JsonValueKind.Object) { var names = new HashSet<string>(StringComparer.Ordinal); foreach (var p in value.EnumerateObject()) { if (!names.Add(DecodeName(p))) throw new OkxParseException(); Check(p.Value, ct); } }
         else if (value.ValueKind == JsonValueKind.Array) foreach (var item in value.EnumerateArray()) Check(item, ct);
+        else if (value.ValueKind == JsonValueKind.String) _ = DecodeString(value);
+    }
+    // JsonDocument defers escaped UTF-16 validation until decoding. Convert only
+    // decoder failures, not arbitrary InvalidOperationException in transport/caller code.
+    private static string DecodeString(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.String) throw new OkxParseException();
+        try { return value.GetString()!; }
+        catch (InvalidOperationException) { throw new OkxParseException(); }
+    }
+    private static string DecodeName(JsonProperty property)
+    {
+        try { return property.Name; }
+        catch (InvalidOperationException) { throw new OkxParseException(); }
     }
     private static string? Str(JsonElement row, string key, bool required = false)
     {
         if (row.ValueKind != JsonValueKind.Object) throw new OkxParseException();
         if (!row.TryGetProperty(key, out var v) || v.ValueKind == JsonValueKind.Null) { if (required) throw new OkxParseException(); return null; }
         if (v.ValueKind != JsonValueKind.String) throw new OkxParseException();
-        var s = v.GetString(); if (required && string.IsNullOrEmpty(s)) throw new OkxParseException();
+        var s = DecodeString(v); if (required && string.IsNullOrEmpty(s)) throw new OkxParseException();
         if (s?.Any(char.IsControl) == true) throw new OkxParseException();
         return s;
     }
@@ -65,7 +79,7 @@ internal static class OkxJson
     private static ImmutableArray<string> Strings(JsonElement row, string name)
     {
         if (!row.TryGetProperty(name, out var a) || a.ValueKind != JsonValueKind.Array) throw new OkxParseException();
-        return a.EnumerateArray().Select(v => v.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(v.GetString()) ? v.GetString()! : throw new OkxParseException()).ToImmutableArray();
+        return a.EnumerateArray().Select(v => { var s = DecodeString(v); return !string.IsNullOrEmpty(s) ? s : throw new OkxParseException(); }).ToImmutableArray();
     }
     private static object Row(Type type, JsonElement r, bool publicCatalog)
     {
