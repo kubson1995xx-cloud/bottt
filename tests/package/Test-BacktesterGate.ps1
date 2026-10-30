@@ -230,6 +230,75 @@ Case 'NonemptyDestinationAndExistingZipRefused' {
     Reject { & (Join-Path $Source 'tools/windows/Zbuduj-APEX.ps1') -Wyjscie $dest }
     if ([IO.File]::ReadAllText($dest+'.zip') -ne 'KEEP') { throw 'Overwrote ZIP' }
 }
+# Task2: the only positive presentation is produced by the real committed replay CLI.
+# These are helper contracts, NOT a fake full release or runtime-host simulator.
+$real = Join-Path $Scratch 'real-presentation'
+Case 'presentation-build-real-export' { New-ApexPresentation -Source $Source -Scratch $real | Out-Null }
+$presentation = Join-Path $Scratch 'presentation-control'
+function Reset-Presentation {
+    if (Test-Path -LiteralPath $presentation) { Remove-Item -LiteralPath $presentation -Recurse -Force }
+    Copy-Item -LiteralPath (Join-Path $real 'presentation') -Destination $presentation -Recurse
+}
+function Presentation-Json([string]$name,$value) { Put (Join-Path $presentation $name) ($value | ConvertTo-Json -Depth 64) }
+function Rehash-Presentation {
+    $m=Get-Content -LiteralPath (Join-Path $presentation 'presentation.json') -Raw | ConvertFrom-Json
+    $m.publicationSha256=Hash (Join-Path $presentation 'naval-publication.json')
+    Presentation-Json 'presentation.json' $m
+}
+function Refuse-Presentation {
+    $reason='';try { Test-ApexPresentation $presentation | Out-Null } catch { $reason=$_.Exception.Message }
+    if ($reason -notlike 'Presentation *') { throw ('Presentation validator did not refuse at its contract: '+$reason) }
+}
+Case 'presentation-valid-real-export' {
+    Reset-Presentation
+    $m=Test-ApexPresentation $presentation
+    if ($m.schema -cne 'apex-presentation-v1' -or $m.scope.Id -cne 'presentation') { throw 'Wrong presentation metadata' }
+    if (@(Get-ChildItem -LiteralPath (Join-Path $real 'presentation') -Force).Count -ne 2 -or -not (Test-Path (Join-Path $real 'presentation-result.json')) -or -not (Test-Path (Join-Path $real 'presentation-authority'))) { throw 'Public/private export split missing' }
+}
+Case 'presentation-corrupt-rehashed-export' {
+    Reset-Presentation
+    $p=Get-Content (Join-Path $presentation 'naval-publication.json') -Raw|ConvertFrom-Json
+    $p.publication.journal.checkpoint.currentQuality='LIVE'
+    Presentation-Json 'naval-publication.json' $p; Rehash-Presentation; Refuse-Presentation
+}
+Case 'presentation-foreign-scope' {
+    Reset-Presentation
+    $m=Get-Content (Join-Path $presentation 'presentation.json') -Raw|ConvertFrom-Json
+    $m.scope.Accounts[0].AccountId='foreign'; Presentation-Json 'presentation.json' $m; Refuse-Presentation
+}
+Case 'presentation-live-label' {
+    Reset-Presentation
+    $p=Get-Content (Join-Path $presentation 'naval-publication.json') -Raw|ConvertFrom-Json
+    $p.temporalClassification='LIVE'; Presentation-Json 'naval-publication.json' $p; Rehash-Presentation; Refuse-Presentation
+}
+Case 'presentation-unlisted-file' { Reset-Presentation; Put (Join-Path $presentation 'authority.json') '{}'; Refuse-Presentation }
+foreach ($fault in @('scope-id-array','account-venue-array','account-environment-array','missing-file','wrong-hash','extra-metadata','missing-metadata','duplicate-metadata','case-metadata','invalid-hash','extra-scope','duplicate-account','live-account','extra-portfolio','credential','directory','case-file','malformed-export')) {
+    Case ('presentation-'+$fault) {
+        Reset-Presentation
+        $m=Get-Content (Join-Path $presentation 'presentation.json') -Raw|ConvertFrom-Json
+        switch ($fault) {
+            'scope-id-array' { $m.scope.Id=@('presentation'); Presentation-Json 'presentation.json' $m }
+            'account-venue-array' { $m.scope.Accounts[0].Venue=@('SYNTHETIC'); Presentation-Json 'presentation.json' $m }
+            'account-environment-array' { $m.scope.Accounts[0].Environment=@('Offline'); Presentation-Json 'presentation.json' $m }
+            'missing-file' { Remove-Item (Join-Path $presentation 'naval-publication.json') }
+            'wrong-hash' { $m.publicationSha256='0'*64; Presentation-Json 'presentation.json' $m }
+            'extra-metadata' { $m|Add-Member extra 'unapproved'; Presentation-Json 'presentation.json' $m }
+            'missing-metadata' { $m.PSObject.Properties.Remove('coreSha256'); Presentation-Json 'presentation.json' $m }
+            'duplicate-metadata' { $path=Join-Path $presentation 'presentation.json'; Put $path ([IO.File]::ReadAllText($path).Replace('"schema":',('"schema":"apex-presentation-v1","schema":'))) }
+            'case-metadata' { $path=Join-Path $presentation 'presentation.json'; Put $path ([IO.File]::ReadAllText($path).Replace('"schema":','"Schema":')) }
+            'invalid-hash' { $m.inputSha256=('A'*64); Presentation-Json 'presentation.json' $m }
+            'extra-scope' { $m.scope|Add-Member credential 'NOT_A_SECRET'; Presentation-Json 'presentation.json' $m }
+            'duplicate-account' { $m.scope.Accounts=@($m.scope.Accounts[0],$m.scope.Accounts[0]); Presentation-Json 'presentation.json' $m }
+            'live-account' { $m.scope.Accounts[0].Environment='Live'; Presentation-Json 'presentation.json' $m }
+            'extra-portfolio' { $m.scope.PortfolioId|Add-Member extra 'unapproved'; Presentation-Json 'presentation.json' $m }
+            'credential' { $p=Get-Content (Join-Path $presentation 'naval-publication.json') -Raw|ConvertFrom-Json; $p|Add-Member apiKey 'NOT_A_SECRET'; Presentation-Json 'naval-publication.json' $p; Rehash-Presentation }
+            'directory' { New-Item -ItemType Directory (Join-Path $presentation 'cache')|Out-Null }
+            'case-file' { Move-Item (Join-Path $presentation 'presentation.json') (Join-Path $presentation 'PRESENTATION.json') }
+            'malformed-export' { Put (Join-Path $presentation 'naval-publication.json') '{'; Rehash-Presentation }
+        }
+        Refuse-Presentation
+    }
+}
 [IO.File]::WriteAllText((Join-Path $Scratch 'results.json'),($results.ToArray()|ConvertTo-Json -Depth 6))
 $fail=@($results|Where-Object {-not $_.pass}).Count
 Write-Output "Controlled package gates: $($results.Count) cases, $fail failed; NOT product totals or native runtime proof"

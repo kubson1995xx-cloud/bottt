@@ -19,7 +19,7 @@ $commit=(& git -C $repo rev-parse HEAD);Sprawdz 'git HEAD'
 $dirty=[bool](& git -C $repo status --porcelain)
 $evidence=Join-Path $Wyjscie 'Weryfikacja';New-Item -ItemType Directory -Force -Path $evidence | Out-Null
 # External temporary install/test plumbing is never copied into the package.
-$scratch=Join-Path ([IO.Path]::GetTempPath()) ('apex-build-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $scratch|Out-Null
+$scratch=Join-Path ([IO.Path]::GetTempPath()) ('apex-build-'+[Guid]::NewGuid().ToString('N'));New-ApexPrivateBuildDirectory $scratch
 $emptyFeed=Join-Path $scratch 'empty-feed';New-Item -ItemType Directory -Path $emptyFeed|Out-Null
 $oldPackage=$env:APEX_PACKAGE_ROOT;$oldEvidence=$env:NAVAL_HOST_EVIDENCE_DIR
 $env:APEX_PACKAGE_ROOT=$null;$env:NAVAL_HOST_EVIDENCE_DIR=$null
@@ -84,6 +84,23 @@ try {
         & dotnet publish src/Apex.Desktop/Apex.Desktop.csproj -c Release --no-restore -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IsTransformWebConfigDisabled=true -o $desktop
     }
     Sprawdz 'Publish'
+    if ($Target -eq 'win-x64') {
+        # Genuine build-time CLI only. Authority/result/logs stay in private external scratch.
+        $presentationBuild=Join-Path $scratch 'presentation-build'
+        New-ApexPresentation -Source $repo -Scratch $presentationBuild | Out-Null
+        $restore=@('restore','tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; & dotnet @restore;Sprawdz 'Presentation Source restore'
+        & dotnet build tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-restore;Sprawdz 'Presentation Source build'
+        $oldPresentation=$env:APEX_PRESENTATION_TEST_DIRECTORY
+        try {
+            $env:APEX_PRESENTATION_TEST_DIRECTORY=Join-Path $presentationBuild 'presentation'
+            & dotnet test tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-build --no-restore --filter FullyQualifiedName~WindowsLocalSetupTests --logger 'trx;LogFileName=presentation.trx' --results-directory $evidence;Sprawdz 'Typed historical presentation'
+            Read-ApexTestCounts (Join-Path $evidence 'presentation.trx') | Out-Null
+        } finally { $env:APEX_PRESENTATION_TEST_DIRECTORY=$oldPresentation }
+        $presentationPublish=Join-Path $desktop 'presentation'
+        New-Item -ItemType Directory -Path $presentationPublish | Out-Null
+        foreach ($name in @('naval-publication.json','presentation.json')) { Copy-Item -LiteralPath (Join-Path $presentationBuild ('presentation/'+$name)) -Destination (Join-Path $presentationPublish $name) }
+        Test-ApexPresentation $presentationPublish | Out-Null
+    }
     $published=Test-ApexNavalAssets (Join-Path $desktop 'wwwroot/naval');if ($published.sha256 -cne $naval.sha256) { throw 'Publish/Naval parity failed' }
     foreach ($f in $rootHashes.Keys) { foreach ($tree in @('src/Apex.Desktop/wwwroot','src/Apex.Desktop/bin/Release/net8.0/wwwroot')) { if ((Hash (Join-Path $repo ($tree+'/'+$f))) -cne $rootHashes[$f]) { throw 'Original panel changed' } };if ((Hash (Join-Path $desktop ('wwwroot/'+$f))) -cne $rootHashes[$f]) { throw 'Published original panel differs' } }
     $ctrader=Join-Path $Wyjscie 'cTrader';New-Item -ItemType Directory -Path $ctrader|Out-Null
@@ -158,5 +175,6 @@ exec dotnet "$here/APEX-Desktop/ApexDesktop.dll" --data "$data" --no-browser
     Write-Host "Local package gates PASS: $Wyjscie.zip SHA256 $zipHash. No broker, Windows/Linux deployment or device acceptance."
 } finally {
     Pop-Location;$env:APEX_PACKAGE_ROOT=$oldPackage;$env:NAVAL_HOST_EVIDENCE_DIR=$oldEvidence
-    if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
+    # Keep private authority/result and failed evidence outside the immutable payload.
+    Write-Host ('Private build scratch retained outside package: '+$scratch)
 }

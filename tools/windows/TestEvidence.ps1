@@ -48,6 +48,117 @@ function Read-ApexFrontendCounts([string]$Path) {
     return [ordered]@{total=$values.tests;passed=$values.pass;failed=$values.fail;skipped=$values.skipped;cancelled=$values.cancelled;todo=$values.todo}
 }
 
+# Public presentation validation is deliberately not financial authority. The native Source
+# test and (in Task3) the host must ALSO use NavalPublicationReader.Parse on these bytes.
+function Read-ApexPresentationJson([string]$Path, [int]$MaximumBytes) {
+    if ((Get-Item -LiteralPath $Path).Length -gt $MaximumBytes) { throw 'Presentation JSON too large' }
+    $bytes=[IO.File]::ReadAllBytes($Path)
+    # The framework JSON XML reader retains duplicate keys on PS5.1 AND PS7.
+    # ConvertFrom-Json alone silently replaces them on Windows PowerShell.
+    $quotas=New-Object System.Xml.XmlDictionaryReaderQuotas
+    $quotas.MaxDepth=64; $quotas.MaxStringContentLength=$MaximumBytes; $quotas.MaxArrayLength=$MaximumBytes
+    $reader=[System.Runtime.Serialization.Json.JsonReaderWriterFactory]::CreateJsonReader($bytes,$quotas)
+    try { $doc=New-Object System.Xml.XmlDocument; $doc.Load($reader) } finally { $reader.Dispose() }
+    foreach ($node in $doc.SelectNodes('//*[@type="object"]')) {
+        $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($child in $node.ChildNodes) { if (-not $seen.Add($child.LocalName)) { throw 'Presentation duplicate JSON property' } }
+    }
+    return ([Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json)
+}
+function Assert-ApexPresentationFields($Value,[string[]]$Names) {
+    if ($null -eq $Value -or $Value -isnot [pscustomobject]) { throw 'Presentation object required' }
+    $actual=@($Value.PSObject.Properties.Name)
+    if ($actual.Count -ne $Names.Count) { throw 'Presentation unexpected/missing field' }
+    foreach ($n in $Names) { if ($actual -cnotcontains $n) { throw 'Presentation field spelling invalid' } }
+}
+function Test-ApexPresentation([string]$Directory) {
+    try {
+        $root=Get-Item -LiteralPath $Directory -Force
+        if (-not $root.PSIsContainer -or ($root.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Presentation directory invalid' }
+        $files=@(Get-ChildItem -LiteralPath $Directory -Force)
+        if ($files.Count -ne 2) { throw 'Presentation exact two-file inventory required' }
+        foreach ($f in $files) {
+            if ($f.PSIsContainer -or ($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -or @('presentation.json','naval-publication.json') -cnotcontains $f.Name) { throw 'Presentation unlisted/linked file' }
+        }
+        $m=Read-ApexPresentationJson (Join-Path $Directory 'presentation.json') 65536
+        Assert-ApexPresentationFields $m @('schema','publicationSha256','inputSha256','coreSha256','backtesterSha256','scope')
+        if ($m.schema -isnot [string] -or $m.schema -cne 'apex-presentation-v1') { throw 'Presentation schema invalid' }
+        foreach ($n in @('publicationSha256','inputSha256','coreSha256','backtesterSha256')) { if ($m.$n -isnot [string] -or $m.$n -cnotmatch '^[a-f0-9]{64}$') { throw 'Presentation hash invalid' } }
+        $path=Join-Path $Directory 'naval-publication.json'
+        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $m.publicationSha256) { throw 'Presentation publication hash mismatch' }
+        $e=Read-ApexPresentationJson $path 33554432
+        Assert-ApexPresentationFields $e @('schema','temporalClassification','sourceClockUtc','sourceFreshness','provenance','publication','contentSha256')
+        if ($e.schema -cne 'naval-shared-publication-export-v1' -or $e.temporalClassification -cne 'HISTORICAL_OFFLINE_CHECKPOINT' -or $e.sourceFreshness -cne 'UNKNOWN' -or $e.contentSha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Presentation historical export required' }
+        Assert-ApexPresentationFields $e.provenance @('inputSha256','coreSha256','backtesterSha256')
+        foreach ($n in @('inputSha256','coreSha256','backtesterSha256')) { if ($e.provenance.$n -isnot [string] -or $e.provenance.$n -cne $m.$n) { throw 'Presentation provenance mismatch' } }
+        Assert-ApexPresentationFields $m.scope @('Id','PublicationScopeId','PortfolioId','ConfigDigest','Accounts')
+        Assert-ApexPresentationFields $m.scope.PortfolioId @('PortfolioId','ReportingCurrency')
+        foreach ($n in @('Id','PublicationScopeId','ConfigDigest')) { if ($m.scope.$n -isnot [string] -or $m.scope.$n.Length -eq 0) { throw 'Presentation scope string required' } }
+        $j=$e.publication.journal; $c=$j.checkpoint
+        if ($m.scope.Id -cne 'presentation' -or $m.scope.PublicationScopeId -isnot [string] -or $m.scope.PublicationScopeId -cne $j.scopeId -or $m.scope.ConfigDigest -isnot [string] -or $m.scope.ConfigDigest -cnotmatch '^[a-fA-F0-9]{64}$' -or $m.scope.ConfigDigest -cne $c.configDigest -or $m.scope.PortfolioId.PortfolioId -isnot [string] -or $m.scope.PortfolioId.PortfolioId -cne $c.portfolioId.portfolioId -or $m.scope.PortfolioId.ReportingCurrency -isnot [string] -or $m.scope.PortfolioId.ReportingCurrency -cne $c.portfolioId.reportingCurrency) { throw 'Presentation foreign scope' }
+        if ($m.scope.Accounts -isnot [array] -or $m.scope.Accounts.Count -eq 0 -or $m.scope.Accounts.Count -ne @($c.accounts).Count) { throw 'Presentation account inventory invalid' }
+        $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        for ($i=0;$i -lt $m.scope.Accounts.Count;$i++) {
+            $a=$m.scope.Accounts[$i]; $b=$c.accounts[$i].account
+            Assert-ApexPresentationFields $a @('Venue','Environment','AccountId','QuoteCurrency')
+            foreach ($n in @('Venue','Environment','AccountId','QuoteCurrency')) { if ($a.$n -isnot [string] -or $a.$n.Length -eq 0) { throw 'Presentation account string required' } }
+            if ($a.Venue -cne 'SYNTHETIC' -or $a.Environment -cne 'Offline' -or $a.AccountId -isnot [string] -or $a.QuoteCurrency -isnot [string] -or $a.Venue -cne $b.venue -or $a.Environment -cne $b.environment -or $a.AccountId -cne $b.accountId -or $a.QuoteCurrency -cne $b.quoteCurrency -or -not $seen.Add(($a|ConvertTo-Json -Compress))) { throw 'Presentation foreign/non-synthetic account' }
+        }
+        if ($e.publication.classification -cne 'OFFLINE_SHARED_CAPITAL / SYNTHETIC_NOT_RESEARCH / NO_BROKER_AUTHORITY' -or $c.currentQuality -cne 'UNKNOWN' -or $c.runtimeReadiness -cne 'UNKNOWN' -or $c.coverage -cne 'UNKNOWN' -or $c.brokerState -cne 'NOT_CONFIGURED' -or $null -ne $c.brokerAccountId -or $null -ne $c.brokerEquity -or $null -ne $c.realizedPnl -or $null -ne $c.unrealizedPnl) { throw 'Presentation synthetic unknown semantics required' }
+        # Inspect ALL nested labels, not just the checkpoint's first account.
+        $pending=New-Object Collections.Generic.Queue[object];$pending.Enqueue($e)
+        while ($pending.Count -gt 0) {
+            $v=$pending.Dequeue()
+            if ($v -is [pscustomobject]) {
+                foreach ($p in $v.PSObject.Properties) {
+                    if ($p.Name -match '(?i)credential|password|secret|token|receipt|apiKey|privateKey|executionAuthority') { throw 'Presentation private authority forbidden' }
+                    if ($p.Name -ceq 'environment' -and $p.Value -cne 'Offline' -or $p.Name -ceq 'venue' -and $p.Value -cne 'SYNTHETIC') { throw 'Presentation non-synthetic label' }
+                    if ($null -ne $p.Value) { $pending.Enqueue($p.Value) }
+                }
+            } elseif ($v -is [array]) { foreach ($item in $v) { if ($null -ne $item) { $pending.Enqueue($item) } } }
+        }
+        return $m
+    } catch { if ($_.Exception.Message -like 'Presentation *') { throw }; throw 'Presentation invalid/unavailable' }
+}
+# Build-only helper: no exporter, authority, result, tests or logs are copied into publish.
+function New-ApexPrivateBuildDirectory([string]$Path) {
+    if (Test-Path -LiteralPath $Path) { throw 'Build scratch must be new' }
+    if ($env:OS -eq 'Windows_NT') {
+        $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $acl=New-Object Security.AccessControl.DirectorySecurity
+        $acl.SetSecurityDescriptorSddlForm(('O:'+ $sid +'G:'+ $sid +'D:P(A;OICI;FA;;;'+$sid+')(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'))
+        $dir=New-Object IO.DirectoryInfo($Path)
+        if ($PSVersionTable.PSVersion.Major -le 5) { $dir.Create($acl) } else { [IO.FileSystemAclExtensions]::Create($dir,$acl) }
+    } else {
+        [void][IO.Directory]::CreateDirectory($Path,[IO.UnixFileMode]448)
+    }
+}
+function New-ApexPresentation([string]$Source,[string]$Scratch) {
+    $Source=[IO.Path]::GetFullPath($Source); $Scratch=[IO.Path]::GetFullPath($Scratch)
+    New-ApexPrivateBuildDirectory $Scratch
+    $public=Join-Path $Scratch 'presentation';New-ApexPrivateBuildDirectory $public
+    New-ApexPrivateBuildDirectory (Join-Path $Scratch 'presentation-authority')
+    $input=Join-Path $Source 'tests/Apex.Backtester.Tests/fixtures/synthetic/naval-shared-replay-v1.json'
+    $cli=Join-Path $Source 'tools/Apex.Backtester/bin/Release/net8.0/Apex.Backtester.dll'
+    $core=Join-Path (Split-Path $cli) 'Apex.Core.dll'
+    # PS5 native stderr is an ErrorRecord; gate on actual exit, preserving private logs.
+    $old=$ErrorActionPreference
+    try {
+        $ErrorActionPreference='Continue'
+        & dotnet $cli naval-shared-replay --input $input --state-dir (Join-Path $Scratch 'presentation-authority') --output (Join-Path $Scratch 'presentation-result.json') --publication (Join-Path $public 'naval-publication.json') 1> (Join-Path $Scratch 'presentation-cli.stdout.log') 2> (Join-Path $Scratch 'presentation-cli.stderr.log')
+        $exit=$LASTEXITCODE
+    } finally { $ErrorActionPreference=$old }
+    if ($exit -ne 0) { throw 'Presentation producer failed; private scratch retained' }
+    $p=Read-ApexPresentationJson (Join-Path $public 'naval-publication.json') 33554432
+    foreach ($pair in @(@('inputSha256',$input),@('coreSha256',$core),@('backtesterSha256',$cli))) {
+        if ((Get-FileHash -LiteralPath $pair[1] -Algorithm SHA256).Hash.ToLowerInvariant() -cne $p.provenance.($pair[0])) { throw 'Presentation producer binary/input binding mismatch' }
+    }
+    $c=$p.publication.journal.checkpoint
+    $m=[ordered]@{schema='apex-presentation-v1';publicationSha256=(Get-FileHash -LiteralPath (Join-Path $public 'naval-publication.json') -Algorithm SHA256).Hash.ToLowerInvariant();inputSha256=$p.provenance.inputSha256;coreSha256=$p.provenance.coreSha256;backtesterSha256=$p.provenance.backtesterSha256;scope=[ordered]@{Id='presentation';PublicationScopeId=$p.publication.journal.scopeId;PortfolioId=[ordered]@{PortfolioId=$c.portfolioId.portfolioId;ReportingCurrency=$c.portfolioId.reportingCurrency};ConfigDigest=$c.configDigest;Accounts=@($c.accounts|ForEach-Object {[ordered]@{Venue=$_.account.venue;Environment=$_.account.environment;AccountId=$_.account.accountId;QuoteCurrency=$_.account.quoteCurrency}})}}
+    [IO.File]::WriteAllText((Join-Path $public 'presentation.json'),($m|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
+    return (Test-ApexPresentation $public)
+}
+
 # Exact bounded Vite inventory, also used on dist/staging/build/publish/extraction.
 function Test-ApexNavalAssets([string]$NavalRoot) {
     $root = [IO.Path]::GetFullPath($NavalRoot)
