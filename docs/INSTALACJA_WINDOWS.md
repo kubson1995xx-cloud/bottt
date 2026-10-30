@@ -1,5 +1,7 @@
 # APEX Trading AI DEMO — instalacja Windows 11
 
+> **Aktualizacja Naval / Task8A:** poniższy Windows autonomy jest dowodem historycznym, nie świeżym wydaniem Naval. Lokalny nowy ZIP Task8A ma target `linux-x64`; nie uruchomi cTrader Desktop. Nowy Windows Naval wymaga osobno zatwierdzonego natywnego CI i odbioru ACL/przeglądarki. Porównaj rzeczywisty SHA dostarczonego ZIP, nie nazwę ani stare wyniki. [Linux/VPS](NAVAL_DELIVERY_VPS.md).
+
 ## Gotowy pakiet — bez narzędzi programistycznych
 
 1. Pobierz `APEX Windows DEMO.zip` i odpowiadający mu plik `.zip.sha256` z artefaktu GitHub Actions **APEX Windows DEMO** dla gałęzi `apex-demo/autonomy`. Porównaj `sourceCommit` w pakiecie z SHA przekazanego przebiegu. Stary pakiet `926afaa` jest nieaktualny dla autonomii; nie używaj go zamiast nowego artefaktu.
@@ -22,6 +24,10 @@ Windows 11 x64 oraz lokalny Pepperstone cTrader Desktop z kontem **DEMO** są wy
 
 Nie ma pakietu AI Lab, uczenia modeli ani automatycznych aktualizacji.
 
+## Opcjonalny Naval (ręczna czynność administratora)
+
+Paczka nie zawiera kont, kluczy OKX, konfiguracji ani poświadczeń. NavalRead domyślnie off. Prywatne pliki i dokładny schemat opisuje [NAVAL_READ_PUBLICATION.md](NAVAL_READ_PUBLICATION.md). Operator loguje się natywnym Basic najpierw na `/`, dopiero potem `/naval/`; ReadOnly Bearer uprawnia tylko do dwóch GET API, nie do UI. Nie wklejaj sekretów do URL, JS, chatu lub argumentów. Awaryjny stary panel pozostaje dostępny dla Operatora również przy H503.
+
 ## Podłączenie konta
 
 Przejdź do [PODLACZENIE_PLATFORM.md](PODLACZENIE_PLATFORM.md), a następnie [PROCEDURA_DEMO_PEPPERSTONE.md](PROCEDURA_DEMO_PEPPERSTONE.md). Start aplikacji i mostu nie jest zgodą na handel. Read-only setup wymaga dedykowanego pustego DEMO hedging, rezerwuje ID/etykietę i wymaga skopiowania dokładnej etykiety do mostu oraz ponownego parowania. CoverageUnknown nie jest certyfikatem całej historii. Test wykonania wysyła rzeczywistą transakcję DEMO i wymaga osobnej zgody. Dopiero trwały PASS + świeże uzgodnienie pozwala zatwierdzić START; restart/reconnect pozostawia STOP.
@@ -32,11 +38,11 @@ Dane i logi znajdują się w `%LOCALAPPDATA%\APEX Trading AI\`. Nie usuwaj tego 
 
 ## Budowanie ze źródeł — tylko dla wykonawcy
 
-Gotowy pakiet nie wymaga tych czynności. Do budowy potrzebne są Git, .NET 8 SDK, Node.js 22+ i dostęp do NuGet/npm:
+Gotowy pakiet nie wymaga tych czynności. Do budowy potrzebne są Git, .NET 8 SDK, przetestowany Node.js 26 / npm11 (Vite wymaga co najmniej 20.19 lub 22.12, samo „22+” nie jest wystarczające) i dostęp do NuGet/npm:
 
 ```powershell
 winget install Microsoft.DotNet.SDK.8
-winget install OpenJS.NodeJS.LTS
+# Przygotuj Node26 / npm11; bez Node na maszynie odbiorcy.
 powershell -ExecutionPolicy Bypass -File tools\windows\Zbuduj-APEX.ps1 -Wyjscie "C:\APEX-build\wersja-1"
 ```
 

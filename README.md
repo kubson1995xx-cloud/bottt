@@ -1,7 +1,7 @@
 # APEX Trading AI (repozytorium `bottt`)
 
 Bot C#/.NET dla Windows 11 z polskim panelem. Główna ścieżka: lokalny cTrader Desktop (Pepperstone DEMO) + ApexBridge + APEX Desktop. MT5 jest dodatkiem bez odbioru MetaEditor/brokera; Native pozostaje tylko odczytem/redukcją w produkcji.
-Zaimplementowano sześć rodzin strategii, ale profil dopuszcza **wyłącznie IndexDipBuy / indeksy, Experimental, BUY-only**. Inne rodziny/klasy są nieaktywne; kryptowaluty całkowicie wykluczone.
+Zaimplementowano sześć rodzin strategii, ale profil dopuszcza **wyłącznie IndexDipBuy / indeksy, Experimental, BUY-only**. Inne rodziny/klasy są nieaktywne; kryptowaluty są wykluczone w ścieżce CFD/cTrader/MT5. Opcjonalny Naval to wyłącznie historyczny odczyt OFFLINE, nie bot wykonawczy OKX.
 
 > **Wydanie techniczne DEMO w trakcie końcowej weryfikacji.** Aktualne dowody i bramki odbioru: [wyniki testów](docs/WYNIKI_TESTOW.md) i [HANDOFF](HANDOFF.md).
 > **Brak potwierdzonej przewagi.** Nowe autentyczne badania: 64/64 prób zablokowanych na preflight danych, 0 ocenionych kont; n/net/koszty/PF/DD są niedostępne, nie zerowe ([Task4](reports/autonomy/task4-summary.md)). Raport 2005–2020 jest historyczny i nie waliduje bieżącej egzekucji/TP 3R.
@@ -35,7 +35,11 @@ Zaimplementowano sześć rodzin strategii, ale profil dopuszcza **wyłącznie In
 | `tests/Apex.AiLab.Tests` | Testy odłożonego modułu AI Lab (nie są uruchamiane przy budowie pakietu). |
 | `config`, `reports`, `docs` | Profil strategii, wyniki badań, dokumentacja. |
 
-## Szybki start (Windows 11, gotowy ZIP)
+## Naval — bieżąca dostawa lokalna
+
+Task7 zaakceptowany lokalnie na Linux; nie oznacza to odbioru urządzeń ani brokera. Task8A buduje świeży **linux-x64 / framework-dependent / ASP.NET Core 8** ZIP ze źródeł, osobno od historycznego Windows autonomy. Zobacz [instrukcję Linux/VPS i granice](docs/NAVAL_DELIVERY_VPS.md), [prywatny opcjonalny odczyt](docs/NAVAL_READ_PUBLICATION.md) oraz `apex-build.json` i `Weryfikacja/source-inputs.json` konkretnej paczki. Domyślnie brak NavalRead i kont. Nowego Naval Windows ZIP nie potwierdza stary run `40360216699`.
+
+## Szybki start (Windows 11, historyczny pakiet autonomy)
 
 Rozpakuj cały `APEX Windows DEMO.zip` do nowego folderu i otwórz `Uruchom APEX.cmd`. **Nie potrzebujesz SDK, Node ani Visual Studio.** Zainstaluj zgodny `cTrader/ApexBridge.algo`, zaloguj dedykowane Pepperstone DEMO hedging w lokalnym cTrader Desktop i sparuj most kluczem z panelu. Read-only setup rezerwuje zakres; skopiuj dokładną wygenerowaną etykietę do mostu i sparuj ponownie. Świeże ScopedReady nie oznacza pełnej historii brokera. Test wymaga osobnej zgody na rzeczywistą transakcję, a START ważnego trwałego PASS i kolejnego jawnego zatwierdzenia. Zacznij od [instalacji](docs/INSTALACJA_WINDOWS.md) i [procedury odbioru DEMO](docs/PROCEDURA_DEMO_PEPPERSTONE.md).
 
@@ -43,7 +47,7 @@ Rozpakuj cały `APEX Windows DEMO.zip` do nowego folderu i otwórz `Uruchom APEX
 
 ```powershell
 winget install Microsoft.DotNet.SDK.8
-winget install OpenJS.NodeJS.LTS
+# Wymagany przetestowany Node26 / npm11; zwykłe 22+ nie wystarcza dla Vite8
 powershell -ExecutionPolicy Bypass -File tools\windows\Zbuduj-APEX.ps1
 & ".\dist\Uruchom APEX.cmd"
 ```

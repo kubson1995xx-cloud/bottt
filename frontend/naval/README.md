@@ -2,6 +2,10 @@
 
 Production React19 / TypeScript6 / Vite8 read application, hosted only by the existing Desktop ASP.NET process at `/naval/`. This is **Operator-only served read application; ReadOnly API only**. No trade/order/settings writer, role expansion, second service, dev-server proxy or broker credential is included. **Task7 adds an optional lazy historical 3D Fleet/Radar slice, exercised locally through the compiled Desktop host; independent parent review/acceptance and target-device gates remain separate.** See the Task7 section below.
 
+## Current local delivery scope
+
+Task7 is parent-accepted locally/Linux at `7877354`, including the initialization retry correction. Earlier pending/R3F wording below is historical, not a remaining implementation task. Windows/private broker/device gates remain open. Task8A uses the existing frontend-first PowerShell builder (`-Target linux-x64 -Offline`) and tests the independently extracted actual packaged DLL. It does not install services or provision real credentials. See Polish `docs/NAVAL_DELIVERY_VPS.md`; Node26/npm11 are build-only, not runtime dependencies.
+
 ## Offline build
 
 From the repository root, using Node26 / npm11 and the approved genuine local cache:

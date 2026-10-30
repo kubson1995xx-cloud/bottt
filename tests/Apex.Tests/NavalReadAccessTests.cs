@@ -7,6 +7,8 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -97,7 +99,8 @@ public sealed class NavalReadAccessTests
         var root = await h.Send("/"); Assert.Equal(HttpStatusCode.OK, root.StatusCode);
         Assert.True((await root.Content.ReadAsStringAsync()).IndexOf(h.LegacyToken, StringComparison.Ordinal) >= 0);
         Assert.Equal(HttpStatusCode.NotFound, (await h.Send("/api/naval/snapshot", "legacy")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await h.Send("/api/status", "legacy")).StatusCode);
+        using (var status=JsonDocument.Parse(await (await h.Send("/api/status", "legacy")).Content.ReadAsStringAsync())) { Assert.Empty(status.RootElement.GetProperty("data").GetProperty("accounts").EnumerateArray()); Assert.False(status.RootElement.GetProperty("host").GetProperty("liveFeature").GetBoolean()); }
+        foreach(string asset in new[]{"app.js","decision-center.js","app.css"}) Assert.Equal(File.ReadAllBytes(Path.Combine(NavalProductionHost.DesktopDirectory,"wwwroot",asset)),await (await h.Send("/"+asset)).Content.ReadAsByteArrayAsync());
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, (await h.Send("/api/accounts/missing/command", "legacy", "POST")).StatusCode);
     }
     [Theory]
@@ -115,7 +118,7 @@ public sealed class NavalReadAccessTests
         if (fault == "corrupt") File.WriteAllText(h.CredentialPath, "{");
         if (fault == "unknown") { var n = JsonNode.Parse(File.ReadAllText(h.CredentialPath))!; n["unknown"] = true; File.WriteAllText(h.CredentialPath, n.ToJsonString()); }
         if (fault == "duplicate") File.WriteAllText(h.CredentialPath, File.ReadAllText(h.CredentialPath).Replace("\"schema\":", "\"schema\":\"naval-local-access-v1\",\"schema\":"));
-        if (fault == "permissions" && !OperatingSystem.IsWindows()) File.SetUnixFileMode(h.CredentialPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherRead);
+        if (fault == "permissions") { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(h.CredentialPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherRead); else { var info=new FileInfo(h.CredentialPath);var acl=info.GetAccessControl();acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid,null),FileSystemRights.Read,AccessControlType.Allow));info.SetAccessControl(acl); } }
         if (fault == "weak") File.WriteAllText(h.CredentialPath, File.ReadAllText(h.CredentialPath).Replace("ReadOnly", "Admin"));
         if (fault == "options") h.Configuration["NavalRead"]!["unexpected"] = true;
         await h.Start(expectExit: true); Assert.Equal(2, h.Process!.ExitCode);
@@ -249,6 +252,20 @@ public sealed class NavalReadAccessTests
 internal sealed class NavalProductionHost : IAsyncDisposable
 {
     internal static string Repo { get { var d = new DirectoryInfo(AppContext.BaseDirectory); while (d != null && !File.Exists(Path.Combine(d.FullName, "APEX.Trading.Demo.sln"))) d = d.Parent; return d!.FullName; } }
+    internal static string DesktopDirectory
+    {
+        get
+        {
+            string? package=Environment.GetEnvironmentVariable("APEX_PACKAGE_ROOT");
+            if (package==null) return Path.Combine(Repo,"src","Apex.Desktop","bin","Release","net8.0");
+            if (string.IsNullOrWhiteSpace(package) || !Path.IsPathFullyQualified(package)) throw new InvalidOperationException("Invalid explicit package root");
+            string root=Path.GetFullPath(package), desktop=Path.Combine(root,"APEX-Desktop");
+            var meta=JsonNode.Parse(File.ReadAllText(Path.Combine(root,"apex-build.json")))!;
+            string expected=OperatingSystem.IsWindows()?"win-x64":"linux-x64";
+            if (meta["schema"]?.GetValue<string>()!="apex-build-v2" || meta["target"]?.GetValue<string>()!=expected || (File.GetAttributes(root)&FileAttributes.ReparsePoint)!=0 || (File.GetAttributes(desktop)&FileAttributes.ReparsePoint)!=0 || !File.Exists(Path.Combine(desktop,OperatingSystem.IsWindows()?"ApexDesktop.exe":"ApexDesktop.dll"))) throw new InvalidOperationException("Package target/path refused; no repository fallback");
+            return desktop;
+        }
+    }
     internal string DirectoryPath { get; }
     internal string CredentialPath { get; }
     internal string ReadSecret { get; } = Secret(); internal string OperatorSecret { get; } = Secret();
@@ -270,9 +287,14 @@ internal sealed class NavalProductionHost : IAsyncDisposable
     internal async Task Start(bool expectExit = false)
     {
         File.WriteAllText(Path.Combine(DirectoryPath, "apex.config.json"), Configuration.ToJsonString());
-        var psi = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "/home/ubuntu/.dotnet/dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        psi.ArgumentList.Add(Path.Combine(Repo, "src", "Apex.Desktop", "bin", "Release", "net8.0", "ApexDesktop.dll")); psi.ArgumentList.Add("--data"); psi.ArgumentList.Add(DirectoryPath); psi.ArgumentList.Add("--no-browser");
+        string desktop=DesktopDirectory;
+        bool native=Environment.GetEnvironmentVariable("APEX_PACKAGE_ROOT")!=null && OperatingSystem.IsWindows();
+        string executable=native?Path.Combine(desktop,"ApexDesktop.exe"):(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH")??"dotnet");
+        var psi = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory=desktop };
+        if (!native) psi.ArgumentList.Add(Path.Combine(desktop,"ApexDesktop.dll"));
+        psi.ArgumentList.Add("--data"); psi.ArgumentList.Add(DirectoryPath); psi.ArgumentList.Add("--no-browser");
         Process = System.Diagnostics.Process.Start(psi)!; output = Process.StandardOutput.ReadToEndAsync(); error = Process.StandardError.ReadToEndAsync();
+        Evidence("process-"+Guid.NewGuid().ToString("N"),new {pid=Process.Id,executable,desktop,packaged=Environment.GetEnvironmentVariable("APEX_PACKAGE_ROOT")!=null,payloadSha256=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(desktop,native?"ApexDesktop.exe":"ApexDesktop.dll")))).ToLowerInvariant(),ownedPrivateData=true,noBrowser=true});
         for (int i = 0; i < 200; i++) { if (Process.HasExited) { if (expectExit) return; throw new InvalidOperationException("Production host exited before readiness (output withheld)"); } if (await Listening()) { if (expectExit) Assert.Fail("Enabled invalid config bound HTTP instead of exiting closed"); return; } await Task.Delay(50); }
         throw new TimeoutException("Production host readiness deadline");
     }
@@ -305,8 +327,8 @@ internal sealed class NavalProductionHost : IAsyncDisposable
     }
     internal async Task Stop() { if (Process != null) { if (!Process.HasExited) { Process.Kill(true); await Process.WaitForExitAsync(); } await Task.WhenAll(output!, error!); Assert.True(await SafeOutput(), "Production output contains secret material"); Process.Dispose(); Process = null; } }
     public async ValueTask DisposeAsync() { await Stop(); Client.Dispose(); if (System.IO.Directory.Exists(DirectoryPath)) System.IO.Directory.Delete(DirectoryPath, true); }
-    internal static void PrivateDirectory(string p) { System.IO.Directory.CreateDirectory(p); if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); }
-    internal static void PrivateFile(string p) { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
+    internal static void PrivateDirectory(string p) { System.IO.Directory.CreateDirectory(p); if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); else { var acl=new DirectorySecurity(); acl.SetAccessRuleProtection(true,false); var user=WindowsIdentity.GetCurrent().User!;acl.SetOwner(user);foreach(var sid in new[]{user,new SecurityIdentifier(WellKnownSidType.LocalSystemSid,null),new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null)})acl.AddAccessRule(new FileSystemAccessRule(sid,FileSystemRights.FullControl,InheritanceFlags.ContainerInherit|InheritanceFlags.ObjectInherit,PropagationFlags.None,AccessControlType.Allow));new DirectoryInfo(p).SetAccessControl(acl); } }
+    internal static void PrivateFile(string p) { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite); else { var acl=new FileSecurity();acl.SetAccessRuleProtection(true,false);var user=WindowsIdentity.GetCurrent().User!;acl.SetOwner(user);foreach(var sid in new[]{user,new SecurityIdentifier(WellKnownSidType.LocalSystemSid,null),new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null)})acl.AddAccessRule(new FileSystemAccessRule(sid,FileSystemRights.FullControl,AccessControlType.Allow));new FileInfo(p).SetAccessControl(acl); } }
     internal static string Hash(string s) => Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(s))).ToLowerInvariant();
     private static string Secret() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     private static int FreePort() { using var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); return ((IPEndPoint)l.LocalEndpoint).Port; }

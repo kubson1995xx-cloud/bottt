@@ -9,6 +9,7 @@ $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
 $listener.Start()
 $port = $listener.LocalEndpoint.Port
 $listener.Stop()
+# Logs/config stay outside the sealed package. TCP port0 is ephemeral, not disabled.
 $data = Join-Path ([IO.Path]::GetTempPath()) ('APEX smoke ' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $data | Out-Null
 $proc = $null

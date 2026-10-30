@@ -5,6 +5,7 @@ on:
     branches: ["claude/beautiful-mccarthy-9cibo1"]
     paths:
       - 'src/**'
+      - 'frontend/**'
       - 'tests/**'
       - 'tools/**'
       - 'docs/**'
@@ -24,8 +25,21 @@ jobs:
           dotnet-version: '8.0.x'
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '26'
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/naval/package-lock.json
+      - name: Record actual tool versions
+        shell: powershell
+        run: |
+          node --version
+          npm --version
+          dotnet --version
+          $PSVersionTable.PSVersion.ToString()
+      # Builder runs tests/package/Test-NavalPackage.ps1 on independently extracted ZIP
+      # (CRC, SHA readback, native EXE private ACL/roles/assets/restart/Emergency).
+      # No Naval branch push trigger; remote dispatch requires separate permission.
       # Package script hard-gates Core, platform, actual-source backtester and panel; reads counts from TRX.
       - name: Build and test complete DEMO package including backtester (PowerShell 5.1)
         shell: powershell
@@ -57,5 +71,8 @@ jobs:
           path: |
             ${{ runner.temp }}/APEX Windows DEMO/Weryfikacja/*.trx
             ${{ runner.temp }}/archive-tests/*.trx
+            ${{ runner.temp }}/APEX Windows DEMO-package-evidence/summary.json
+            ${{ runner.temp }}/APEX Windows DEMO-package-evidence/archive-readback.json
+            ${{ runner.temp }}/APEX Windows DEMO-package-evidence/packaged.trx
           if-no-files-found: warn
           retention-days: 30

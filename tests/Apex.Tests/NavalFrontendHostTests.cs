@@ -15,7 +15,12 @@ public sealed class NavalFrontendHostSerialCollection { }
 [Collection("NavalFrontendHostSerial")]
 public sealed class NavalFrontendHostTests
 {
-    private static string Webroot => Path.Combine(NavalProductionHost.Repo,"src","Apex.Desktop","bin","Release","net8.0","wwwroot");
+    [Fact] public void Frontend_ExplicitPackageRootCannotFallBackToRepo()
+    {
+        string? package=Environment.GetEnvironmentVariable("APEX_PACKAGE_ROOT");
+        if (package!=null) Assert.Equal(Path.GetFullPath(Path.Combine(package,"APEX-Desktop","wwwroot")),Webroot);
+    }
+    private static string Webroot => Path.Combine(NavalProductionHost.DesktopDirectory,"wwwroot");
     private static JsonNode Manifest => JsonNode.Parse(File.ReadAllText(Path.Combine(Webroot,"naval","build-manifest.json")))!;
     [Fact] public async Task Frontend_EnabledOperatorGetsBuildAndHashAssets()
     {
@@ -33,8 +38,8 @@ public sealed class NavalFrontendHostTests
     [Fact] public async Task Frontend_MissingBuildDoesNotBreakOldPanel()
     {
         // Isolate missing-index mutation from other frontend cases; no legacy/static source changes.
-        string p=Path.Combine(Webroot,"naval","index.html"),backup=p+".test-backup";File.Move(p,backup);
-        try{await using var h=new NavalProductionHost();await h.Start();var r=await h.Send("/naval/","operator");Assert.Equal(HttpStatusCode.ServiceUnavailable,r.StatusCode);string body=await r.Content.ReadAsStringAsync();Assert.Contains("NAVAL_UI_NOT_BUILT",body);Assert.Contains("href=\"/\"",body);Assert.DoesNotContain(Webroot,body);Assert.Equal(HttpStatusCode.OK,(await h.Send("/","operator")).StatusCode);}finally{File.Move(backup,p);}
+        string p=Path.Combine(Webroot,"naval","index.html"),backup=p+".test-backup";byte[] original=File.ReadAllBytes(p),inventory=File.ReadAllBytes(Path.Combine(Webroot,"naval","build-manifest.json"));File.Move(p,backup);
+        try{await using var h=new NavalProductionHost();await h.Start();var r=await h.Send("/naval/","operator");Assert.Equal(HttpStatusCode.ServiceUnavailable,r.StatusCode);string body=await r.Content.ReadAsStringAsync();Assert.Contains("NAVAL_UI_NOT_BUILT",body);Assert.Contains("href=\"/\"",body);Assert.DoesNotContain(Webroot,body);Assert.Equal(HttpStatusCode.OK,(await h.Send("/","operator")).StatusCode);}finally{File.Move(backup,p);Assert.Equal(original,File.ReadAllBytes(p));Assert.Equal(inventory,File.ReadAllBytes(Path.Combine(Webroot,"naval","build-manifest.json")));}
     }
     [Fact] public async Task Frontend_NoCatchAllOrSecretBootstrap()
     {

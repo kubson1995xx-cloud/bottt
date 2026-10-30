@@ -1,5 +1,7 @@
 # Naval — trwała publikacja OFFLINE (Task6A-P)
 
+> **Korekta aktualnego zakresu:** niższe wzmianki o H „nieodebranym/BLOCKED browser” są historią Task6A. H i React/Task7 zostały zaakceptowane **lokalnie/Linux** z prawdziwym native Basic cache i syntetycznym Emergency. Nie jest to odbiór Windows, prywatnego brokera ani wdrożenia. Task8A dodaje źródłowo związany pasywny pakiet Linux; [instrukcja i granice](NAVAL_DELIVERY_VPS.md). Domyślnie brak NavalRead i kont, stary lokalny panel nadal ma legacy bootstrap — nie jest anonimowym portalem ReadOnly. Wyłączone są dokumenty `/naval`, `/naval/` i H API, ale jawny URL pliku statycznego może nadal zostać obsłużony przez static middleware.
+
 ## Granica produktu
 
 Publikacja jest wyłącznie **OFFLINE_SHARED_CAPITAL / SYNTHETIC_NOT_RESEARCH / NO_BROKER_AUTHORITY**. To historyczny checkpoint wspólnego kapitału syntetycznego i ograniczony dziennik zaakceptowanych operacji. Nie jest brokerowym kontem, notowaniem live, księgą wyniku ani potwierdzeniem zlecenia. Nie nadaje uprawnień do START, wystawiania receiptów ani execution. Producent P nie dodaje auth ani UI; kandydat pasywnego hosta H jest opisany niżej i pozostaje **nieodebrany** do czasu prawdziwego testu przeglądarki.
