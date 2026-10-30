@@ -2,7 +2,7 @@ import {Component,useState} from 'react';import type {ReactNode} from 'react';
 import type {AccountId,ReadReservation,ReadFill,Batch} from '../read/contracts.ts';
 import {canonical} from '../read/decode.ts';
 export class DiagramBoundary extends Component<{children:ReactNode},{failed:boolean}>{state={failed:false};static getDerivedStateFromError(){return {failed:true};}render(){return this.state.failed?<p className="caption">Diagram unavailable — rzeczywiste zapisy pozostają w listach poniżej.</p>:this.props.children;}}
-export type ViewProps={state:import('../read/store.ts').NavalState;account:string};
+export type ViewProps={state:import('../read/store.ts').NavalState;account:string;visual:import('../scene/model.ts').VisualPrefs};
 export const matches=(a:AccountId,filter:string)=>!filter||canonical(a)===filter;
 export function Unknown({label,why}:{label:string;why:string}){return <div className="unknown"><strong>{label} <span>UNKNOWN</span></strong><p>{why}</p></div>;}
 export function RecordDetail({value}:{value:unknown}){return <details className="record-detail"><summary>Pełny zapis · historical synthetic</summary><pre>{JSON.stringify(value,null,2)}</pre></details>;}
