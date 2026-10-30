@@ -3,7 +3,7 @@
 ## Scoped review round1
 I1 i I2 ADDRESSED; I3 częściowo niezamknięty (`task-8a-fix1-review.md`). Jedyny residual Important I3-R1: parser pomija dodatkowy bare numbered TAP result `ok 59`, akceptując59recordsvsplan58 przy rehashed logach. Obecny ZIP ma autentyczne spójne wyniki; wada dotyczy fail-closed validatora.
 
-Fix round2 aktywny: tylko parser i regresje, exact original bare/described/positive controls, nowy helper/source-bound reseal bez zmiany runtime/servedbytes i bez fikcyjnych nowych unit/browserruns. Odbiór lokalnej dostawy nadal wstrzymany do scoped re-review.
+Fix round2 `0720f29` ma controlled150/150 i root18/18; oryginalne positive/bareextra/describedextra dają0/1/1 przez nowyshippedverifier. Parent383sourcehashes/CRC49files zweryfikowane. NowyZIP `/home/ubuntu/.hermes/cache/scratch/apex-task8a-fix2/run-20261030T153456Z-96b50242/APEX-Linux-Naval-fix2.zip`,1505312bytes,SHA`3d81314e45f26f1f437a183883d63deff153a6b2bfbb25aa03686a952721144a`. Runtime/servedbytes unchanged, stareunit/browsergates reusedbez nowychexecutionclaims. Scopedreview `task-8a-fix2-review.md` w toku, odbiór/durablecopy nadalotwarte.
 
 ## Werdykt niezależnego review: REQUEST CHANGES
 Raport `task-8a-delivery-review.md` zgłosił **3 Important, 0 Critical** w nowym weryfikatorze: re-manifested private-map/cache/replay payloads, unlisted case-alias w nested/outer inventory i niespójne frontend TAP log/hash/count references. Copy-only probes potwierdziły luki; review potwierdził też rzeczywisty czysty ZIP, jego SHA/CRC/inventory i zachowane testy. Nie stwierdzono tych zanieczyszczeń w obecnej paczce.
