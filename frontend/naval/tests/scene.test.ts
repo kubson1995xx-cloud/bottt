@@ -2,7 +2,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
 import {decodeSnapshot,decodeEvents,canonical} from '../src/read/decode.ts';import {createNavalStore,initialState} from '../src/read/store.ts';import type {NavalState} from '../src/read/store.ts';
 import {projectScene,stepSceneCue,sceneBudget} from '../src/scene/model.ts';import type {SceneInput} from '../src/scene/model.ts';
-const capture=()=>JSON.parse(readFileSync(new URL('./fixtures/README.md',import.meta.url),'utf8').split('```json\n')[1].split('```')[0]);
+const capture=()=>JSON.parse(readFileSync(new URL('./fixtures/README.md',import.meta.url),'utf8').split(/```json\r?\n/)[1].split('```')[0]);
 const fence={generation:1,requestGeneration:'scene-test',scopeSelector:null,hostEpoch:null,epoch:null,scopeId:null};
 function setup(seq='18'){const store=createNavalStore(),d=capture().snapshot;d.asOfSequence=seq;d.financialRevision=d.snapshotVersion=d.checkpoint.financialRevision=seq;d.cursor=Buffer.from(JSON.stringify(['naval-cursor-v1',d.epoch,d.scopeId,seq])).toString('base64url');store.dispatch({type:'begin',fence});store.dispatch({type:'hydrate',fence,snapshot:decodeSnapshot(d)});return store;}
 function input(state:NavalState):SceneInput{const r=state.snapshot?.checkpoint?.fleets[0].reservations??[];return {kind:'fleet',state,accountKey:'',fleet:'Alpha',asset:'*',page:0,visible:r.slice(0,8),totalCount:r.length,selectedId:r[0]?.reservation.id??null};}

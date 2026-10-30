@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parseCounter, parseDecimal, compareCounter, isZero } from '../src/read/decimal.ts';
 import { decodeSnapshot, decodeEvents, decodeCursor, ContractError } from '../src/read/decode.ts';
-const capture = () => JSON.parse(readFileSync(new URL('./fixtures/README.md',import.meta.url),'utf8').split('```json\n')[1].split('```')[0]);
+const capture = () => JSON.parse(readFileSync(new URL('./fixtures/README.md',import.meta.url),'utf8').split(/```json\r?\n/)[1].split('```')[0]);
 test('decodePreservesInt64AndDecimalStrings',()=>{
  assert.equal(parseCounter('9007199254740993'),'9007199254740993');
  assert.equal(compareCounter(parseCounter('9007199254740993'),parseCounter('9007199254740992')),1);

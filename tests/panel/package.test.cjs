@@ -19,6 +19,7 @@ test('Naval frontend is built before .NET and both locks are cached without offl
   const build = fs.readFileSync(path.join(root, 'tools/windows/Zbuduj-APEX.ps1'), 'utf8');
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/windows-demo.yml'), 'utf8');
   assert.ok(build.indexOf('npm --prefix frontend/naval ci') >= 0);
+  assert.ok(build.indexOf('npm ci @install') < build.indexOf('npm --prefix frontend/naval ci'), 'root-pinned linkedom must exist before frontend DOM tests');
   assert.ok(build.indexOf('npm --prefix frontend/naval run build') < build.indexOf('Invoke-ApexBuildDotnet build APEX.Trading.Demo.sln'));
   assert.match(build, /--offline/);
   assert.match(build, /--source \$emptyFeed/);

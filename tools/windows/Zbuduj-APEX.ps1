@@ -72,6 +72,8 @@ $rootHashes=@{};foreach ($f in @('index.html','app.js','app.css','decision-cente
 Push-Location $repo
 try {
     $install=@('--ignore-scripts','--no-audit','--no-fund');if ($Offline) { $install+=@('--offline') }
+    # Existing DOM tests consume root-pinned linkedom; install it before frontend tests.
+    & npm ci @install;Sprawdz 'Root test dependency npm ci'
     & npm --prefix frontend/naval ci @install;Sprawdz 'Clean Naval npm ci'
     & npm --prefix frontend/naval run typecheck;Sprawdz 'Naval strict typecheck'
     # npm test command is the same node runner, with an explicit TAP reporter for sealed evidence.
@@ -93,7 +95,6 @@ try {
         Invoke-ApexBuildDotnet test $suite[1] -c Release --no-build --no-restore --logger ('trx;LogFileName='+$suite[0]+'.trx') --results-directory $evidence;Sprawdz $suite[0]
     }
     $testCounts=[ordered]@{bot=(Read-ApexTestCounts (Join-Path $evidence 'bot.trx'));platform=(Read-ApexTestCounts (Join-Path $evidence 'platform.trx'));backtester=(Read-ApexTestCounts (Join-Path $evidence 'backtester.trx'))}
-    & npm ci @install;Sprawdz 'Root npm ci'
     & npm test;Sprawdz 'Root panel and packaging tests'
     & npm run check;Sprawdz 'Original panel JS syntax'
     try { & (Join-Path $repo 'tests/package/Test-BacktesterGate.ps1') -Source $repo -Scratch (Join-Path $scratch 'fixtures') }
