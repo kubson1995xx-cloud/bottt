@@ -1,5 +1,12 @@
 # Task6A-P — trwały dziennik publikacji OFFLINE
 
+## Końcowy odbiór zakresu offline
+**ZAAKCEPTOWANY OFFLINE**, źródła `f5f1715`, po scoped re-review `task-6a-fix1-review.md`: wszystkie 3 Important ADDRESSED, spec i quality PASS, bez nowych Critical/Important w poprawce. Parent wykonał retained re-review verifier exit0: 11 source hashes, 6 binary paths i20 CLI artifacts zgodne; actual TRX targeted53/53 i32/32 oraz full737/737 Core/Desktop i168/168 Backtester. Solution/SDK build0warnings/errors. Oryginalne wadliwe kopie odmawiają2, bez zmiany authority/marker i bez outputs; control/continuation/rebuild działają.
+
+To odbiór historycznego syntetycznego journal/export na Linux, nie auth/H/UI, Windows runtime, broker/WS/settlement lub resistance wobec złośliwego tego samego OS usera. Checksum nie jest authentication. Task6A-H może konsumować pasywną publikację bez writer lease, ale ma własny odbiór auth/bootstrap/HTTP/browser.
+
+Poniżej historia kandydata i wcześniejszych dowodów, podporządkowana tej dyspozycji.
+
 ## Status
 Kod `c58390f`, baza `a8f1b8e` (zmiana względem poprzedniej bazy `1f53901` była wyłącznie w HANDOFF). **Review: CHANGES REQUIRED — 3 Important present-metadata validation defects, etap NIEODEBRANY.** Raport `task-6a-producer-review.md` odtworzył powtórzone fill facts, coverage final sprzeczne z dołączoną rezerwacją i niedozwolone mode/resultcode na prywatnych checksum-valid kopiach. Nie wykazano duplicate cash posting ani zwykłego Append generującego takie dane. Poprawki zapisane w `f5f1715`, scoped re-review w toku (`task-6a-fix1-review.md`), etap nadal NIEODEBRANY. Parent wykonał retained verifier: exit0, 11 source hashes i20CLI artifacts zgodne. Końcowe targeted53/53journal i32/32command, full737/737CoreDesktop i168/168Backtester, solution/SDK0warnings/errors. Wszystkie trzy oryginalne kopie z review są odrzucane przez nowe built CLI exit2 bez zmiany authority/marker i bez result/publication; control nadal exit0. Zachowany poprzedni719/150 wynik jest historyczny, nie current gate. Wcześniejsze zielone wyniki nie pokrywały brakujących przypadków.
 
