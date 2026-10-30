@@ -21,7 +21,7 @@ Następnie trzeba wznowić istniejącą częściową implementację, nie budowa�
 
 Licencja1072bytes została pobrana z commitaprzypisanego oficjalnym npmmetadata do9.6.1 i zweryfikowana byte-for-byte. SHA`9c35b5de7b7493a707fffe4eb23bd2f7f449153c1911f7c6eefb4e591fd5349a`. Parent autoryzuje wyłącznie exactversion/manifest/notice/provenance-pinned builderfallback, nigdy generycznyMIT.
 
-Niezależny review poprawki/testów/provenance jest aktywny (`task-8a-unblock-review.md`). Pakowanie wznowione z częściowych15files (`task-8a-delivery-report.md` append): wdrożyć noticechecks, freshfullbuilder, actualZIP/extract/host/browser. Wszystkie finalproductbramki nadal nieodebrane do rzeczywistego wykonania i review.
+Niezależny unblock review **PASS**, `task-8a-unblock-review.md`, commit `4f07d7a`: spec/quality bez Critical/Important/minor. Parent zaakceptował wyłącznie test-only source-clock correction i version-bound notice, nie całość pakowania. Pakowanie wznowione z częściowych15files (`task-8a-delivery-report.md` append): noticechecks, freshfullbuilder, actualZIP/extract/host/browser. Finalproductbramki nadal nieodebrane do rzeczywistego wykonania i niezależnego packagingreview.
 
 ## Artefakty
 - `.superpowers/sdd/2026-10-29-apex-naval/task-8a-delivery-{brief,report}.md` — dokładne wymagania i raport BLOCKED.
