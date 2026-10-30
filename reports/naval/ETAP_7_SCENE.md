@@ -1,7 +1,7 @@
 # Task7 — opcjonalna historyczna scena floty i radaru 3D
 
 ## Status
-Kod `d13fbe2`, baza `5d7be4b`; implementacja zakończona, **niezależny review w toku, jeszcze NIEODEBRANA**. Początkowy blocker stagingu zamknięto przez dot-free hashed chunk names w Vite. Staging/host/auth/CSP pozostały bez zmian.
+Kod `d13fbe2`, baza `5d7be4b`; **review REQUEST CHANGES — 1 Important, scena NIEODEBRANA**. `task-7-naval-scene-review.md` odtworzył noWebGL2 initialization→restore→Retry na tym samym lane: unconfigured Fiber cleanup nie wywołuje callback, lane pozostaje poisoned/CLEANUP_FAILED i nie ponawia kontekstu. Fallback/dane pozostają bezpieczne, nie wykazano financial/auth defect. W toku bounded fixround1 cleanup i exactbrowserregression; adjacent M1 selectedpage2→same-sessionshrink test do uzupełnienia. Wcześniejsze51/4/6 i332browserrecords pozostają historycznym dowodem innych ścieżek, nie rozwiązaniem tego błędu. Początkowy blocker stagingu zamknięto przez dot-free hashed chunk names w Vite. Staging/host/auth/CSP pozostały bez zmian.
 
 Scena jest opcjonalnym lazy R3F/Three odczytem aktualnego historycznego checkpointu i zaakceptowanych zdarzeń P→H. Zachowuje wspólną stronę i reservation IDs/selection z listą i SVG, UNKNOWN i synthetic labels. Finite neutral publication cue nie jest broker fill, market scan, torpedo lub settlement/profit. Nie dodano writerów i authority.
 
@@ -14,7 +14,7 @@ Parent porównał **39/39 finalnych źródeł frontendu** i **16/16 kopii artefa
 - sześć final-byte Chrome runs: **332 check records /0 failed**, nie332unit tests;
 - genuine P→H publication cue, suppression hydrate/backlog/duplicate/gap/resync/restart, ninth-Uncertain parity/selection, context loss/import failure/noWebGL/reduced/minimal/hidden i fallback oraz cleanup.
 
-Środowisko: Chrome145/Linux WebGL2 **SwiftShader software rendering**, nie fizyczny GPU/telefon. Zmierzone maxima:1live context,36draw calls,752triangles,5GPU-resident geometries,7materials,0textures. Rzeczywisty teardown504.6–529.8ms;60s trace idle/interaction/idle bez stałej pętli idle, pendingRAF<=1. To pomiary określonego testu, nie gwarancja FPS lub pełny device benchmark. Wymiary/DPR/drawing buffer sprawdzone; canvas style mutations/CSP violations0. Cleanup:0testhosts/0isolatedcontexts/0privatecredentialdirectories.
+Środowisko: Chrome145/Linux WebGL2 **SwiftShader software rendering**, nie fizyczny GPU/telefon. Zmierzone maxima:1live context,36draw calls,752triangles,5GPU-resident geometries wmainrun /7wsupplementradar (7all-runmax),7materials,0textures. Rzeczywisty teardown504.6–529.8ms;60s trace idle/interaction/idle bez stałej pętli idle, pendingRAF<=1. To pomiary określonego testu, nie gwarancja FPS lub pełny device benchmark. Wymiary/DPR/drawing buffer sprawdzone; canvas style mutations/CSP violations0. Cleanup:0testhosts/0isolatedcontexts/0privatecredentialdirectories.
 
 ## Zależności i zakres
 Genuine official @types/three0.180.0/Fiber9.6.1/Three0.180.0 i20newclosure SRI, npm-generatedlock i44package cleanofflineCI/strictsmoke są dowodem prerequisite z pierwszej fazy, nie nowym wykonaniem. Original7pins i rootmanifesty bez zmian, ignore-scripts. Backend845/rootpanel17 i wcześniejszy EmergencyStop reused tylko dla niezmienionych źródeł; nie nazywać tego nowymi fullsuite tests sceny.
