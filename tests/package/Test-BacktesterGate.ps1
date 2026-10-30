@@ -17,7 +17,26 @@ function Hash([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Has
 Case 'TrxValid' { Write-Fixture 1 1 0; $c=Read-ApexTestCounts $fixture; if ($c.total -ne 1 -or $c.passed -ne 1) { throw 'Wrong counts' } }
 foreach ($v in @(@(0,0,0),@(1,0,1),@(2,2,0))) { $vv=$v; Case ('TrxRejected-'+($v -join '-')) { Write-Fixture $vv[0] $vv[1] $vv[2]; Reject { Read-ApexTestCounts $fixture } } }
 # Controlled files are never executed. This valid control must pass before negative mutations.
+$real=Join-Path $Scratch 'real-presentation'
+Case 'presentation-build-real-export' { New-ApexPresentation -Source $Source -Scratch $real | Out-Null }
 $package=[IO.Path]::GetFullPath((Join-Path $Scratch 'controlled-package'))
+# Task5 controlled layout contracts: dummy EXE/TRX are NEVER product evidence.
+# The presentation is the genuine producer output above; runtime metadata here is
+# an explicitly controlled parser fixture, not a claim of native publication.
+$windowsRuntimeText='{"runtimeOptions":{"tfm":"net8.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"8.0.0"},{"name":"Microsoft.AspNetCore.App","version":"8.0.0"}]}}'
+function Set-WindowsControl {
+    Copy-Item -LiteralPath (Join-Path $real 'presentation') -Destination (Join-Path $package 'APEX-Desktop/presentation') -Recurse
+    Put (Join-Path $package 'PRZECZYTAJ.md') 'CONTROLLED_NOT_PRODUCT'
+    Copy-Item $fixture (Join-Path $package 'Weryfikacja/windows.trx')
+    $meta.navalReadDefaultEnabled=$true;$meta.firstRunProfile='windows-local-presentation-v1';$meta.existingConfigPolicy='preserve';$meta.task7Acceptance='pending'
+    $meta.testCounts.windows=@{total=1;passed=1;failed=0}
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { $digest=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($windowsRuntimeText)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+    $script:wp=@{schema='apex-windows-publish-v1';rid='win-x64';sdkVersion='8.0.427';exeSha256=(Hash (Join-Path $package 'APEX-Desktop/ApexDesktop.exe'));runtimeConfigUtf8=$windowsRuntimeText;runtimeConfigSha256=$digest;assetsSha256=('3'*64);publishArgv=@('publish','src/Apex.Desktop/Apex.Desktop.csproj','-c','Release','--no-restore','-r','win-x64','--self-contained','true','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:PublishTrimmed=false','-p:PublishReadyToRun=false','-p:IsTransformWebConfigDisabled=true','-o','APEX-Desktop');runtimePacks=@(@{name='Microsoft.NETCore.App.Runtime.win-x64';version='8.0.0';sha512=[Convert]::ToBase64String([byte[]]::new(64))},@{name='Microsoft.AspNetCore.App.Runtime.win-x64';version='8.0.0';sha512=[Convert]::ToBase64String([byte[]]::new(64))});nativeLibraries=@(@{name='coreclr.dll';pack='Microsoft.NETCore.App.Runtime.win-x64';bytes=1;sha256=('4'*64)})}
+}
+function Windows-Control { Reset-Package }
+function Seal-Windows { Put (Join-Path $package 'Weryfikacja/windows-publish.json') ($wp|ConvertTo-Json -Depth 12);Seal }
+
 function Reset-Package {
     if (Test-Path $package) { Remove-Item -LiteralPath $package -Recurse -Force }
     foreach ($p in @('APEX-Desktop/ApexDesktop.exe','APEX-Desktop/wwwroot/index.html','APEX-Desktop/wwwroot/app.js','APEX-Desktop/wwwroot/decision-center.js','APEX-Desktop/wwwroot/app.css','cTrader/ApexBridge.algo','cTrader/ApexTradingAI.algo','Uruchom APEX.cmd','Dokumentacja/THIRD_PARTY_NAVAL.txt')) { Put (Join-Path $package $p) 'CONTROLLED_NOT_PRODUCT' }
@@ -44,8 +63,10 @@ function Reset-Package {
     Copy-Item (Join-Path $Source 'tools/windows/Smoke-Windows.ps1') (Join-Path $package 'Weryfikacja')
     foreach ($name in @('Sprawdz-Pakiet.ps1','TestEvidence.ps1')) { Copy-Item (Join-Path $Source ('tools/windows/'+$name)) $package }
     $script:meta=@{schema='apex-build-v2';sourceCommit=('a'*40);sourceDirty=$true;target='win-x64';deploymentMode='self-contained';requiredRuntime='included';demoOnly=$true;botTestsRun=$true;platformTestsRun=$true;backtesterTestsRun=$true;panelTestsRun=$true;frontendTestsRun=$true;frontendBuildVerified=$true;brokerTested=$false;windowsRuntimeTested=$false;navalReadDefaultEnabled=$false;task7Acceptance='accepted-local-linux';sourceInputsSha256=(Hash (Join-Path $package 'Weryfikacja/source-inputs.json'));rootLockSha256=('1'*64);navalLockSha256=('2'*64);navalManifestSha256=(Hash (Join-Path $naval 'build-manifest.json'));frontendResultsSha256=(Hash (Join-Path $package 'Weryfikacja/frontend-results.json'));tools=@{node='v26.8.1';npm='11.19.0';dotnet='8.0.427';powershell='7.6.9'};testCounts=@{bot=@{total=1;passed=1;failed=0};platform=@{total=1;passed=1;failed=0};backtester=@{total=1;passed=1;failed=0}}}
+    Set-WindowsControl
 }
 function Seal {
+    if ($meta.target -ceq 'win-x64') { Put (Join-Path $package 'Weryfikacja/windows-publish.json') ($wp|ConvertTo-Json -Depth 12) }
     Put (Join-Path $package 'apex-build.json') ($meta|ConvertTo-Json -Depth 8)
     $prefix=$package.TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar
     $lines=@(Get-ChildItem -LiteralPath $package -Force -Recurse -File | Where-Object {$_.Name -ne 'manifest.sha256'} | ForEach-Object { (Hash $_.FullName)+'  '+$_.FullName.Substring($prefix.Length).Replace('\','/') })
@@ -223,7 +244,9 @@ Case 'LinuxExplicitProductLayoutPositive' {
     Remove-Item (Join-Path $package 'APEX-Desktop/ApexDesktop.exe');Remove-Item (Join-Path $package 'Uruchom APEX.cmd')
     foreach ($p in @('APEX-Desktop/ApexDesktop.dll','APEX-Desktop/ApexDesktop.deps.json','APEX-Desktop/Apex.Core.dll','Uruchom APEX.sh')) { Put (Join-Path $package $p) 'CONTROLLED_NOT_PRODUCT' }
     Put (Join-Path $package 'APEX-Desktop/ApexDesktop.runtimeconfig.json') '{"runtimeOptions":{"tfm":"net8.0","frameworks":[{"name":"Microsoft.AspNetCore.App","version":"8.0.0"}]}}'
-    $meta.target='linux-x64';$meta.deploymentMode='framework-dependent';$meta.requiredRuntime='Microsoft.AspNetCore.App 8';Seal;Verify
+    $meta.target='linux-x64';$meta.navalReadDefaultEnabled=$false;$meta.Remove('firstRunProfile');$meta.Remove('existingConfigPolicy');$meta.testCounts.Remove('windows');$meta.deploymentMode='framework-dependent';$meta.requiredRuntime='Microsoft.AspNetCore.App 8'
+    foreach ($name in @('PRZECZYTAJ.md','Weryfikacja/windows.trx','Weryfikacja/windows-publish.json','APEX-Desktop/presentation')) { $p=Join-Path $package $name;if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } }
+    Seal;Verify
 }
 Case 'LinuxRequiredCoreAssembly' { Remove-Item (Join-Path $package 'APEX-Desktop/Apex.Core.dll'); Seal; Reject { Verify } }
 Case 'NonemptyDestinationAndExistingZipRefused' {
@@ -235,8 +258,7 @@ Case 'NonemptyDestinationAndExistingZipRefused' {
 }
 # Task2: the only positive presentation is produced by the real committed replay CLI.
 # These are helper contracts, NOT a fake full release or runtime-host simulator.
-$real = Join-Path $Scratch 'real-presentation'
-Case 'presentation-build-real-export' { New-ApexPresentation -Source $Source -Scratch $real | Out-Null }
+
 $presentation = Join-Path $Scratch 'presentation-control'
 function Reset-Presentation {
     if (Test-Path -LiteralPath $presentation) { Remove-Item -LiteralPath $presentation -Recurse -Force }
@@ -369,6 +391,33 @@ foreach ($casing in @('lower','upper','mixed','final-LF')) {
         Presentation-Json 'naval-publication.json' $p; Presentation-Json 'presentation.json' $m; Rehash-Presentation
         # Helper lexical/casing contract only, not a re-canonicalized typed export.
         if ($casing -eq 'final-LF') { Refuse-Presentation } else { Test-ApexPresentation $presentation | Out-Null }
+    }
+}
+Case 'WindowsTask5ShippedPositive' { Windows-Control;Seal-Windows;& (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package }
+foreach ($fault in @('missing-exe','missing-presentation','missing-runtime-proof','shared-framework','wrong-rid','wrong-default','wrong-profile','wrong-preserve','missing-windows-trx','zero-windows-trx','failed-windows-trx','skip-windows-trx','loose-dll','replay-exe','private-map','session-cache')) {
+    Case ('WindowsTask5-'+$fault) {
+        Windows-Control
+        switch ($fault) {
+            'missing-exe' { Remove-Item (Join-Path $package 'APEX-Desktop/ApexDesktop.exe') }
+            'missing-presentation' { Remove-Item (Join-Path $package 'APEX-Desktop/presentation/presentation.json') }
+            'shared-framework' { $wp.runtimeConfigUtf8=$windowsRuntimeText.Replace('includedFrameworks','frameworks');$sha=[Security.Cryptography.SHA256]::Create();try {$wp.runtimeConfigSha256=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($wp.runtimeConfigUtf8)))).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()} }
+            'wrong-rid' { $wp.rid='linux-x64' }
+            'wrong-default' { $meta.navalReadDefaultEnabled=$false }
+            'wrong-profile' { $meta.firstRunProfile='legacy' }
+            'wrong-preserve' { $meta.existingConfigPolicy='reset' }
+            'missing-windows-trx' { Remove-Item (Join-Path $package 'Weryfikacja/windows.trx') }
+            'zero-windows-trx' { Write-Fixture 0 0 0; Copy-Item $fixture (Join-Path $package 'Weryfikacja/windows.trx') }
+            'failed-windows-trx' { Write-Fixture 1 0 1; Copy-Item $fixture (Join-Path $package 'Weryfikacja/windows.trx') }
+            'skip-windows-trx' { Put (Join-Path $package 'Weryfikacja/windows.trx') ([IO.File]::ReadAllText($fixture).Replace("outcome='Passed'","outcome='NotExecuted'")) }
+            'loose-dll' { Put (Join-Path $package 'APEX-Desktop/arbitrary.dll') 'CONTROLLED_NOT_PRODUCT' }
+            'replay-exe' { Put (Join-Path $package 'APEX-Desktop/replay.exe') 'CONTROLLED_NOT_PRODUCT' }
+            'private-map' { Put (Join-Path $package 'APEX-Desktop/presentation/local-access.json') '{"schema":"naval-local-access-v1"}' }
+            'session-cache' { Put (Join-Path $package 'APEX-Desktop/wwwroot/cache/session.json') '{}' }
+        }
+        Seal-Windows
+        if ($fault -eq 'missing-runtime-proof') { Remove-Item (Join-Path $package 'Weryfikacja/windows-publish.json') }
+        Reject { & (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package }
+        Write-Fixture 1 1 0
     }
 }
 [IO.File]::WriteAllText((Join-Path $Scratch 'results.json'),($results.ToArray()|ConvertTo-Json -Depth 6))

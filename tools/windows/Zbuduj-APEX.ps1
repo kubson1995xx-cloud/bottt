@@ -13,19 +13,31 @@ if ($Target -eq 'win-x64' -and $env:OS -ne 'Windows_NT') { throw 'Windows target
 function Sprawdz([string]$co) { if ($LASTEXITCODE -ne 0) { throw "$co failed ($LASTEXITCODE); no accepted package" } }
 function Hash([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
 function Json([string]$p,$o) { [IO.File]::WriteAllText($p,($o|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false)) }
+# Select SDK8 for every CLI invocation, including nested producer/package gates.
+$scratch=Join-Path ([IO.Path]::GetTempPath()) ('apex-build-'+[Guid]::NewGuid().ToString('N'));New-ApexPrivateBuildDirectory $scratch
+$dotnetExecutable=(Get-Command dotnet).Source
+$selectedSdk=(& $dotnetExecutable --list-sdks | Where-Object { $_ -match '^8\.0\.[0-9]+ ' } | Select-Object -Last 1).Split(' ')[0]
+if ($selectedSdk -notmatch '^8\.0\.[0-9]+$') { throw 'Installed SDK8 required' }
+$sdkSelection=Join-Path $scratch 'sdk-selection';New-Item -ItemType Directory -Path $sdkSelection | Out-Null
+Json (Join-Path $sdkSelection 'global.json') @{sdk=@{version=$selectedSdk;rollForward='disable'}}
+function Invoke-ApexBuildDotnet {
+    $cliArgs=@($args|ForEach-Object { if ($_ -is [string] -and $_ -match '\.(sln|csproj|dll)$' -and -not [IO.Path]::IsPathRooted($_)) { Join-Path $repo $_ } else { $_ } })
+    Push-Location $sdkSelection
+    try { & $dotnetExecutable @cliArgs } finally { Pop-Location }
+}
 $node=(& node --version);Sprawdz 'Node';if ($node -notmatch '^v26\.') { throw 'Use tested Node26 toolchain' }
-$npm=(& npm --version);Sprawdz 'npm';$sdk=(& dotnet --version);Sprawdz 'SDK';if ($sdk -notmatch '^8\.') { throw '.NET8 SDK required' }
+$npm=(& npm --version);Sprawdz 'npm';$sdk=(Invoke-ApexBuildDotnet --version);Sprawdz 'SDK';if ($sdk -cne $selectedSdk) { throw '.NET8 SDK selection failed' }
 $commit=(& git -C $repo rev-parse HEAD);Sprawdz 'git HEAD'
 $dirty=[bool](& git -C $repo status --porcelain)
 $evidence=Join-Path $Wyjscie 'Weryfikacja';New-Item -ItemType Directory -Force -Path $evidence | Out-Null
 # External temporary install/test plumbing is never copied into the package.
-$scratch=Join-Path ([IO.Path]::GetTempPath()) ('apex-build-'+[Guid]::NewGuid().ToString('N'));New-ApexPrivateBuildDirectory $scratch
+$oldDotnetHost=$env:DOTNET_HOST_PATH;$env:DOTNET_HOST_PATH=$dotnetExecutable
 $emptyFeed=Join-Path $scratch 'empty-feed';New-Item -ItemType Directory -Path $emptyFeed|Out-Null
 $oldPackage=$env:APEX_PACKAGE_ROOT;$oldEvidence=$env:NAVAL_HOST_EVIDENCE_DIR
 $env:APEX_PACKAGE_ROOT=$null;$env:NAVAL_HOST_EVIDENCE_DIR=$null
 function Inputs {
     $names=@(& git -C $repo ls-files) + @(& git -C $repo ls-files --others --exclude-standard)
-    $items=@($names|Sort-Object -Unique|Where-Object { $_ -match '^(src/|tests/|tools/|frontend/|config/|docs/|reports/|\.github/|package.*\.json$|APEX.*\.sln$|README\.md$|Directory\.|global\.json$|NuGet\.)' }|ForEach-Object {
+    $items=@($names|Sort-Object -Unique|Where-Object { $_ -match '^(src/|tests/|tools/|frontend/|config/|docs/|reports/|\.github/|package.*\.json$|APEX.*\.sln$|README\.md$|PRZECZYTAJ\.md$|Directory\.|global\.json$|NuGet\.)' }|ForEach-Object {
         $p=Join-Path $repo $_
         if (-not (Test-Path -LiteralPath $p -PathType Leaf) -or ((Get-Item -LiteralPath $p -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Source input missing/link' }
         [ordered]@{path=$_;bytes=(Get-Item -LiteralPath $p).Length;sha256=(Hash $p)}
@@ -47,7 +59,15 @@ function NodeGate([string]$name,[string[]]$arguments) {
     if ($values.tests -le 0 -or $values.pass -ne $values.tests -or $values.fail+$values.skipped+$values.cancelled+$values.todo -ne 0) { throw 'Incomplete frontend tests' }
     return [ordered]@{total=$values.tests;passed=$values.pass;failed=$values.fail;log=($name+'.txt');logSha256=(Hash $log)}
 }
+$buildEvidence=$Wyjscie+'-build-evidence';New-Item -ItemType Directory -Path $buildEvidence | Out-Null
+Copy-Item (Join-Path $sdkSelection 'global.json') (Join-Path $buildEvidence 'sdk-global.json')
 $before=Inputs;Json (Join-Path $evidence 'source-inputs.json') $before
+Copy-Item (Join-Path $evidence 'source-inputs.json') $buildEvidence
+function Save-BinaryMap([string]$Name) {
+    $paths=@('src/Apex.Desktop/bin/Release/net8.0','tests/Apex.Tests/bin/Release/net8.0','tests/Apex.Windows.Tests/bin/Release/net8.0','tests/Apex.Backtester.Tests/bin/Release/net8.0','src/Platforms/cTrader/Tests/bin/Release/net8.0','tools/Apex.Backtester/bin/Release/net8.0')
+    $files=@(foreach ($path in $paths) { $full=Join-Path $repo $path;if (Test-Path -LiteralPath $full) { Get-ChildItem -LiteralPath $full -File -Recurse | ForEach-Object { [ordered]@{path=$_.FullName.Substring($repo.Length+1).Replace('\','/');bytes=$_.Length;sha256=(Hash $_.FullName)} } } })
+    Json (Join-Path $buildEvidence $Name) @{reason='Before executable gate';sdk=(Invoke-ApexBuildDotnet --version);files=$files}
+}
 $rootHashes=@{};foreach ($f in @('index.html','app.js','app.css','decision-center.js')) { $rootHashes[$f]=Hash (Join-Path $repo ('src/Apex.Desktop/wwwroot/'+$f)) }
 Push-Location $repo
 try {
@@ -61,45 +81,75 @@ try {
     $naval=Test-ApexNavalAssets (Join-Path $repo 'frontend/naval/dist')
     $stage=Test-ApexNavalAssets (Join-Path $repo 'src/Apex.Desktop/wwwroot/naval')
     if ($stage.sha256 -cne $naval.sha256) { throw 'dist/staging parity failed' }
-    if ($Offline) { & dotnet restore APEX.Trading.Demo.sln --source $emptyFeed -p:NuGetAudit=false;Sprawdz 'Cache-only solution restore' }
-    else { & dotnet restore APEX.Trading.Demo.sln;Sprawdz 'Solution restore' }
+    if ($Offline) { Invoke-ApexBuildDotnet restore APEX.Trading.Demo.sln --source $emptyFeed -p:NuGetAudit=false;Sprawdz 'Cache-only solution restore' }
+    else { Invoke-ApexBuildDotnet restore APEX.Trading.Demo.sln;Sprawdz 'Solution restore' }
     if ($Target -eq 'win-x64') {
-        $restore=@('restore','src/Apex.Desktop/Apex.Desktop.csproj','-r','win-x64','-p:SelfContained=true','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; & dotnet @restore;Sprawdz 'Windows runtime restore'
+        $restore=@('restore','src/Apex.Desktop/Apex.Desktop.csproj','-r','win-x64','-p:SelfContained=true','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; Invoke-ApexBuildDotnet @restore;Sprawdz 'Windows runtime restore'
     }
-    & dotnet build APEX.Trading.Demo.sln -c Release --no-restore;Sprawdz 'Solution Release build'
+    Invoke-ApexBuildDotnet build APEX.Trading.Demo.sln -c Release --no-restore;Sprawdz 'Solution Release build'
     $built=Test-ApexNavalAssets (Join-Path $repo 'src/Apex.Desktop/bin/Release/net8.0/wwwroot/naval');if ($built.sha256 -cne $naval.sha256) { throw 'Build/Naval parity failed' }
+    Save-BinaryMap 'before-product-tests.json'
     foreach ($suite in @(@('bot','tests/Apex.Tests/Apex.Tests.csproj'),@('platform','src/Platforms/cTrader/Tests/Apex.Platform.Tests.csproj'),@('backtester','tests/Apex.Backtester.Tests/Apex.Backtester.Tests.csproj'))) {
-        & dotnet test $suite[1] -c Release --no-build --no-restore --logger ('trx;LogFileName='+$suite[0]+'.trx') --results-directory $evidence;Sprawdz $suite[0]
+        Invoke-ApexBuildDotnet test $suite[1] -c Release --no-build --no-restore --logger ('trx;LogFileName='+$suite[0]+'.trx') --results-directory $evidence;Sprawdz $suite[0]
     }
     $testCounts=[ordered]@{bot=(Read-ApexTestCounts (Join-Path $evidence 'bot.trx'));platform=(Read-ApexTestCounts (Join-Path $evidence 'platform.trx'));backtester=(Read-ApexTestCounts (Join-Path $evidence 'backtester.trx'))}
     & npm ci @install;Sprawdz 'Root npm ci'
     & npm test;Sprawdz 'Root panel and packaging tests'
     & npm run check;Sprawdz 'Original panel JS syntax'
-    & (Join-Path $repo 'tests/package/Test-BacktesterGate.ps1') -Source $repo -Scratch (Join-Path $scratch 'fixtures')
-    & (Join-Path $repo 'tests/package/Test-NavalNotices.ps1') -Source $repo -Scratch (Join-Path $scratch 'notice-fixtures')
-    $desktop=Join-Path $Wyjscie 'APEX-Desktop'
-    if ($Target -eq 'linux-x64') {
-        & dotnet publish src/Apex.Desktop/Apex.Desktop.csproj -c Release --no-restore --self-contained false -p:UseAppHost=false -p:IsTransformWebConfigDisabled=true -o $desktop
-    } else {
-        & dotnet publish src/Apex.Desktop/Apex.Desktop.csproj -c Release --no-restore -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IsTransformWebConfigDisabled=true -o $desktop
-    }
-    Sprawdz 'Publish'
+    try { & (Join-Path $repo 'tests/package/Test-BacktesterGate.ps1') -Source $repo -Scratch (Join-Path $scratch 'fixtures') }
+    finally { $result=Join-Path $scratch 'fixtures/results.json';if (Test-Path $result) { Copy-Item $result (Join-Path $buildEvidence 'controlled-results.json') } }
+    try { & (Join-Path $repo 'tests/package/Test-NavalNotices.ps1') -Source $repo -Scratch (Join-Path $scratch 'notice-fixtures') }
+    finally { $result=Join-Path $scratch 'notice-fixtures/results.json';if (Test-Path $result) { Copy-Item $result (Join-Path $buildEvidence 'notice-results.json') } }
     if ($Target -eq 'win-x64') {
         # Genuine build-time CLI only. Authority/result/logs stay in private external scratch.
         $presentationBuild=Join-Path $scratch 'presentation-build'
         New-ApexPresentation -Source $repo -Scratch $presentationBuild | Out-Null
-        $restore=@('restore','tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; & dotnet @restore;Sprawdz 'Presentation Source restore'
-        & dotnet build tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-restore;Sprawdz 'Presentation Source build'
+        $restore=@('restore','tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; Invoke-ApexBuildDotnet @restore;Sprawdz 'Presentation Source restore'
+        Invoke-ApexBuildDotnet build tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-restore;Sprawdz 'Presentation Source build'
         $oldPresentation=$env:APEX_PRESENTATION_TEST_DIRECTORY
         try {
             $env:APEX_PRESENTATION_TEST_DIRECTORY=Join-Path $presentationBuild 'presentation'
-            & dotnet test tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-build --no-restore --filter FullyQualifiedName~WindowsLocalSetupTests --logger 'trx;LogFileName=presentation.trx' --results-directory $evidence;Sprawdz 'Typed historical presentation'
-            Read-ApexTestCounts (Join-Path $evidence 'presentation.trx') | Out-Null
+            Save-BinaryMap 'before-windows-source.json'
+            Invoke-ApexBuildDotnet test tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-build --no-restore --filter 'Gate=Source' --logger 'trx;LogFileName=windows.trx' --results-directory $evidence;Sprawdz 'All native Windows Source tests'
+            $testCounts.windows=Read-ApexTestCounts (Join-Path $evidence 'windows.trx')
         } finally { $env:APEX_PRESENTATION_TEST_DIRECTORY=$oldPresentation }
+        $restore=@('restore','src/Apex.Desktop/Apex.Desktop.csproj','-r','win-x64','-p:SelfContained=true','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; Invoke-ApexBuildDotnet @restore;Sprawdz 'Final Windows publish restore'
+    }
+    $desktop=Join-Path $Wyjscie 'APEX-Desktop'
+    if ($Target -eq 'linux-x64') {
+        Invoke-ApexBuildDotnet publish src/Apex.Desktop/Apex.Desktop.csproj -c Release --no-restore --self-contained false -p:UseAppHost=false -p:IsTransformWebConfigDisabled=true -o $desktop
+    } else {
+        $publishArgv=@('publish','src/Apex.Desktop/Apex.Desktop.csproj','-c','Release','--no-restore','-r','win-x64','--self-contained','true','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:PublishTrimmed=false','-p:PublishReadyToRun=false','-p:IsTransformWebConfigDisabled=true','-o',$desktop)
+        Invoke-ApexBuildDotnet @publishArgv
+    }
+    Sprawdz 'Publish'
+    if ($Target -eq 'win-x64') {
         $presentationPublish=Join-Path $desktop 'presentation'
         New-Item -ItemType Directory -Path $presentationPublish | Out-Null
         foreach ($name in @('naval-publication.json','presentation.json')) { Copy-Item -LiteralPath (Join-Path $presentationBuild ('presentation/'+$name)) -Destination (Join-Path $presentationPublish $name) }
         Test-ApexPresentation $presentationPublish | Out-Null
+        # Read actual unbundled publish intermediate, then retain its exact UTF8 bytes.
+        $runtimePath=Join-Path $repo 'src/Apex.Desktop/bin/Release/net8.0/win-x64/ApexDesktop.runtimeconfig.json'
+        $runtimeText=[IO.File]::ReadAllText($runtimePath);$runtime=$runtimeText|ConvertFrom-Json
+        $assetsPath=Join-Path $repo 'src/Apex.Desktop/obj/project.assets.json'
+        $assets=Get-Content -LiteralPath $assetsPath -Raw|ConvertFrom-Json
+        $packs=@();$nativeLibraries=@()
+        foreach ($framework in $runtime.runtimeOptions.includedFrameworks) {
+            $name=$framework.name+'.Runtime.win-x64';$version=$framework.version
+            $packDirectory=$null
+            foreach ($folder in $assets.packageFolders.PSObject.Properties.Name) {
+                $candidate=Join-Path $folder ($name.ToLowerInvariant()+'/'+$version)
+                if (Test-Path -LiteralPath $candidate -PathType Container) { $packDirectory=$candidate;break }
+            }
+            if (-not $packDirectory) { throw 'Actual Windows runtime pack not found' }
+            $packs+=@{name=$name;version=$version;sha512=[IO.File]::ReadAllText((Join-Path $packDirectory ($name.ToLowerInvariant()+'.'+$version+'.nupkg.sha512'))).Trim()}
+            $native=Join-Path $packDirectory 'runtimes/win-x64/native'
+            if (Test-Path -LiteralPath $native) { foreach ($file in Get-ChildItem -LiteralPath $native -File -Filter '*.dll') { $nativeLibraries+=@{name=$file.Name;pack=$name;bytes=$file.Length;sha256=(Hash $file.FullName)} } }
+        }
+        $publishArgv[1]=Join-Path $repo 'src/Apex.Desktop/Apex.Desktop.csproj'
+        Json (Join-Path $evidence 'windows-publish.json') ([ordered]@{schema='apex-windows-publish-v1';rid='win-x64';sdkVersion=$sdk;exeSha256=(Hash (Join-Path $desktop 'ApexDesktop.exe'));runtimeConfigUtf8=$runtimeText;runtimeConfigSha256=(Hash $runtimePath);assetsSha256=(Hash $assetsPath);publishArgv=$publishArgv;runtimePacks=$packs;nativeLibraries=$nativeLibraries})
+        Test-ApexWindowsPublish $desktop (Join-Path $evidence 'windows-publish.json') | Out-Null
+        Copy-Item (Join-Path $PSScriptRoot 'PRZECZYTAJ-WINDOWS.md') (Join-Path $Wyjscie 'PRZECZYTAJ.md')
     }
     $published=Test-ApexNavalAssets (Join-Path $desktop 'wwwroot/naval');if ($published.sha256 -cne $naval.sha256) { throw 'Publish/Naval parity failed' }
     foreach ($f in $rootHashes.Keys) { foreach ($tree in @('src/Apex.Desktop/wwwroot','src/Apex.Desktop/bin/Release/net8.0/wwwroot')) { if ((Hash (Join-Path $repo ($tree+'/'+$f))) -cne $rootHashes[$f]) { throw 'Original panel changed' } };if ((Hash (Join-Path $desktop ('wwwroot/'+$f))) -cne $rootHashes[$f]) { throw 'Published original panel differs' } }
@@ -162,6 +212,7 @@ exec dotnet "$here/APEX-Desktop/ApexDesktop.dll" --data "$data" --no-browser
     $after=Inputs
     if (($before|ConvertTo-Json -Depth 12 -Compress) -cne ($after|ConvertTo-Json -Depth 12 -Compress)) { throw 'Source inputs changed during build; preserve evidence, rebind before promotion' }
     $info=[ordered]@{schema='apex-build-v2';product='APEX Trading AI DEMO';sourceCommit="$commit".Trim();sourceDirty=$dirty;builtUtc=[DateTime]::UtcNow.ToString('o');target=$Target;deploymentMode=$mode;requiredRuntime=$runtime;demoOnly=$true;botTestsRun=$true;platformTestsRun=$true;backtesterTestsRun=$true;testCounts=$testCounts;panelTestsRun=$true;frontendTestsRun=$true;frontendBuildVerified=$true;brokerTested=$false;windowsRuntimeTested=$false;navalReadDefaultEnabled=$false;task7Acceptance='accepted-local-linux';sourceInputsSha256=(Hash (Join-Path $evidence 'source-inputs.json'));rootLockSha256=(Hash 'package-lock.json');navalLockSha256=(Hash 'frontend/naval/package-lock.json');navalManifestSha256=$naval.sha256;frontendResultsSha256=(Hash (Join-Path $evidence 'frontend-results.json'));tools=@{node=$node;npm=$npm;dotnet=$sdk;powershell=$PSVersionTable.PSVersion.ToString()};originalPanelSha256=$rootHashes}
+    if ($Target -eq 'win-x64') { $info.navalReadDefaultEnabled=$true;$info.firstRunProfile='windows-local-presentation-v1';$info.existingConfigPolicy='preserve';$info.task7Acceptance='pending' }
     Json (Join-Path $Wyjscie 'apex-build.json') $info
     $base=$Wyjscie.TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar
     $hashes=@(Get-ChildItem -LiteralPath $Wyjscie -Force -Recurse -File|Sort-Object FullName|ForEach-Object {(Hash $_.FullName)+'  '+$_.FullName.Substring($base.Length).Replace('\','/')})
@@ -171,10 +222,11 @@ exec dotnet "$here/APEX-Desktop/ApexDesktop.dll" --data "$data" --no-browser
     [IO.Compression.ZipFile]::CreateFromDirectory($Wyjscie,($Wyjscie+'.zip'),[IO.Compression.CompressionLevel]::Optimal,$false)
     $zipHash=Hash ($Wyjscie+'.zip');[IO.File]::WriteAllText(($Wyjscie+'.zip.sha256'),($zipHash+'  '+[IO.Path]::GetFileName($Wyjscie)+".zip`n"),[Text.Encoding]::ASCII)
     # Independent safe extraction, CRC and native packaged tests. Evidence remains external/sealed ZIP unchanged.
-    & (Join-Path $repo 'tests/package/Test-NavalPackage.ps1') -Source $repo -Pakiet ($Wyjscie+'-extracted') -Evidence ($Wyjscie+'-package-evidence') -Zip ($Wyjscie+'.zip')
+    Push-Location $sdkSelection
+    try { & (Join-Path $repo 'tests/package/Test-NavalPackage.ps1') -Source $repo -Pakiet ($Wyjscie+'-extracted') -Evidence ($Wyjscie+'-package-evidence') -Zip ($Wyjscie+'.zip') } finally { Pop-Location }
     Write-Host "Local package gates PASS: $Wyjscie.zip SHA256 $zipHash. No broker, Windows/Linux deployment or device acceptance."
 } finally {
-    Pop-Location;$env:APEX_PACKAGE_ROOT=$oldPackage;$env:NAVAL_HOST_EVIDENCE_DIR=$oldEvidence
+    Pop-Location;$env:DOTNET_HOST_PATH=$oldDotnetHost;$env:APEX_PACKAGE_ROOT=$oldPackage;$env:NAVAL_HOST_EVIDENCE_DIR=$oldEvidence
     # Keep private authority/result and failed evidence outside the immutable payload.
     Write-Host ('Private build scratch retained outside package: '+$scratch)
 }

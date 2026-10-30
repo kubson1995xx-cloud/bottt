@@ -13,7 +13,9 @@ foreach ($n in $all) { if (($n.Attributes -band [IO.FileAttributes]::ReparsePoin
 $meta = Get-Content -LiteralPath (Join-Path $base 'apex-build.json') -Raw | ConvertFrom-Json
 if ($meta.schema -cne 'apex-build-v2' -or $meta.target -cnotin @('win-x64','linux-x64') -or $meta.sourceCommit -cnotmatch '^[0-9a-f]{40}$' -or $meta.sourceDirty -isnot [bool]) { throw 'Missing/unknown current source or target metadata' }
 foreach ($flag in @('demoOnly','botTestsRun','platformTestsRun','backtesterTestsRun','panelTestsRun','frontendTestsRun','frontendBuildVerified')) { if ($meta.$flag -isnot [bool] -or $meta.$flag -ne $true) { throw "Pakiet bez potwierdzonych testow DEMO: $flag" } }
-foreach ($flag in @('brokerTested','windowsRuntimeTested','navalReadDefaultEnabled')) { if ($meta.$flag -isnot [bool] -or $meta.$flag -ne $false) { throw "Invalid sealed default flag: $flag" } }
+foreach ($flag in @('brokerTested','windowsRuntimeTested')) { if ($meta.$flag -isnot [bool] -or $meta.$flag -ne $false) { throw "Invalid sealed default flag: $flag" } }
+if ($meta.navalReadDefaultEnabled -isnot [bool] -or $meta.navalReadDefaultEnabled -ne ($meta.target -ceq 'win-x64')) { throw 'Invalid target-specific Naval default' }
+if ($meta.target -ceq 'win-x64' -and ($meta.firstRunProfile -cne 'windows-local-presentation-v1' -or $meta.existingConfigPolicy -cne 'preserve' -or $meta.tools.dotnet -notmatch '^8\.0\.')) { throw 'Invalid Windows first-run or SDK identity' }
 if ($meta.task7Acceptance -cnotin @('pending','accepted-local-linux')) { throw 'Missing Task7 scope' }
 foreach ($tool in @('node','npm','dotnet','powershell')) { if ([string]::IsNullOrWhiteSpace($meta.tools.$tool)) { throw 'Missing tool identity' } }
 if ($meta.tools.node -notmatch '^v26\.') { throw 'Untested Node line' }
@@ -21,7 +23,9 @@ $required=@('APEX-Desktop/wwwroot/index.html','APEX-Desktop/wwwroot/app.js','APE
 foreach ($name in @('INSTALACJA_WINDOWS.md','PROCEDURA_DEMO_PEPPERSTONE.md','PODLACZENIE_PLATFORM.md','INSTRUKCJA_PANELU.md','KONFIGURACJA.md','OGRANICZENIA_I_STATUS.md','WYNIKI_TESTOW.md','PRZEGLAD_BEZPIECZENSTWA.md','METODOLOGIA_TESTOW.md','BACKTESTER.md','NAVAL_READ_PUBLICATION.md','NAVAL_DELIVERY_VPS.md','NAVAL_OFFLINE.md','NAVAL_SHARED_OFFLINE.md','README.md','RAPORT_BADAN.md','NAVAL_FRONTEND.md')) { $required+=('Dokumentacja/'+$name) }
 if ($meta.target -ceq 'win-x64') {
     if ($meta.deploymentMode -cne 'self-contained' -or $meta.requiredRuntime -cne 'included') { throw 'Windows deployment metadata mismatch' }
-    $required+=@('APEX-Desktop/ApexDesktop.exe','Uruchom APEX.cmd')
+    $required+=@('APEX-Desktop/ApexDesktop.exe','Uruchom APEX.cmd','PRZECZYTAJ.md','APEX-Desktop/presentation/naval-publication.json','APEX-Desktop/presentation/presentation.json','Weryfikacja/windows-publish.json','Weryfikacja/windows.trx')
+    Test-ApexWindowsPublish (Join-Path $base 'APEX-Desktop') (Join-Path $base 'Weryfikacja/windows-publish.json') | Out-Null
+    Test-ApexPresentation (Join-Path $base 'APEX-Desktop/presentation') | Out-Null
 } else {
     if ($meta.deploymentMode -cne 'framework-dependent' -or $meta.requiredRuntime -cne 'Microsoft.AspNetCore.App 8') { throw 'Linux deployment metadata mismatch' }
     $required+=@('APEX-Desktop/ApexDesktop.dll','APEX-Desktop/Apex.Core.dll','APEX-Desktop/ApexDesktop.deps.json','APEX-Desktop/ApexDesktop.runtimeconfig.json','Uruchom APEX.sh')
@@ -30,7 +34,8 @@ if ($meta.target -ceq 'win-x64') {
     if (Test-Path $runtimePath) { $runtime=Get-Content $runtimePath -Raw|ConvertFrom-Json; if ($runtime.runtimeOptions.tfm -cne 'net8.0' -or @($runtime.runtimeOptions.frameworks|Where-Object {$_.name -ceq 'Microsoft.AspNetCore.App' -and $_.version -match '^8\.'}).Count -ne 1 -or $null -ne $runtime.runtimeOptions.includedFrameworks) { throw 'Not framework-dependent ASP.NET8' } }
 }
 foreach ($r in $required) { if (-not (Test-Path -LiteralPath (Join-Path $base $r) -PathType Leaf)) { throw "Brak pliku: $r" } }
-foreach ($suite in @('bot','platform','backtester')) {
+$suites=@('bot','platform','backtester');if ($meta.target -ceq 'win-x64') { $suites+=@('windows') }
+foreach ($suite in $suites) {
     $actual=Read-ApexTestCounts (Join-Path $base ('Weryfikacja/'+$suite+'.trx')); $declared=$meta.testCounts.$suite
     if ($null -eq $declared -or $declared.total -ne $actual.total -or $declared.passed -ne $actual.passed -or $declared.failed -ne $actual.failed) { throw "Test metadata does not match TRX: $suite" }
 }

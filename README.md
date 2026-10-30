@@ -1,5 +1,8 @@
 # APEX Trading AI (repozytorium `bottt`)
 
+> **Windows Naval / Task5:** format kandydata `APEX-NAVAL-COMMAND-Windows-x64.zip`; pełna instrukcja [PRZECZYTAJ](PRZECZYTAJ.md) i [Windows](docs/INSTALACJA_WINDOWS.md). Self-contained EXE, prywatne zewnętrzne dane, historyczna syntetyczna prezentacja i zachowane istniejące konfiguracje. Engineering candidate nie jest końcowym odbiorem: actual first-run/modal/default-shell/browser acceptance pozostają Task6, finalna dostawa Task7. Bez kont lub zgody na transakcje.
+
+
 Bot C#/.NET dla Windows 11 z polskim panelem. Główna ścieżka: lokalny cTrader Desktop (Pepperstone DEMO) + ApexBridge + APEX Desktop. MT5 jest dodatkiem bez odbioru MetaEditor/brokera; Native pozostaje tylko odczytem/redukcją w produkcji.
 Zaimplementowano sześć rodzin strategii, ale profil dopuszcza **wyłącznie IndexDipBuy / indeksy, Experimental, BUY-only**. Inne rodziny/klasy są nieaktywne; kryptowaluty są wykluczone w ścieżce CFD/cTrader/MT5. Opcjonalny Naval to wyłącznie historyczny odczyt OFFLINE, nie bot wykonawczy OKX.
 

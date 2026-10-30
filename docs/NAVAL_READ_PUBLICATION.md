@@ -1,5 +1,12 @@
 # Naval — trwała publikacja OFFLINE (Task6A-P)
 
+## Windows — nowy pusty katalog a konfiguracja istniejąca
+
+Kandydat Task5 Windows tworzy na **nowym/pustym** prywatnym katalogu profil `windows-local-presentation-v1`, Native Basic Operator i CurrentUser DPAPI. Ponowny podgląd: `ApexDesktop.exe --show-local-access`; bez hosta, rotacji i sekretów w URL/logach. `/?view=naval` wymaga dotychczasowego Operator Basic na root, dopiero potem stały redirect `/naval/`. Reader nadal ma tylko dwa GET API, nie dokumenty/JS/CSS. Istniejący config (także Naval-off) jest zachowany; Linux pozostaje domyślnie off. To nie anonimowy bootstrap ani nowa rola.
+
+Publiczne `presentation/naval-publication.json` i `presentation.json` pochodzą z rzeczywistego build-time eksportera syntetycznego. Tylko pierwsza inicjalizacja kopiuje je do prywatnych danych; nie ma runtime producenta/authority/kont ani automatycznego START. Checkpoint jest historyczny, broker `NOT_CONFIGURED`, gotowość/freshness `UNKNOWN`. Task5 smoke legacy nie stanowi odbioru first-run modalu/default-browser ani pięciu widoków — Task6. Instrukcje odzyskiwania danych/ACL i backupu są w root `PRZECZYTAJ.md` paczki.
+
+
 > **Korekta aktualnego zakresu:** niższe wzmianki o H „nieodebranym/BLOCKED browser” są historią Task6A. H i React/Task7 zostały zaakceptowane **lokalnie/Linux** z prawdziwym native Basic cache i syntetycznym Emergency. Nie jest to odbiór Windows, prywatnego brokera ani wdrożenia. Task8A dodaje źródłowo związany pasywny pakiet Linux; [instrukcja i granice](NAVAL_DELIVERY_VPS.md). Domyślnie brak NavalRead i kont, stary lokalny panel nadal ma legacy bootstrap — nie jest anonimowym portalem ReadOnly. Wyłączone są dokumenty `/naval`, `/naval/` i H API, ale jawny URL pliku statycznego może nadal zostać obsłużony przez static middleware.
 
 ## Granica produktu

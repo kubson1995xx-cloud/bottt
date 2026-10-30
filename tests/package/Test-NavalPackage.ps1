@@ -65,7 +65,7 @@ with zipfile.ZipFile(archive) as z:
         & $python $scriptPath $Zip $Pakiet (Join-Path $Evidence 'archive-readback.json')
         if ($LASTEXITCODE -ne 0) { throw 'Independent archive verification failed' }
     }
-    & (Join-Path $Source 'tools/windows/Sprawdz-Pakiet.ps1') -Pakiet $Pakiet
+    & (Join-Path $Pakiet 'Sprawdz-Pakiet.ps1') -Pakiet $Pakiet
     $meta=Get-Content (Join-Path $Pakiet 'apex-build.json') -Raw|ConvertFrom-Json
     $expected='linux-x64';if ($env:OS -eq 'Windows_NT') { $expected='win-x64' }
     if ($meta.target -cne $expected) { throw 'Packaged target does not match native test OS' }
@@ -82,7 +82,7 @@ with zipfile.ZipFile(archive) as z:
     $counts=Read-ApexTestCounts (Join-Path $Evidence 'packaged.trx')
     $after=Inventory;[IO.File]::WriteAllLines((Join-Path $Evidence 'package-after.sha256'),$after)
     if (($before -join "`n") -cne ($after -join "`n")) { throw 'Package mutated during tests' }
-    & (Join-Path $Source 'tools/windows/Sprawdz-Pakiet.ps1') -Pakiet $Pakiet
+    & (Join-Path $Pakiet 'Sprawdz-Pakiet.ps1') -Pakiet $Pakiet
     $proof=@(Get-ChildItem -LiteralPath (Join-Path $Evidence 'host') -Filter 'process-*.json'|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
     if ($proof.Count -eq 0 -or @($proof|Where-Object {-not $_.packaged -or $_.desktop -cne (Join-Path $Pakiet 'APEX-Desktop')}).Count -gt 0) { throw 'Missing actual package process proof' }
     foreach ($p in $proof) { if (Get-Process -Id $p.pid -ErrorAction SilentlyContinue) { throw 'Owned host still running after tests' } }

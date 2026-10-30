@@ -54,7 +54,11 @@ function Read-ApexPresentationJson([string]$Path, [int]$MaximumBytes) {
     # PS5.1 does not preload the framework assembly containing the JSON XML reader.
     Add-Type -AssemblyName System.Runtime.Serialization
     if ((Get-Item -LiteralPath $Path).Length -gt $MaximumBytes) { throw 'Presentation JSON too large' }
-    $bytes=[IO.File]::ReadAllBytes($Path)
+    return (Read-ApexJsonBytes ([IO.File]::ReadAllBytes($Path)) $MaximumBytes)
+}
+function Read-ApexJsonBytes([byte[]]$bytes,[int]$MaximumBytes) {
+    Add-Type -AssemblyName System.Runtime.Serialization
+    if ($bytes.Length -gt $MaximumBytes) { throw 'JSON too large' }
     # The framework JSON XML reader retains duplicate keys on PS5.1 AND PS7.
     # ConvertFrom-Json alone silently replaces them on Windows PowerShell.
     $quotas=New-Object System.Xml.XmlDictionaryReaderQuotas
@@ -149,7 +153,9 @@ function New-ApexPresentation([string]$Source,[string]$Scratch) {
     $old=$ErrorActionPreference
     try {
         $ErrorActionPreference='Continue'
-        & dotnet $cli naval-shared-replay --input $input --state-dir (Join-Path $Scratch 'presentation-authority') --output (Join-Path $Scratch 'presentation-result.json') --publication (Join-Path $public 'naval-publication.json') 1> (Join-Path $Scratch 'presentation-cli.stdout.log') 2> (Join-Path $Scratch 'presentation-cli.stderr.log')
+        $producerArgs=@($cli,'naval-shared-replay','--input',$input,'--state-dir',(Join-Path $Scratch 'presentation-authority'),'--output',(Join-Path $Scratch 'presentation-result.json'),'--publication',(Join-Path $public 'naval-publication.json'))
+        if (Get-Command Invoke-ApexBuildDotnet -ErrorAction SilentlyContinue) { Invoke-ApexBuildDotnet @producerArgs 1> (Join-Path $Scratch 'presentation-cli.stdout.log') 2> (Join-Path $Scratch 'presentation-cli.stderr.log') }
+        else { & dotnet @producerArgs 1> (Join-Path $Scratch 'presentation-cli.stdout.log') 2> (Join-Path $Scratch 'presentation-cli.stderr.log') }
         $exit=$LASTEXITCODE
     } finally { $ErrorActionPreference=$old }
     if ($exit -ne 0) { throw 'Presentation producer failed; private scratch retained' }
@@ -161,6 +167,46 @@ function New-ApexPresentation([string]$Source,[string]$Scratch) {
     $m=[ordered]@{schema='apex-presentation-v1';publicationSha256=(Get-FileHash -LiteralPath (Join-Path $public 'naval-publication.json') -Algorithm SHA256).Hash.ToLowerInvariant();inputSha256=$p.provenance.inputSha256;coreSha256=$p.provenance.coreSha256;backtesterSha256=$p.provenance.backtesterSha256;scope=[ordered]@{Id='presentation';PublicationScopeId=$p.publication.journal.scopeId;PortfolioId=[ordered]@{PortfolioId=$c.portfolioId.portfolioId;ReportingCurrency=$c.portfolioId.reportingCurrency};ConfigDigest=$c.configDigest;Accounts=@($c.accounts|ForEach-Object {[ordered]@{Venue=$_.account.venue;Environment=$_.account.environment;AccountId=$_.account.accountId;QuoteCurrency=$_.account.quoteCurrency}})}}
     [IO.File]::WriteAllText((Join-Path $public 'presentation.json'),($m|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
     return (Test-ApexPresentation $public)
+}
+
+# Runtime evidence is hash-bound build provenance, not a publisher signature.
+function Get-ApexTextSha256([string]$Text) {
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+}
+function Test-ApexWindowsPublish([string]$Directory,[string]$EvidencePath) {
+    $m=Read-ApexPresentationJson $EvidencePath 1048576
+    Assert-ApexPresentationFields $m @('schema','rid','sdkVersion','exeSha256','runtimeConfigUtf8','runtimeConfigSha256','assetsSha256','publishArgv','runtimePacks','nativeLibraries')
+    if ($m.schema -cne 'apex-windows-publish-v1' -or $m.rid -cne 'win-x64' -or $m.sdkVersion -isnot [string] -or $m.sdkVersion -cnotmatch '\A8\.0\.[0-9]+\z') { throw 'Windows publish identity invalid' }
+    foreach ($n in @('exeSha256','runtimeConfigSha256','assetsSha256')) { if ($m.$n -isnot [string] -or $m.$n -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Windows publish hash invalid' } }
+    if ($m.exeSha256 -cne (Get-FileHash -LiteralPath (Join-Path $Directory 'ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Windows publish EXE binding invalid' }
+    foreach ($f in Get-ChildItem -LiteralPath $Directory -Force) {
+        if (($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($f.PSIsContainer -and @('wwwroot','presentation') -cnotcontains $f.Name) -or (-not $f.PSIsContainer -and @('ApexDesktop.exe','ApexDesktop.pdb','Apex.Core.pdb') -cnotcontains $f.Name)) { throw 'Windows publish exact layout invalid; no arbitrary loose runtime files' }
+    }
+    $expected=@('publish','src/Apex.Desktop/Apex.Desktop.csproj','-c','Release','--no-restore','-r','win-x64','--self-contained','true','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:PublishTrimmed=false','-p:PublishReadyToRun=false','-p:IsTransformWebConfigDisabled=true','-o')
+    if ($m.publishArgv -isnot [array] -or $m.publishArgv.Count -ne $expected.Count+1) { throw 'Windows publish argv invalid' }
+    for ($i=0;$i -lt $expected.Count;$i++) { if ($m.publishArgv[$i] -isnot [string] -or ($i -eq 1 -and $m.publishArgv[$i].Replace('\','/') -cnotmatch '(^|/)src/Apex.Desktop/Apex.Desktop.csproj\z') -or ($i -ne 1 -and $m.publishArgv[$i] -cne $expected[$i])) { throw 'Windows publish argv invalid' } }
+    if ($m.publishArgv[-1] -isnot [string] -or $m.publishArgv[-1] -cnotmatch '(^|[/\\])APEX-Desktop\z') { throw 'Windows publish output invalid' }
+    if ($m.runtimeConfigUtf8 -isnot [string] -or (Get-ApexTextSha256 $m.runtimeConfigUtf8) -cne $m.runtimeConfigSha256) { throw 'Windows runtimeconfig hash invalid' }
+    $r=Read-ApexJsonBytes ([Text.Encoding]::UTF8.GetBytes($m.runtimeConfigUtf8)) 65536
+    if ($r -isnot [pscustomobject] -or $r.runtimeOptions.tfm -cne 'net8.0' -or $null -ne $r.runtimeOptions.framework -or $null -ne $r.runtimeOptions.frameworks -or $r.runtimeOptions.includedFrameworks -isnot [array] -or $r.runtimeOptions.includedFrameworks.Count -ne 2) { throw 'Windows self-contained included frameworks required' }
+    if ($m.runtimePacks -isnot [array] -or $m.runtimePacks.Count -ne 2) { throw 'Windows runtime packs required' }
+    $names=@('Microsoft.NETCore.App','Microsoft.AspNetCore.App')
+    for ($i=0;$i -lt 2;$i++) {
+        $framework=@($r.runtimeOptions.includedFrameworks|Where-Object { $_.name -ceq $names[$i] })
+        $pack=@($m.runtimePacks|Where-Object { $_.name -ceq ($names[$i]+'.Runtime.win-x64') })
+        if ($framework.Count -ne 1 -or $pack.Count -ne 1) { throw 'Windows runtime pack identity invalid' }
+        Assert-ApexPresentationFields $framework[0] @('name','version');Assert-ApexPresentationFields $pack[0] @('name','version','sha512')
+        if ($framework[0].name -isnot [string] -or $framework[0].version -isnot [string] -or $pack[0].name -isnot [string] -or $pack[0].version -isnot [string] -or $pack[0].version -cnotmatch '\A8\.0\.[0-9]+\z' -or $framework[0].version -cne $pack[0].version -or $pack[0].sha512 -isnot [string] -or $pack[0].sha512 -cnotmatch '\A[A-Za-z0-9+/]{86}==\z') { throw 'Windows runtime pack version/hash invalid' }
+    }
+    if ($m.nativeLibraries -isnot [array] -or $m.nativeLibraries.Count -eq 0) { throw 'Windows native provenance required' }
+    $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($n in $m.nativeLibraries) {
+        Assert-ApexPresentationFields $n @('name','pack','bytes','sha256')
+        if ($n.name -isnot [string] -or $n.name -cnotmatch '\A[A-Za-z0-9_.-]+\.dll\z' -or -not $seen.Add($n.name) -or $n.pack -cnotin @('Microsoft.NETCore.App.Runtime.win-x64','Microsoft.AspNetCore.App.Runtime.win-x64') -or $n.sha256 -isnot [string] -or $n.sha256 -cnotmatch '\A[a-f0-9]{64}\z' -or ($n.bytes -isnot [int] -and $n.bytes -isnot [long]) -or $n.bytes -le 0) { throw 'Windows native provenance invalid' }
+    }
+    if (-not $seen.Contains('coreclr.dll')) { throw 'Windows coreclr provenance required' }
+    return $m
 }
 
 # Exact bounded Vite inventory, also used on dist/staging/build/publish/extraction.

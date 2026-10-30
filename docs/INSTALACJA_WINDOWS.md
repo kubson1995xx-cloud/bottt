@@ -1,60 +1,29 @@
-# APEX Trading AI DEMO — instalacja Windows 11
+# APEX Naval Command — Windows x64
 
-> **Aktualizacja Naval / Task8A:** poniższy Windows autonomy jest dowodem historycznym, nie świeżym wydaniem Naval. Lokalny nowy ZIP Task8A ma target `linux-x64`; nie uruchomi cTrader Desktop. Nowy Windows Naval wymaga osobno zatwierdzonego natywnego CI i odbioru ACL/przeglądarki. Porównaj rzeczywisty SHA dostarczonego ZIP, nie nazwę ani stare wyniki. [Linux/VPS](NAVAL_DELIVERY_VPS.md).
+Bieżący format kandydata: `APEX-NAVAL-COMMAND-Windows-x64.zip`, nie stary `APEX Windows DEMO.zip`. Task5 nie jest końcowym odbiorem. Rzeczywiste first-run/modal/default-shell/browser acceptance pozostają Task6, a finalna dostawa Task7. Hosted Windows Server nie zastępuje Windows 11 Pro, sprzętowego GPU ani cTrader użytkownika. Historyczny artefakt autonomy i osobne wydanie Linux nie są tym kandydatem.
 
-## Gotowy pakiet — bez narzędzi programistycznych
+## Odbiorca
 
-1. Pobierz `APEX Windows DEMO.zip` i odpowiadający mu plik `.zip.sha256` z artefaktu GitHub Actions **APEX Windows DEMO** dla gałęzi `apex-demo/autonomy`. Porównaj `sourceCommit` w pakiecie z SHA przekazanego przebiegu. Stary pakiet `926afaa` jest nieaktualny dla autonomii; nie używaj go zamiast nowego artefaktu.
-2. Rozpakuj **cały ZIP** do nowego folderu, np. `C:\APEX DEMO`. Nie uruchamiaj pliku bezpośrednio wewnątrz ZIP i nie kopiuj samego EXE: folder `wwwroot` jest potrzebny do panelu.
-3. Opcjonalna weryfikacja integralności: kliknij prawym przyciskiem Start → Terminal/PowerShell i wykonaj `powershell -ExecutionPolicy Bypass -File "C:\APEX DEMO\Sprawdz-Pakiet.ps1"`. Oczekiwane: `PAKIET OK`. SHA-256 nie zastępuje podpisu wydawcy — porównaj sumę ZIP z otrzymaną z zaufanego źródła.
-4. Dwuklik `Uruchom APEX.cmd`. Aplikacja jest samodzielna: **nie instalujesz .NET SDK, Node, Pythona ani Visual Studio**.
-5. Panel otwiera się w Edge albo domyślnej przeglądarce. Jeżeli okno nie otworzy się automatycznie, wejdź na `http://127.0.0.1:5077`.
-6. Pozostaw proces APEX uruchomiony; zamknięcie samej karty panelu nie jest poleceniem STOP. Użyj przycisku STOP lub Emergency Stop w panelu.
+Pełna instrukcja jest w korzeniu archiwum **PRZECZYTAJ.md** (źródło: [PRZECZYTAJ-WINDOWS](../tools/windows/PRZECZYTAJ-WINDOWS.md)). Porównaj SHA ZIP-a i `sourceCommit` z przekazanym przebiegiem CI. Rozpakuj **całość** do nowego folderu i uruchom `APEX-Desktop\ApexDesktop.exe`. Nie przenoś samego EXE. Samodzielny pakiet nie wymaga SDK, Node, Pythona, Visual Studio ani ręcznej instalacji .NET/VC++. Ostrzeżeń o niepodpisanych plikach nie omijaj w ciemno; nieznane źródło oznacza przerwanie.
 
-Windows 11 x64 oraz lokalny Pepperstone cTrader Desktop z kontem **DEMO** są wymagane. Program nie jest podpisany cyfrowo; nie omijaj SmartScreen dla plików z nieznanego źródła. Nie udostępniaj portów APEX w routerze ani w zaporze.
+Na pustym katalogu Windows profil `windows-local-presentation-v1` tworzy prywatny dostęp webowy (natywne okno → Basic w przeglądarce). `ApexDesktop.exe --show-local-access` pokazuje go ponownie przez CurrentUser DPAPI; nie uruchamia serwera i nie rotuje sekretów. Po bind aplikacja prosi domyślną przeglądarkę o lokalny adres `http://127.0.0.1:5077/?view=naval`. Po uwierzytelnieniu: `/naval/`; `/` pozostaje starym polskim panelem. `--no-browser` i `OpenBrowserOnStart=false` nadal działają.
 
-## Zawartość
+Dane i backup: `%LOCALAPPDATA%\APEX Trading AI`, poza całym wydaniem. `--data` ma pierwszeństwo przed `APEX_DATA_DIR`. Istniejące konfiguracje/własne profile i Naval-off pozostają bez zmian. Błędy ACL/ścieżki lub przerwanej inicjalizacji nie uprawniają do kasowania danych, regenerowania map ani nadawania Everyone dostępu. Zachowaj komplet plików/ACL i zleć diagnozę. DPAPI wymaga tego samego konta Windows. Aktualizacja: finansowy STOP i weryfikacja pozycji → zakończenie własnego procesu → nowy folder produktu, zachowany prywatny katalog danych. Druga instancja lub zajęty HTTP odmawiają bez otwierania obcego portu. Zamknięcie karty/procesu nie jest finansowym STOP.
 
-- `APEX-Desktop\ApexDesktop.exe` i `wwwroot\` — silnik, panel i serwer lokalny.
-- `cTrader\ApexBridge.algo` — zalecany most do pełnego panelu APEX.
-- `cTrader\ApexTradingAI.algo` — Native produkcyjnie tylko odczyt/redukcja; START/TEST nowych wejść odmawiają. Nie jest zamiennikiem głównej ścieżki. **Nie uruchamiaj obu na tym samym koncie**.
-- `MT5-opcjonalny\ApexBridge.mq5` — źródło dodatku MT5, wymaga MetaEditora; nie jest potrzebne do cTrader.
-- `Dokumentacja\` — instrukcje i ograniczenia; `Weryfikacja\bot.trx`, `platform.trx`, `backtester.trx` — rzeczywiste wyniki bramek produktu.
-- `apex-build.json`, `manifest.sha256`, `Sprawdz-Pakiet.ps1` — pochodzenie i integralność plików. `sourceDirty: true` oznacza lokalne modyfikacje względem wskazanego commita.
+Nie wystawiaj portów poza `127.0.0.1`. Nowy profil ma zero kont runtime i statyczną syntetyczną/historyczną prezentację, nie rynek na żywo. `UNKNOWN`/`NOT_CONFIGURED` nie są gotowością brokera. Sześć rodzin strategii, dotychczasowy profil i limity 0,5% / 1,5% / DD5% / x5, SL/TP, Emergency, replay protection i trwały REAL-block są zachowane. Brak AI Lab, trenowania i updatera.
 
-Nie ma pakietu AI Lab, uczenia modeli ani automatycznych aktualizacji.
+## Platformy — osobny zakres
 
-## Opcjonalny Naval (ręczna czynność administratora)
+`cTrader\ApexBridge.algo` jest lokalną ścieżką Desktop + most; `ApexTradingAI.algo` Native pozostaje tylko odczytem/redukcją. Nie uruchamiaj obu na jednym koncie. MT5 jest opcjonalnym źródłem do MetaEditora. [Podłączenie](PODLACZENIE_PLATFORM.md) i [procedura DEMO](PROCEDURA_DEMO_PEPPERSTONE.md) nie są pozwoleniem na handel. Prywatne konto/realna transakcja DEMO wymagają osobnej zgody; LIVE nie jest dostępne. Rentowność nieudowodniona.
 
-Paczka nie zawiera kont, kluczy OKX, konfiguracji ani poświadczeń. NavalRead domyślnie off. Prywatne pliki i dokładny schemat opisuje [NAVAL_READ_PUBLICATION.md](NAVAL_READ_PUBLICATION.md). Operator loguje się natywnym Basic najpierw na `/`, dopiero potem `/naval/`; ReadOnly Bearer uprawnia tylko do dwóch GET API, nie do UI. Nie wklejaj sekretów do URL, JS, chatu lub argumentów. Awaryjny stary panel pozostaje dostępny dla Operatora również przy H503.
+## Wykonawca — build i dowody
 
-## Podłączenie konta
-
-Przejdź do [PODLACZENIE_PLATFORM.md](PODLACZENIE_PLATFORM.md), a następnie [PROCEDURA_DEMO_PEPPERSTONE.md](PROCEDURA_DEMO_PEPPERSTONE.md). Start aplikacji i mostu nie jest zgodą na handel. Read-only setup wymaga dedykowanego pustego DEMO hedging, rezerwuje ID/etykietę i wymaga skopiowania dokładnej etykiety do mostu oraz ponownego parowania. CoverageUnknown nie jest certyfikatem całej historii. Test wykonania wysyła rzeczywistą transakcję DEMO i wymaga osobnej zgody. Dopiero trwały PASS + świeże uzgodnienie pozwala zatwierdzić START; restart/reconnect pozostawia STOP.
-
-Aktywny profil: tylko **IndexDipBuy / indeksy / Experimental**, long-only (D1, SMA100, RSI2<5, wyjście SMA5 lub 10 barów, SL3ATR i ochronny TP3R). Testy nie dowodzą rentowności: wszystkie 64 autentyczne próby badawcze zatrzymał preflight, bez wyników finansowych. Limity pozostają 0,5% / 1,5% / DD5% / x5, obowiązkowe SL/TP, Emergency i pełne close. Nie ma odblokowania REAL.
-
-Dane i logi znajdują się w `%LOCALAPPDATA%\APEX Trading AI\`. Nie usuwaj tego katalogu podczas aktualizacji: przechowuje rejestr sygnałów, limity i plany pozycji. Nie przesyłaj `apex.config.json`, tokenu ani klucza parowania do publicznego GitHub.
-
-## Budowanie ze źródeł — tylko dla wykonawcy
-
-Gotowy pakiet nie wymaga tych czynności. Do budowy potrzebne są Git, .NET 8 SDK, przetestowany Node.js 26 / npm11 (Vite wymaga co najmniej 20.19 lub 22.12, samo „22+” nie jest wystarczające) i dostęp do NuGet/npm:
+Builder zachowuje interfejs:
 
 ```powershell
-winget install Microsoft.DotNet.SDK.8
-# Przygotuj Node26 / npm11; bez Node na maszynie odbiorcy.
-powershell -ExecutionPolicy Bypass -File tools\windows\Zbuduj-APEX.ps1 -Wyjscie "C:\APEX-build\wersja-1"
+powershell -NoProfile -File tools\windows\Zbuduj-APEX.ps1 -Target win-x64 -Wyjscie 'C:\APEX-build\APEX-NAVAL-COMMAND-Windows-x64'
 ```
 
-Skrypt buduje pełne `APEX.Trading.Demo.sln` w Release, uruchamia testy bota, platformy, backtestera, fixtures bramki pakietu i panelu, publikuje samodzielny EXE i oba zgodne cBoty, sprawdza manifest oraz tworzy ZIP. Nie pozwala pominąć testów ani nadpisać niepustego katalogu. Przy ponownej budowie wybierz nowy folder. MT5 nie jest kompilowany i nie blokuje pakietu cTrader. Archiwalne testy AI Lab uruchamia się oddzielnie, nie dołączając modułu do aplikacji.
+Wymaga natywnego Windows x64, SDK8 i Node26/npm z przypiętymi lockami; wybiera faktyczny SDK8 przez scratch `global.json`. Kolejność: czysty frontend/typecheck/test/build/staging → solution i cTrader SDK → rzeczywiste suites → root panel/helper controls → native `Gate=Source` → self-contained single-file publish bez trim/R2R → genuine presentation → dokładny verifier/manifest/ZIP → niezależna ekstrakcja i dotychczasowy gate produkcyjnego hosta. Nie ma flag pomijania testów. Wybierz nowy katalog, bez nadpisywania ZIP-a.
 
-GitHub → Actions → **APEX Windows DEMO** → Run workflow na właściwej gałęzi automatyzuje budowę na `windows-2022`, w tym Windows PowerShell 5.1 i test uruchomienia prawdziwego EXE. Zielony workflow nie dowodzi połączenia z brokerem.
-
-## Aktualizacja i problemy
-
-- Aktualizuj ręcznie do **nowego folderu**, po zatrzymaniu handlu i sprawdzeniu pozycji. Dane konta zostają w LocalAppData. Zainstaluj nowy most i uruchom jedną instancję.
-- Brak panelu: sprawdź proces APEX i port 5077; zajęty port wymaga świadomej zmiany `HttpPort` przy zamkniętej aplikacji i zgodnej zmiany adresu mostu.
-- Druga instancja APEX na tym samym katalogu danych jest blokowana.
-- Brak połączenia: APEX i cTrader muszą być na **tym samym Windows**. cTrader Cloud ani sam VPS nie wystarczą.
-- Brak sygnałów może być poprawnym zachowaniem strategii; nie luzuj limitów, aby wymusić transakcję. Do kontrolowanego sprawdzenia służy zatwierdzany test wykonania.
-- Błąd kalendarza, prowizji albo specyfikacji: sprawdź diagnostykę i nie wyłączaj zabezpieczeń w ciemno.
+Manualny workflow **APEX Windows DEMO**, tryb `task5-package`, jest odrębnym engineering lane na `windows-latest`; domyślny `full-delivery` pozostaje osobny do Task7. Task5 uruchamia izolowany legacy-config smoke EXE: pusty runtime root, PATH bez dotnet tylko dla dziecka, rzeczywiste moduły/hashe bibliotek i ACL ekstrakcji, HTTP/panel/zero kont. Nie potwierdza natywnego modalu, autolaunch ani renderingu przeglądarki. `Weryfikacja/windows-publish.json` zawiera autentyczne runtimeconfig/packs/argv/provenance, a `windows.trx` rzeczywiste testy Source. `windowsRuntimeTested=false` i `brokerTested=false` pozostają w zapieczętowanym ZIP-ie; wyniki runtime są zewnętrzne i związane z tym samym SHA.
