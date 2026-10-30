@@ -5,7 +5,9 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -174,7 +176,18 @@ public sealed class NavalReadEndpointTests
         }
         if (fault is not ("missing" or "truncated" or "duplicate" or "permissions" or "oversize" or "identity")) File.WriteAllText(path, n.ToJsonString());
         // Publication permissions are a source fault, not credential/startup failure.
-        await h.Start(); var response = await h.Send("/api/naval/snapshot", "read"); Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        await h.Start();
+        if (fault == "permissions" && OperatingSystem.IsWindows())
+        {
+            // Mutate after native startup admission: this tests the passive reader's
+            // source-fault refusal, not the separate whole-tree startup guard.
+            var file = new FileInfo(path); var acl = file.GetAccessControl();
+            var world = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+            acl.AddAccessRule(new FileSystemAccessRule(world, FileSystemRights.Read, AccessControlType.Allow));
+            file.SetAccessControl(acl);
+            Assert.Contains(file.GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>(), rule => rule.IdentityReference.Equals(world) && rule.AccessControlType == AccessControlType.Allow);
+        }
+        var response = await h.Send("/api/naval/snapshot", "read"); Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!; Assert.Null(body["checkpoint"]); Assert.True(!body.ToJsonString().Contains(h.DirectoryPath));
     }
     [Fact]
