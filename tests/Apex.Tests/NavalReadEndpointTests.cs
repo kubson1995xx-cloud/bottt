@@ -185,7 +185,10 @@ public sealed class NavalReadEndpointTests
             var world = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
             acl.AddAccessRule(new FileSystemAccessRule(world, FileSystemRights.Read, AccessControlType.Allow));
             file.SetAccessControl(acl);
-            Assert.Contains(file.GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>(), rule => rule.IdentityReference.Equals(world) && rule.AccessControlType == AccessControlType.Allow);
+            bool broad = false;
+            foreach (FileSystemAccessRule rule in file.GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)))
+                broad |= rule.IdentityReference.Equals(world) && rule.AccessControlType == AccessControlType.Allow;
+            Assert.True(broad, "The fixture must actually add a broad Windows read ACL");
         }
         var response = await h.Send("/api/naval/snapshot", "read"); Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!; Assert.Null(body["checkpoint"]); Assert.True(!body.ToJsonString().Contains(h.DirectoryPath));
@@ -352,7 +355,17 @@ internal static class NavalHostPublication
     {
         NavalProductionHost.PrivateDirectory(Path.GetDirectoryName(PathFor(h))!); Configure(h, p);
         var n = JsonSerializer.SerializeToNode(new { schema = "naval-shared-publication-export-v1", temporalClassification = "HISTORICAL_OFFLINE_CHECKPOINT", sourceClockUtc = clock, sourceFreshness = "UNKNOWN", provenance = new { inputSha256 = new string('a', 64), coreSha256 = new string('b', 64), backtesterSha256 = new string('c', 64) }, publication = p }, Json)!;
-        Rehash(n); string tmp = PathFor(h) + ".candidate"; File.WriteAllText(tmp, n.ToJsonString(Json)); NavalProductionHost.PrivateFile(tmp); File.Move(tmp, PathFor(h), true);
+        Rehash(n); string tmp = PathFor(h) + ".candidate"; File.WriteAllText(tmp, n.ToJsonString(Json)); NavalProductionHost.PrivateFile(tmp);
+        // Native read-side ACL inspection briefly holds the leaf without delete
+        // sharing. Keep the candidate intact and retry atomic rename, never write
+        // in place or weaken the production path guard. Permanent refusal fails.
+        long deadline = Environment.TickCount64 + 5000;
+        while (true)
+        {
+            try { File.Move(tmp, PathFor(h), true); break; }
+            catch (Exception ex) when (OperatingSystem.IsWindows() && (ex is IOException or UnauthorizedAccessException) && Environment.TickCount64 < deadline)
+            { System.Threading.Thread.Yield(); }
+        }
     }
     internal static void RehashJournal(JsonNode envelope)
     {

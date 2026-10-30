@@ -251,6 +251,7 @@ namespace Apex.Tests
             var a = new RunningSim(_host, 700004);
             Assert.True(await WaitFor(() => a.Sim.Accepted, 15));
             await a.DisposeAsync();
+            Assert.True(await WaitFor(async () => (await _host.Account(a.Key)) is { } account && !account.GetProperty("connected").GetBoolean(), 20), "Host has not observed the previous bridge disconnect");
             await using var b = new RunningSim(_host, 700004);
             Assert.True(await WaitFor(() => b.Sim.Accepted, 20), b.Sim.RejectReason);
         }
@@ -281,6 +282,7 @@ namespace Apex.Tests
             await s.Sim.AddForeignPosition("US500", "InnyBot");
             await s.Sim.AddForeignPosition("NAS100", "");
             var foreignIds = s.Sim.Positions.Select(p => p.Id).ToList();
+            Assert.True(await WaitFor(async () => (await _host.Account(s.Key)) is { } account && account.GetProperty("session").GetProperty("quotes").GetInt32() > 0, 20), "Host has not received simulator quotes");
 
             // Używamy tej samej ścieżki domyślnego instrumentu co przycisk panelu, nie ręcznego obejścia.
             string msg = await _host.Command(s.Key, "executionTest");
