@@ -1,7 +1,7 @@
 # Task6B — pięć podłączonych widoków NAVAL COMMAND, kandydat
 
 ## Status
-Kod `6c0ff8c` plus integrated test update `e87e87b`, baza `5262aa2`. **UI jest zaimplementowane; NIEODEBRANE do niezależnego review.** Pełny affected gate po authorized oczekiwaniu302 jest **845/845 PASS,0fail/skip**; parent wykonał retained verifier exit0 i potwierdził niezmienione źródła/artefakty frontendu. Poprzednie844/845 i obsolete404 pozostają wyłącznie historią. Root-firstBasic workflow i odrębne gate Windows/broker/R3F nie zostały zmienione.
+Kod `6c0ff8c` plus integrated test update `e87e87b`, baza `5262aa2`. **UI jest zaimplementowane; NIEODEBRANE — review CHANGES REQUESTED, 1 Important.** I1 w `task-6b-react-command-review.md`: diagram floty nie podąża za paginacją listy i może pomijać widoczną niepewną rezerwację. Fix round1 w toku: wspólna strona/IDs listy i diagramu, adjacent skip-link/UNKNOWN counts oraz brakujący dowód browser back/forward; następnie scoped re-review. Brak Critical i nowego financial/auth defect. Pełny affected gate po authorized oczekiwaniu302 jest **845/845 PASS,0fail/skip**; parent wykonał retained verifier exit0 i potwierdził niezmienione źródła/artefakty frontendu. Poprzednie844/845 i obsolete404 pozostają wyłącznie historią. Root-firstBasic workflow i odrębne gate Windows/broker/R3F nie zostały zmienione.
 
 ## Dostawa
 - React/TS/Vite, pięć widoków Command Center, Tactical Radar, Fleet Operations, Trade Animations (inspektor historycznego lifecycle), Analytics Center.
@@ -14,7 +14,7 @@ Kod `6c0ff8c` plus integrated test update `e87e87b`, baza `5262aa2`. **UI jest z
 Parent dopasował36/36 pozycji `final-proof.json` do source, lock hash i9screenshotów. Final manifest obejmuje JS/CSS/index identyczne w dist, stagedwebroot, Desktopoutput i publish. Zbudowany ekran wizualnie sprawdzony przez parenta: jawne synthetic/offline/noaccount labels, oryginalny fallback link.
 - Frontend units32/32; artifactbuildtests3/3; typecheck/build PASS.
 - Nowe produkcyjne hosttests5/5; rootpanel17/17; check/solutionSDKbuild0warnings/errors; publishPASS.
-- FullApexTests844/845: jedyny remaining fail to stare oczekiwanie `/naval`404. Nie zastępować go twierdzeniem fullPASS; osobny authorizedtestupdate ma wykazać302+location+securityheaders i zachować Reader403/anonymous401/malformedAPI404.
+- Historycznie FullApexTests844/845 miało jedno obsolete oczekiwanie `/naval`404. Ten blocker zamknięto test-only `e87e87b`: Operator302+literal Location/securityheaders, Reader403/anonymous401/malformedAPI404 zachowane; pełne845/845 PASS potwierdzone. To dowód kandydata, nie naprawy I1.
 - Chrome145:254 named check records przez4oddzielne runs,0failed,9screenshots finalbytes. To nie254unit tests i nie jeden uninterruptedrun. Pokazano prawdziwy producerpartial/finality/uncertain, gap/restart/conflict/hiddenpause, nativeBasiccache/rootfirst,5routes/responsive360/390/768/1440, no-JS/SVGfallback i oryginalny emergency underNaval503. Poprzednie nieudane/interruptedprobe pozostają jawnie zachowane.
 
 ## Naprawiona blokada zależności
@@ -23,4 +23,4 @@ Zwykłe offline npm zawiodło przez brak packument. Rzeczywiste cached tgz/SRI/m
 ## Artefakty i bramki
 - `.superpowers/sdd/2026-10-29-apex-naval/task-6b-react-command-{brief,report,review}.md`.
 - `/home/ubuntu/.hermes/cache/scratch/apex-naval-task6b/dependency-recovery/` — exact commands/source maps/browser/build/publish/SRI (scratch może wygasnąć).
-- Fullsuitegreen po korekcie starego testu i niezależnyreview nadal wymagane. Bez końcowego odbioru UI, R3F, Windows/native, ReadOnly UI/credentialdelivery, realuserprovisioning, privateOKX/broker/WS, remoteTLS/mobile i rentowności. Realaccount ani handlu nie podłączono.
+- Wymagane naprawa I1, narrow browser back/forward i scoped re-review. Fullsuite845/845 jest już zielone dla kandydata; nie pozostaje aktualnym blockerem. Bez końcowego odbioru UI, R3F, Windows/native, ReadOnly UI/credentialdelivery, realuserprovisioning, privateOKX/broker/WS, remoteTLS/mobile i rentowności. Realaccount ani handlu nie podłączono.
