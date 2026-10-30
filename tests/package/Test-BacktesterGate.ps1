@@ -29,7 +29,10 @@ function Reset-Package {
     $a=@('index.html','assets/index-test.js','assets/chunk-test.js','assets/index-test.css') | ForEach-Object { @{path=$_;bytes=(Get-Item (Join-Path $naval $_)).Length;sha256=(Hash (Join-Path $naval $_))} }
     Put (Join-Path $naval 'build-manifest.json') (@{schema='naval-build-v1';artifacts=@($a)} | ConvertTo-Json -Depth 6)
     Write-Fixture 1 1 0
-    foreach ($suite in @('bot','platform','backtester')) { Copy-Item $fixture (Join-Path $package ('Weryfikacja/'+$suite+'.trx')) -Force -ErrorAction SilentlyContinue; if (-not (Test-Path (Join-Path $package ('Weryfikacja/'+$suite+'.trx')))) { New-Item -ItemType Directory -Force (Join-Path $package 'Weryfikacja') | Out-Null; Copy-Item $fixture (Join-Path $package ('Weryfikacja/'+$suite+'.trx')) } }
+    # Create the parent BEFORE Copy-Item: PS5.1 DirectoryNotFoundException can
+    # terminate even with SilentlyContinue. Never hide a fixture construction failure.
+    New-Item -ItemType Directory -Force (Join-Path $package 'Weryfikacja') | Out-Null
+    foreach ($suite in @('bot','platform','backtester')) { Copy-Item -LiteralPath $fixture -Destination (Join-Path $package ('Weryfikacja/'+$suite+'.trx')) -Force }
     $inputs=@{schema='apex-source-inputs-v1';files=@(@{path='package-lock.json';bytes=1;sha256=('1'*64)},@{path='frontend/naval/package-lock.json';bytes=1;sha256=('2'*64)})}
     Put (Join-Path $package 'Weryfikacja/source-inputs.json') ($inputs|ConvertTo-Json -Depth 5)
     $tap="TAP version 13`nok 1 - controlled`n1..1`n# tests 1`n# suites 0`n# pass 1`n# fail 0`n# cancelled 0`n# skipped 0`n# todo 0`n"
