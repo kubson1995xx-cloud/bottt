@@ -179,7 +179,22 @@ public sealed partial class WindowsLocalSetupTests
                 if (path == "/") Assert.Contains("name=\"apex-token\" content=\"\"", text);
             }
         }
-        finally { if (!process.HasExited) process.Kill(true); await process.WaitForExitAsync(); }
+        finally
+        {
+            if (!process.HasExited) process.Kill(true);
+            await process.WaitForExitAsync();
+            await Task.WhenAll(stdout, stderr);
+            // Windows process signaling can precede final file-object teardown.
+            // Wait on the real exclusive lock, not a sleep or a re-run of assertions.
+            string lockPath = Path.Combine(f.Root, "apex.lock"); bool released = false;
+            for (int i = 0; i < 100; i++)
+            {
+                try { using var check = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None); released = true; break; }
+                catch (IOException) { if (i == 0) Console.WriteLine("Owned host exited; waiting for lock teardown. pid=" + process.Id); await Task.Delay(50); }
+            }
+            Assert.True(released, "Exited owned host retained exclusive data lock");
+            Assert.False(await SetupListening(port), "Owned host listener survived termination");
+        }
         string publicText = string.Join("\n", documents) + await stdout + await stderr;
         foreach (string secret in new[] { secrets.Operator, secrets.Reader })
             Assert.True(!publicText.Contains(secret) && !publicText.Contains(Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(secret))).ToLowerInvariant()), "Credential material in host output/documents (content withheld)");
