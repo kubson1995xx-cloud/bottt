@@ -398,7 +398,7 @@ foreach ($casing in @('lower','upper','mixed','final-LF')) {
     }
 }
 Case 'WindowsTask5ShippedPositive' { Windows-Control;Seal-Windows;& (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package }
-foreach ($fault in @('missing-static-host','changed-static-code','missing-exe','missing-presentation','missing-runtime-proof','shared-framework','wrong-rid','wrong-default','wrong-profile','wrong-preserve','missing-windows-trx','zero-windows-trx','failed-windows-trx','skip-windows-trx','loose-dll','replay-exe','private-map','session-cache')) {
+foreach ($fault in @('missing-static-host','changed-static-code','missing-exe','missing-presentation','missing-runtime-proof','shared-framework','wrong-rid','array-schema','array-rid','array-tfm','array-native-pack','wrong-default','wrong-profile','wrong-preserve','missing-windows-trx','zero-windows-trx','failed-windows-trx','skip-windows-trx','loose-dll','replay-exe','private-map','session-cache')) {
     Case ('WindowsTask5-'+$fault) {
         Windows-Control
         switch ($fault) {
@@ -407,6 +407,10 @@ foreach ($fault in @('missing-static-host','changed-static-code','missing-exe','
             'missing-exe' { Remove-Item (Join-Path $package 'APEX-Desktop/ApexDesktop.exe') }
             'missing-presentation' { Remove-Item (Join-Path $package 'APEX-Desktop/presentation/presentation.json') }
             'shared-framework' { $wp.runtimeConfigUtf8=$windowsRuntimeText.Replace('includedFrameworks','frameworks');$sha=[Security.Cryptography.SHA256]::Create();try {$wp.runtimeConfigSha256=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($wp.runtimeConfigUtf8)))).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()} }
+            'array-schema' { $wp.schema=@($wp.schema) }
+            'array-rid' { $wp.rid=@($wp.rid) }
+            'array-native-pack' { $wp.nativeLibraries[0].pack=@($wp.nativeLibraries[0].pack) }
+            'array-tfm' { $r=$wp.runtimeConfigUtf8|ConvertFrom-Json;$r.runtimeOptions.tfm=@($r.runtimeOptions.tfm);$wp.runtimeConfigUtf8=$r|ConvertTo-Json -Depth 10 -Compress;$wp.runtimeConfigSha256=Get-ApexTextSha256 $wp.runtimeConfigUtf8 }
             'wrong-rid' { $wp.rid='linux-x64' }
             'wrong-default' { $meta.navalReadDefaultEnabled=$false }
             'wrong-profile' { $meta.firstRunProfile='legacy' }

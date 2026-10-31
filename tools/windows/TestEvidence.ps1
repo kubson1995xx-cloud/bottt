@@ -224,7 +224,7 @@ function Test-ApexWindowsStaticHost([string]$Exe,$Proof) {
 function Test-ApexWindowsPublish([string]$Directory,[string]$EvidencePath) {
     $m=Read-ApexPresentationJson $EvidencePath 1048576
     Assert-ApexPresentationFields $m @('schema','rid','sdkVersion','exeSha256','runtimeConfigUtf8','runtimeConfigSha256','assetsSha256','publishArgv','runtimePacks','nativeLibraries','staticHost')
-    if ($m.schema -cne 'apex-windows-publish-v1' -or $m.rid -cne 'win-x64' -or $m.sdkVersion -isnot [string] -or $m.sdkVersion -cnotmatch '\A8\.0\.[0-9]+\z') { throw 'Windows publish identity invalid' }
+    if ($m.schema -isnot [string] -or $m.rid -isnot [string] -or $m.schema -cne 'apex-windows-publish-v1' -or $m.rid -cne 'win-x64' -or $m.sdkVersion -isnot [string] -or $m.sdkVersion -cnotmatch '\A8\.0\.[0-9]+\z') { throw 'Windows publish identity invalid' }
     foreach ($n in @('exeSha256','runtimeConfigSha256','assetsSha256')) { if ($m.$n -isnot [string] -or $m.$n -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Windows publish hash invalid' } }
     if ($m.exeSha256 -cne (Get-FileHash -LiteralPath (Join-Path $Directory 'ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Windows publish EXE binding invalid' }
     foreach ($f in Get-ChildItem -LiteralPath $Directory -Force) {
@@ -236,7 +236,7 @@ function Test-ApexWindowsPublish([string]$Directory,[string]$EvidencePath) {
     if ($m.publishArgv[-1] -isnot [string] -or $m.publishArgv[-1] -cnotmatch '(^|[/\\])APEX-Desktop\z') { throw 'Windows publish output invalid' }
     if ($m.runtimeConfigUtf8 -isnot [string] -or (Get-ApexTextSha256 $m.runtimeConfigUtf8) -cne $m.runtimeConfigSha256) { throw 'Windows runtimeconfig hash invalid' }
     $r=Read-ApexJsonBytes ([Text.Encoding]::UTF8.GetBytes($m.runtimeConfigUtf8)) 65536
-    if ($r -isnot [pscustomobject] -or $r.runtimeOptions.tfm -cne 'net8.0' -or $null -ne $r.runtimeOptions.framework -or $null -ne $r.runtimeOptions.frameworks -or $r.runtimeOptions.includedFrameworks -isnot [array] -or $r.runtimeOptions.includedFrameworks.Count -ne 2) { throw 'Windows self-contained included frameworks required' }
+    if ($r -isnot [pscustomobject] -or $r.runtimeOptions.tfm -isnot [string] -or $r.runtimeOptions.tfm -cne 'net8.0' -or $null -ne $r.runtimeOptions.framework -or $null -ne $r.runtimeOptions.frameworks -or $r.runtimeOptions.includedFrameworks -isnot [array] -or $r.runtimeOptions.includedFrameworks.Count -ne 2) { throw 'Windows self-contained included frameworks required' }
     if ($m.runtimePacks -isnot [array] -or $m.runtimePacks.Count -ne 2) { throw 'Windows runtime packs required' }
     $names=@('Microsoft.NETCore.App','Microsoft.AspNetCore.App')
     for ($i=0;$i -lt 2;$i++) {
@@ -250,7 +250,7 @@ function Test-ApexWindowsPublish([string]$Directory,[string]$EvidencePath) {
     $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($n in $m.nativeLibraries) {
         Assert-ApexPresentationFields $n @('name','pack','bytes','sha256')
-        if ($n.name -isnot [string] -or $n.name -cnotmatch '\A[A-Za-z0-9_.-]+\.dll\z' -or -not $seen.Add($n.name) -or $n.pack -cnotin @('Microsoft.NETCore.App.Runtime.win-x64','Microsoft.AspNetCore.App.Runtime.win-x64') -or $n.sha256 -isnot [string] -or $n.sha256 -cnotmatch '\A[a-f0-9]{64}\z' -or ($n.bytes -isnot [int] -and $n.bytes -isnot [long]) -or $n.bytes -le 0) { throw 'Windows native provenance invalid' }
+        if ($n.name -isnot [string] -or $n.name -cnotmatch '\A[A-Za-z0-9_.-]+\.dll\z' -or -not $seen.Add($n.name) -or $n.pack -isnot [string] -or $n.pack -cnotin @('Microsoft.NETCore.App.Runtime.win-x64','Microsoft.AspNetCore.App.Runtime.win-x64') -or $n.sha256 -isnot [string] -or $n.sha256 -cnotmatch '\A[a-f0-9]{64}\z' -or ($n.bytes -isnot [int] -and $n.bytes -isnot [long]) -or $n.bytes -le 0) { throw 'Windows native provenance invalid' }
     }
     if (-not $seen.Contains('coreclr.dll')) { throw 'Windows coreclr provenance required' }
     Test-ApexWindowsStaticHost (Join-Path $Directory 'ApexDesktop.exe') $m.staticHost | Out-Null

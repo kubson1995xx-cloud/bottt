@@ -1,0 +1,151 @@
+{
+  "schema": "apex-windows-publish-v1",
+  "rid": [
+    "win-x64"
+  ],
+  "sdkVersion": "8.0.427",
+  "exeSha256": "19d07aadf2a79d5dd43eeffc499c8900dec96487855d031484ff396ca9c25752",
+  "runtimeConfigUtf8": "{\r\n  \"runtimeOptions\": {\r\n    \"tfm\": \"net8.0\",\r\n    \"includedFrameworks\": [\r\n      {\r\n        \"name\": \"Microsoft.NETCore.App\",\r\n        \"version\": \"8.0.33\"\r\n      },\r\n      {\r\n        \"name\": \"Microsoft.AspNetCore.App\",\r\n        \"version\": \"8.0.33\"\r\n      }\r\n    ],\r\n    \"configProperties\": {\r\n      \"System.GC.Server\": false,\r\n      \"System.Globalization.Invariant\": false,\r\n      \"System.Reflection.Metadata.MetadataUpdater.IsSupported\": false,\r\n      \"System.Runtime.Serialization.EnableUnsafeBinaryFormatterSerialization\": false\r\n    }\r\n  }\r\n}",
+  "runtimeConfigSha256": "1b7fb807896303ff5674f667f058a25f03eec93d44292ac4adabf55d78095106",
+  "assetsSha256": "3915073bd6ca97cf5a1acaa99d1de256adb2430e780052e98fcddac352cb8d0f",
+  "publishArgv": [
+    "publish",
+    "D:\\a\\bottt\\bottt\\src\\Apex.Desktop\\Apex.Desktop.csproj",
+    "-c",
+    "Release",
+    "--no-restore",
+    "-r",
+    "win-x64",
+    "--self-contained",
+    "true",
+    "-p:PublishSingleFile=true",
+    "-p:IncludeNativeLibrariesForSelfExtract=true",
+    "-p:PublishTrimmed=false",
+    "-p:PublishReadyToRun=false",
+    "-p:IsTransformWebConfigDisabled=true",
+    "-o",
+    "D:\\a\\_temp\\APEX-NAVAL-COMMAND-Windows-x64\\APEX-Desktop"
+  ],
+  "runtimePacks": [
+    {
+      "sha512": "sK+4Xj/iglM4b1QnXeOzdJlQ3pFNKRJntXfzbryAGcAIzrL4BTicSV9m7C/iPvx+tHOPJzMGsafj1e1q5pfuIA==",
+      "name": "Microsoft.NETCore.App.Runtime.win-x64",
+      "version": "8.0.33"
+    },
+    {
+      "sha512": "I6kPPL9caRk0HmE7T46DX/kOsUKD9IehbI4v1EPtH+0H6Al9Rjld68Qz85fXlGUcQlGoOIl/MkmIxsd4FjGUBg==",
+      "name": "Microsoft.AspNetCore.App.Runtime.win-x64",
+      "version": "8.0.33"
+    }
+  ],
+  "nativeLibraries": [
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "clretwrc.dll",
+      "bytes": 310568,
+      "sha256": "2e83566369113e6ba0b909a0aa91d17ad03b14fa4b39f72ae61e9f542a96e8a9"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "clrgc.dll",
+      "bytes": 667944,
+      "sha256": "f93f46f0f424a8365a269551e2ba83792122b3f09a603d307010605818a1a166"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "clrjit.dll",
+      "bytes": 1777960,
+      "sha256": "02807b7f2d2f487b54dd640fa64cfc32ee44fd0bdeaebebe123ef593a6e67ef5"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "coreclr.dll",
+      "bytes": 4995920,
+      "sha256": "76808cf5616db4fec830e0884877bfec0d2cc14f569cf1dce8c90e747ae5d3ae"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "hostfxr.dll",
+      "bytes": 366376,
+      "sha256": "c87db2191ab72f27c8d6fabf082c97a0b90185d9e639c4e181ae0720b9687a55"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "hostpolicy.dll",
+      "bytes": 406824,
+      "sha256": "b251cceb04b21adcf1bc4e6c2f7e63fbce63552f352ec444fef611eee7f1ceab"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "Microsoft.DiaSymReader.Native.amd64.dll",
+      "bytes": 2377016,
+      "sha256": "70e4b89978ce57ef87b28f4921f3140c383b04aa96e7f3bdb3c4ebb898fd8a72"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "mscordaccore.dll",
+      "bytes": 1348952,
+      "sha256": "40e1279137ce03acf937d8f18f587cb1aa08aa1482d8e4098dce72554e44ef22"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "mscordaccore_amd64_amd64_8.0.3326.52219.dll",
+      "bytes": 1348952,
+      "sha256": "40e1279137ce03acf937d8f18f587cb1aa08aa1482d8e4098dce72554e44ef22"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "mscordbi.dll",
+      "bytes": 1233752,
+      "sha256": "1414710a44d24ba4c1ff1355c0375091f38a6a168820c9510ba8f2dd542d3d92"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "mscorrc.dll",
+      "bytes": 136488,
+      "sha256": "be4102da619af5dc7fa828967103ea26267ad1895e1deb4ff9bb2d88f2df3583"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "msquic.dll",
+      "bytes": 537920,
+      "sha256": "4d9bc762b1cb41402201ab097b52cccaa5540e928649d678f657cb1c0b2702c3"
+    },
+    {
+      "pack": "Microsoft.NETCore.App.Runtime.win-x64",
+      "name": "System.IO.Compression.Native.dll",
+      "bytes": 828200,
+      "sha256": "40e9ab49a5e82b5338e8978e9872eaa699486a5b3c813b4e113428ff51140f99"
+    },
+    {
+      "pack": "Microsoft.AspNetCore.App.Runtime.win-x64",
+      "name": "aspnetcorev2_inprocess.dll",
+      "bytes": 383840,
+      "sha256": "ee34b6502773db17be67b7e30e3692723b811bdcef8c0b357031a7c3392f458a"
+    }
+  ],
+  "staticHost": {
+    "version": "8.0.33",
+    "pack": "Microsoft.NETCore.App.Host.win-x64",
+    "runtimeListSha256": "23f33660af403e74109ad47fc51118c3df1daa735daca26a66ccf4f9c60e5202",
+    "templateSha256": "e6fc2f6ea3fb185265a86e7d8759bc29b7001d8b352da7fb3a2d0864e59855a2",
+    "droppedNativeComponents": [
+      "coreclr.dll",
+      "clrjit.dll",
+      "hostfxr.dll",
+      "hostpolicy.dll"
+    ],
+    "codeSections": [
+      {
+        "name": ".text",
+        "bytes": 6350848,
+        "sha256": "1a785821012229f70b3307c44c385121e3ebe2f4bdf86e6874cc75e780b480f6"
+      },
+      {
+        "name": ".CLR_UEF",
+        "bytes": 512,
+        "sha256": "3c783fd144c68ce551432b91cd1755ba396e0d5831b3ab29a79ba9203ba676c9"
+      }
+    ]
+  }
+}

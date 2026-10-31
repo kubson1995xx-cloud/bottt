@@ -28,8 +28,11 @@ permissions:
 jobs:
   windows:
     if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full-delivery'
-    runs-on: windows-2022
-    timeout-minutes: 25
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -42,28 +45,26 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             frontend/naval/package-lock.json
-      - name: Record actual tool versions
-        shell: powershell
-        run: |
-          node --version
-          npm --version
-          dotnet --version
-          $PSVersionTable.PSVersion.ToString()
+      - uses: actions/download-artifact@v4
+        with:
+          name: APEX-NAVAL-COMMAND-Windows-x64
+          run-id: 41167079728
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/scalar-original-input
       # Builder runs tests/package/Test-NavalPackage.ps1 on independently extracted ZIP
       # (CRC, SHA readback, native EXE private ACL/roles/assets/restart/Emergency).
-      # No Naval branch push trigger; remote dispatch requires separate permission.
-      # Package script hard-gates Core, platform, actual-source backtester and panel; reads counts from TRX.
-      - name: Build and test complete DEMO package including backtester (PowerShell 5.1)
+      # Old artifact above is ONLY the reviewer's causal scalar fixture. Final
+      # runtime and ALL mandatory suites come from the fresh builder below.
+      - name: Fresh full Windows delivery, native Package/Browser and isolated smoke (PowerShell 5.1)
         shell: powershell
-        run: ./tools/windows/Zbuduj-APEX.ps1 -Wyjscie "$env:RUNNER_TEMP/APEX Windows DEMO"
-      - name: Run actual Windows executable (no broker, no orders)
-        shell: powershell
-        run: ./tools/windows/Smoke-Windows.ps1 -Pakiet "$env:RUNNER_TEMP/APEX Windows DEMO"
+        run: ./tools/windows/Test-FinalDelivery.ps1 -OriginalDownload "$env:RUNNER_TEMP/scalar-original-input"
       - name: Test archive separately (not part of product)
         id: archive
         continue-on-error: true
         shell: powershell
-        run: dotnet test tests/Apex.AiLab.Tests/Apex.AiLab.Tests.csproj -c Release --logger "trx;LogFileName=archive.trx" --results-directory "$env:RUNNER_TEMP/archive-tests"
+        run: |
+          Push-Location "$env:RUNNER_TEMP/apex-final-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT/sdk"
+          try { dotnet test "$env:GITHUB_WORKSPACE/tests/Apex.AiLab.Tests/Apex.AiLab.Tests.csproj" -c Release --logger "trx;LogFileName=archive.trx" --results-directory "$env:RUNNER_TEMP/archive-tests" } finally { Pop-Location }
       - name: Report archive failure without blocking DEMO product
         if: steps.archive.outcome == 'failure'
         shell: powershell
@@ -71,22 +72,29 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: APEX Windows DEMO
+          name: APEX-NAVAL-COMMAND-Windows-x64
           path: |
-            ${{ runner.temp }}/APEX Windows DEMO.zip
-            ${{ runner.temp }}/APEX Windows DEMO.zip.sha256
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64.zip
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: Task7-Failed-Candidate-${{ github.run_id }}-${{ github.run_attempt }}-NOT-ACCEPTED
+          path: |
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64.zip
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64.zip.sha256
+          if-no-files-found: warn
           retention-days: 30
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: APEX-Test-Evidence
+          name: Task7-Windows-Evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/APEX Windows DEMO/Weryfikacja/*.trx
+            ${{ runner.temp }}/final-public-evidence/**
             ${{ runner.temp }}/archive-tests/*.trx
-            ${{ runner.temp }}/APEX Windows DEMO-package-evidence/summary.json
-            ${{ runner.temp }}/APEX Windows DEMO-package-evidence/archive-readback.json
-            ${{ runner.temp }}/APEX Windows DEMO-package-evidence/packaged.trx
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
   nativeTask6:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'task6-acceptance' && github.ref == 'refs/heads/feature/apex-naval-command'
