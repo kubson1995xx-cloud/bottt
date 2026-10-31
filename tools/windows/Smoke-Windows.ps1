@@ -34,7 +34,7 @@ $data=Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) ('ApexSmo
 New-ApexPrivateBuildDirectory $data
 $extract=Join-Path $data 'bundle';New-ApexPrivateBuildDirectory $extract
 $empty=Join-Path $data 'empty-runtime';New-ApexPrivateBuildDirectory $empty
-$proc=$null;$stdout=$null;$stderr=$null;$passed=$false;$modules=@();$aclCount=0
+$proc=$null;$stdout=$null;$stderr=$null;$passed=$false;$modules=@();$aclCount=0;$staticHostValidated=$false;$extractedFiles=0
 try {
     $token=[Guid]::NewGuid().ToString('N')+[Guid]::NewGuid().ToString('N')
     $config=@{HttpPort=$port;BridgeTcpPort=0;ApiToken=$token;PairingKey=[Guid]::NewGuid().ToString('N');OpenBrowserOnStart=$false;News=@{Enabled=$false}}
@@ -84,12 +84,19 @@ try {
         }
         $modules+=@{name=$name;origin=$origin;kind=$kind;sha256=(Hash $path)}
     }
-    if (@($modules|Where-Object { $_.name -ieq 'coreclr.dll' -and $_.kind -eq 'authenticated-runtime-pack' }).Count -ne 1) { throw 'No actual bundled coreclr module' }
+    # .NET8 Windows singlefilehost statically links CoreCLR/JIT/hosting code.
+    # Bind the ACTUALLY loaded executable, including its code sections, to publish.
+    $main=(Get-Item -LiteralPath $proc.MainModule.FileName).FullName
+    if (-not $main.Equals((Get-Item -LiteralPath $exe).FullName,[StringComparison]::OrdinalIgnoreCase) -or (Hash $main) -cne $publish.exeSha256) { throw 'Loaded apphost differs from authenticated EXE' }
+    Test-ApexWindowsStaticHost $main $publish.staticHost | Out-Null
+    $staticHostValidated=$true
+    $modules+=@{name='ApexDesktop.exe';origin='APEX-Desktop/ApexDesktop.exe';kind='authenticated-static-host';sha256=(Hash $main);runtimeComponents=$publish.staticHost.droppedNativeComponents}
     foreach ($item in @((Get-Item -LiteralPath $extract))+@(Get-ChildItem -LiteralPath $extract -Recurse -Force)) {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Extraction reparse point forbidden' }
         Assert-Private $item.FullName ($item.FullName -ceq $extract);$aclCount++
+        if (-not $item.PSIsContainer) { $extractedFiles++ }
     }
-    if ($aclCount -le 1) { throw 'No runtime extraction was inspected' }
+    if ($aclCount -lt 1) { throw 'Runtime extraction base was not inspected' }
     $passed=$true
 } finally {
     if ($null -ne $proc) { if (-not $proc.HasExited) { $proc.Kill() };$proc.WaitForExit();$proc.Dispose() }
@@ -102,7 +109,7 @@ try {
     if (@(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue).Count -ne 0) { throw 'Owned HTTP listener survived smoke' }
     & (Join-Path $Pakiet 'Sprawdz-Pakiet.ps1') -Pakiet $Pakiet
     if ($Evidence) {
-        $summary=[ordered]@{schema='apex-windows-smoke-v1';status=$(if($passed){'PASS'}else{'FAIL'});sourceCommit=$meta.sourceCommit;sourceInputsSha256=$meta.sourceInputsSha256;exeSha256=$publish.exeSha256;osCaption=(Get-CimInstance Win32_OperatingSystem).Caption;osVersion=[Environment]::OSVersion.Version.ToString();childRuntimeRootsEmpty=$true;childPathHasDotnet=$false;machineDotnetUsed=$(if($passed){$false}else{$null});machineVcRedistributableUsed=$(if($passed){$false}else{$null});modules=$modules;hostpolicyLoaded=(@($modules|Where-Object name -ieq 'hostpolicy.dll').Count -gt 0);hostpolicyNote='Single-file apphost can statically link hostpolicy; report actual loaded module presence, never infer a shared DLL';extractionAclItems=$aclCount;extractionPrivate=$passed;zeroAccounts=$passed;servedLegacyPanel=$passed;packageUnchanged=$true;ownedProcessExited=$true;ownedPrivateDataRemoved=$true;firstRunModalTested=$false;defaultBrowserTested=$false;browserRenderingTested=$false;brokerTested=$false}
+        $summary=[ordered]@{schema='apex-windows-smoke-v1';status=$(if($passed){'PASS'}else{'FAIL'});sourceCommit=$meta.sourceCommit;sourceInputsSha256=$meta.sourceInputsSha256;exeSha256=$publish.exeSha256;osCaption=(Get-CimInstance Win32_OperatingSystem).Caption;osVersion=[Environment]::OSVersion.Version.ToString();childRuntimeRootsEmpty=$true;childPathHasDotnet=$false;machineDotnetUsed=$(if($passed){$false}else{$null});machineVcRedistributableUsed=$(if($passed){$false}else{$null});modules=$modules;staticHostValidated=$staticHostValidated;staticRuntimeComponents=$publish.staticHost.droppedNativeComponents;coreclrDllLoaded=(@($modules|Where-Object name -ieq 'coreclr.dll').Count -gt 0);extractionFileCount=$extractedFiles;runtimeExtractionUsed=($extractedFiles -gt 0);hostpolicyLoaded=(@($modules|Where-Object name -ieq 'hostpolicy.dll').Count -gt 0);hostpolicyNote='Single-file apphost can statically link hostpolicy; report actual loaded module presence, never infer a shared DLL';extractionAclItems=$aclCount;extractionPrivate=$passed;zeroAccounts=$passed;servedLegacyPanel=$passed;packageUnchanged=$true;ownedProcessExited=$true;ownedPrivateDataRemoved=$true;firstRunModalTested=$false;defaultBrowserTested=$false;browserRenderingTested=$false;brokerTested=$false}
         [IO.File]::WriteAllText((Join-Path $Evidence 'summary.json'),($summary|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
     }
 }

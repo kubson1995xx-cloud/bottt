@@ -98,7 +98,7 @@ try {
     & npm test;Sprawdz 'Root panel and packaging tests'
     & npm run check;Sprawdz 'Original panel JS syntax'
     try { & (Join-Path $repo 'tests/package/Test-BacktesterGate.ps1') -Source $repo -Scratch (Join-Path $scratch 'fixtures') }
-    finally { $result=Join-Path $scratch 'fixtures/results.json';if (Test-Path $result) { Copy-Item $result (Join-Path $buildEvidence 'controlled-results.json') } }
+    finally { $result=Join-Path $scratch 'fixtures/results.json';if (Test-Path $result) { Copy-Item $result (Join-Path $buildEvidence 'controlled-results.json') };$staticResult=Join-Path $scratch 'fixtures/static-host-controls/results.json';if (Test-Path $staticResult) { Copy-Item $staticResult (Join-Path $buildEvidence 'static-host-controls.json') } }
     try { & (Join-Path $repo 'tests/package/Test-NavalNotices.ps1') -Source $repo -Scratch (Join-Path $scratch 'notice-fixtures') }
     finally { $result=Join-Path $scratch 'notice-fixtures/results.json';if (Test-Path $result) { Copy-Item $result (Join-Path $buildEvidence 'notice-results.json') } }
     if ($Target -eq 'win-x64') {
@@ -140,7 +140,7 @@ try {
         $runtimeText=[IO.File]::ReadAllText($runtimePath);$runtime=$runtimeText|ConvertFrom-Json
         $assetsPath=Join-Path $repo 'src/Apex.Desktop/obj/project.assets.json'
         $assets=Get-Content -LiteralPath $assetsPath -Raw|ConvertFrom-Json
-        $packs=@();$nativeLibraries=@()
+        $packs=@();$nativeLibraries=@();$runtimeListPath=$null
         foreach ($framework in $runtime.runtimeOptions.includedFrameworks) {
             $name=$framework.name+'.Runtime.win-x64';$version=$framework.version
             $packDirectory=$null
@@ -150,11 +150,24 @@ try {
             }
             if (-not $packDirectory) { throw 'Actual Windows runtime pack not found' }
             $packs+=@{name=$name;version=$version;sha512=[IO.File]::ReadAllText((Join-Path $packDirectory ($name.ToLowerInvariant()+'.'+$version+'.nupkg.sha512'))).Trim()}
+            if ($framework.name -ceq 'Microsoft.NETCore.App') { $runtimeListPath=Join-Path $packDirectory 'data/RuntimeList.xml' }
             $native=Join-Path $packDirectory 'runtimes/win-x64/native'
             if (Test-Path -LiteralPath $native) { foreach ($file in Get-ChildItem -LiteralPath $native -File -Filter '*.dll') { $nativeLibraries+=@{name=$file.Name;pack=$name;bytes=$file.Length;sha256=(Hash $file.FullName)} } }
         }
+        # Resolve the ACTUAL SDK-selected static host, rather than invent DLL loading.
+        $hostPath=(Invoke-ApexBuildDotnet msbuild src/Apex.Desktop/Apex.Desktop.csproj -t:_GetAppHostPaths -p:Configuration=Release -p:RuntimeIdentifier=win-x64 -p:SelfContained=true -p:PublishSingleFile=true -getProperty:SingleFileHostSourcePath)
+        Sprawdz 'Resolve actual singlefilehost source'
+        $hostFile=Get-Item -LiteralPath ([string]$hostPath).Trim()
+        if ($hostFile.Name -cne 'singlefilehost.exe' -or $hostFile.Directory.Parent.Parent.Parent.Parent.Name -ine 'Microsoft.NETCore.App.Host.win-x64') { throw 'Unexpected SDK singlefilehost source' }
+        $dropped=@('coreclr.dll','clrjit.dll','hostfxr.dll','hostpolicy.dll')
+        [xml]$runtimeList=[IO.File]::ReadAllText($runtimeListPath)
+        foreach ($component in $dropped) {
+            $entry=@($runtimeList.FileList.File|Where-Object { $_.Path -ceq ('runtimes/win-x64/native/'+$component) })
+            if ($entry.Count -ne 1 -or $entry[0].DropFromSingleFile -cne 'true') { throw 'Actual runtime list does not prove static host component' }
+        }
+        $staticHost=@{pack='Microsoft.NETCore.App.Host.win-x64';version=$hostFile.Directory.Parent.Parent.Parent.Name;templateSha256=(Hash $hostFile.FullName);runtimeListSha256=(Hash $runtimeListPath);codeSections=@(Read-ApexPeExecutableSections $hostFile.FullName);droppedNativeComponents=$dropped}
         $publishArgv[1]=Join-Path $repo 'src/Apex.Desktop/Apex.Desktop.csproj'
-        Json (Join-Path $evidence 'windows-publish.json') ([ordered]@{schema='apex-windows-publish-v1';rid='win-x64';sdkVersion=$sdk;exeSha256=(Hash (Join-Path $desktop 'ApexDesktop.exe'));runtimeConfigUtf8=$runtimeText;runtimeConfigSha256=(Hash $runtimePath);assetsSha256=(Hash $assetsPath);publishArgv=$publishArgv;runtimePacks=$packs;nativeLibraries=$nativeLibraries})
+        Json (Join-Path $evidence 'windows-publish.json') ([ordered]@{schema='apex-windows-publish-v1';rid='win-x64';sdkVersion=$sdk;exeSha256=(Hash (Join-Path $desktop 'ApexDesktop.exe'));runtimeConfigUtf8=$runtimeText;runtimeConfigSha256=(Hash $runtimePath);assetsSha256=(Hash $assetsPath);publishArgv=$publishArgv;runtimePacks=$packs;nativeLibraries=$nativeLibraries;staticHost=$staticHost})
         Test-ApexWindowsPublish $desktop (Join-Path $evidence 'windows-publish.json') | Out-Null
         Copy-Item (Join-Path $PSScriptRoot 'PRZECZYTAJ-WINDOWS.md') (Join-Path $Wyjscie 'PRZECZYTAJ.md')
     }

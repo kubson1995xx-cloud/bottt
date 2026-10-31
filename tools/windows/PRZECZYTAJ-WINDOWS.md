@@ -20,7 +20,7 @@ Dla własnego katalogu dodaj `--data 'C:\pełna\prywatna-ścieżka'`. Nie przeka
 
 ## Dane, aktualizacje i bezpieczna odmowa
 
-Domyślny katalog danych: `%LOCALAPPDATA%\APEX Trading AI`. Precedencja: `--data`, następnie `APEX_DATA_DIR`, następnie domyślny KnownFolder. Dane są **poza całym pakietem**, chronione natywnymi ACL dla bieżącego użytkownika, SYSTEM i Administratorów. Poświadczenia webowe przechowuje CurrentUser DPAPI oraz mapa skrótów; nie są to klucze brokera. Nie wysyłaj konfiguracji, map, plików DPAPI ani prywatnych logów. Pliki bibliotek runtime rozpakowuje mechanizm .NET poza ZIP-em; izolowany smoke sprawdza osobny chroniony katalog ekstrakcji.
+Domyślny katalog danych: `%LOCALAPPDATA%\APEX Trading AI`. Precedencja: `--data`, następnie `APEX_DATA_DIR`, następnie domyślny KnownFolder. Dane są **poza całym pakietem**, chronione natywnymi ACL dla bieżącego użytkownika, SYSTEM i Administratorów. Poświadczenia webowe przechowuje CurrentUser DPAPI oraz mapa skrótów; nie są to klucze brokera. Nie wysyłaj konfiguracji, map, plików DPAPI ani prywatnych logów. Pliki natywne, jeśli są potrzebne, rozpakowuje mechanizm .NET poza ZIP-em. W tym wariancie .NET 8 kod CoreCLR/JIT/hostingu jest statycznie związany z EXE: smoke wiąże sekcje wykonywalne z rzeczywistym szablonem hosta SDK, sprawdza pochodzenie załadowanych modułów i ACL katalogu ekstrakcji oraz raportuje faktyczną liczbę rozpakowanych plików (również zero).
 
 Istniejąca poprawna konfiguracja i własne profile pozostają zachowane, również `NavalRead` wyłączone. To tryb legacy, a nie portal bezpieczny dla roli Reader. Nie przenoś poświadczeń między użytkownikami: DPAPI wiąże je z kontem Windows. Nie usuwaj ani nie resetuj danych po błędzie.
 

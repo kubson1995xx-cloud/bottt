@@ -181,9 +181,49 @@ function Test-ApexWindowsOsRuntimeModule([string]$Name,[string]$Path,[string]$Sy
     return $Path.Equals((Join-Path $SystemDirectory $Name),[StringComparison]::OrdinalIgnoreCase)
 }
 
+# Hash executable PE sections, not mutable apphost metadata/resources/bundle data.
+function Read-ApexPeExecutableSections([string]$Path) {
+    $b=[IO.File]::ReadAllBytes($Path)
+    if ($b.Length -lt 256 -or $b.Length -gt 268435456 -or [BitConverter]::ToUInt16($b,0) -ne 0x5a4d) { throw 'Invalid bounded PE image' }
+    $pe=[long][BitConverter]::ToUInt32($b,60)
+    if ($pe -lt 64 -or $pe+24 -gt $b.Length -or [BitConverter]::ToUInt32($b,[int]$pe) -ne 0x4550 -or [BitConverter]::ToUInt16($b,[int]$pe+4) -ne 0x8664) { throw 'Invalid x64 PE header' }
+    $count=[BitConverter]::ToUInt16($b,[int]$pe+6);$optional=[BitConverter]::ToUInt16($b,[int]$pe+20)
+    $table=$pe+24+$optional
+    if ($count -lt 1 -or $count -gt 96 -or $optional -lt 112 -or $table+40*$count -gt $b.Length -or [BitConverter]::ToUInt16($b,[int]$pe+24) -ne 0x20b) { throw 'Invalid PE section table' }
+    $sections=@();$seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try {
+        for ($i=0;$i -lt $count;$i++) {
+            $offset=[int]($table+40*$i)
+            if (([BitConverter]::ToUInt32($b,$offset+36) -band 0x20000000) -eq 0) { continue }
+            $name=[Text.Encoding]::ASCII.GetString($b,$offset,8).TrimEnd([char]0)
+            $size=[long][BitConverter]::ToUInt32($b,$offset+16);$start=[long][BitConverter]::ToUInt32($b,$offset+20)
+            if ($name -cnotmatch '\A[.A-Za-z0-9_-]{1,8}\z' -or -not $seen.Add($name) -or $size -le 0 -or $start -lt $table+40*$count -or $start+$size -gt $b.Length) { throw 'Invalid PE executable section' }
+            $sections+=[pscustomobject]@{name=$name;bytes=$size;sha256=([BitConverter]::ToString($sha.ComputeHash($b,[int]$start,[int]$size))).Replace('-','').ToLowerInvariant()}
+        }
+    } finally { $sha.Dispose() }
+    if ($sections.Count -eq 0) { throw 'No executable PE sections' }
+    return $sections
+}
+function Test-ApexWindowsStaticHost([string]$Exe,$Proof) {
+    Assert-ApexPresentationFields $Proof @('pack','version','templateSha256','runtimeListSha256','codeSections','droppedNativeComponents')
+    if ($Proof.pack -isnot [string] -or $Proof.version -isnot [string] -or $Proof.pack -cne 'Microsoft.NETCore.App.Host.win-x64' -or $Proof.version -cnotmatch '\A8\.0\.[0-9]+\z') { throw 'Static host pack identity invalid' }
+    foreach ($field in @('templateSha256','runtimeListSha256')) { if ($Proof.$field -isnot [string] -or $Proof.$field -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Static host provenance hash invalid' } }
+    $required=@('coreclr.dll','clrjit.dll','hostfxr.dll','hostpolicy.dll')
+    if ($Proof.droppedNativeComponents -isnot [array] -or $Proof.droppedNativeComponents.Count -ne $required.Count) { throw 'Static host runtime components unproven' }
+    for ($i=0;$i -lt $required.Count;$i++) { if ($Proof.droppedNativeComponents[$i] -isnot [string] -or $Proof.droppedNativeComponents[$i] -cne $required[$i]) { throw 'Static host runtime component identity invalid' } }
+    $actual=@(Read-ApexPeExecutableSections $Exe)
+    if ($Proof.codeSections -isnot [array] -or $Proof.codeSections.Count -ne $actual.Count) { throw 'Static host code section inventory invalid' }
+    for ($i=0;$i -lt $actual.Count;$i++) {
+        $expected=$Proof.codeSections[$i];Assert-ApexPresentationFields $expected @('name','bytes','sha256')
+        if ($expected.name -isnot [string] -or ($expected.bytes -isnot [int] -and $expected.bytes -isnot [long]) -or $expected.sha256 -isnot [string] -or $expected.name -cne $actual[$i].name -or $expected.bytes -ne $actual[$i].bytes -or $expected.sha256 -cne $actual[$i].sha256) { throw 'EXE runtime code differs from SDK-resolved singlefilehost' }
+    }
+    return $true
+}
+
 function Test-ApexWindowsPublish([string]$Directory,[string]$EvidencePath) {
     $m=Read-ApexPresentationJson $EvidencePath 1048576
-    Assert-ApexPresentationFields $m @('schema','rid','sdkVersion','exeSha256','runtimeConfigUtf8','runtimeConfigSha256','assetsSha256','publishArgv','runtimePacks','nativeLibraries')
+    Assert-ApexPresentationFields $m @('schema','rid','sdkVersion','exeSha256','runtimeConfigUtf8','runtimeConfigSha256','assetsSha256','publishArgv','runtimePacks','nativeLibraries','staticHost')
     if ($m.schema -cne 'apex-windows-publish-v1' -or $m.rid -cne 'win-x64' -or $m.sdkVersion -isnot [string] -or $m.sdkVersion -cnotmatch '\A8\.0\.[0-9]+\z') { throw 'Windows publish identity invalid' }
     foreach ($n in @('exeSha256','runtimeConfigSha256','assetsSha256')) { if ($m.$n -isnot [string] -or $m.$n -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Windows publish hash invalid' } }
     if ($m.exeSha256 -cne (Get-FileHash -LiteralPath (Join-Path $Directory 'ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Windows publish EXE binding invalid' }
@@ -213,6 +253,8 @@ function Test-ApexWindowsPublish([string]$Directory,[string]$EvidencePath) {
         if ($n.name -isnot [string] -or $n.name -cnotmatch '\A[A-Za-z0-9_.-]+\.dll\z' -or -not $seen.Add($n.name) -or $n.pack -cnotin @('Microsoft.NETCore.App.Runtime.win-x64','Microsoft.AspNetCore.App.Runtime.win-x64') -or $n.sha256 -isnot [string] -or $n.sha256 -cnotmatch '\A[a-f0-9]{64}\z' -or ($n.bytes -isnot [int] -and $n.bytes -isnot [long]) -or $n.bytes -le 0) { throw 'Windows native provenance invalid' }
     }
     if (-not $seen.Contains('coreclr.dll')) { throw 'Windows coreclr provenance required' }
+    Test-ApexWindowsStaticHost (Join-Path $Directory 'ApexDesktop.exe') $m.staticHost | Out-Null
+    if ($m.staticHost.version -cne @($m.runtimePacks|Where-Object name -ceq 'Microsoft.NETCore.App.Runtime.win-x64')[0].version) { throw 'Static host/runtime pack version mismatch' }
     return $m
 }
 

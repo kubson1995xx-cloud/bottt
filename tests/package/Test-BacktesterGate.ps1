@@ -14,6 +14,8 @@ function Write-Fixture([int]$total, [int]$passed, [int]$failed) {
 function Reject([scriptblock]$body) { $bad=$false; try { & $body } catch { $bad=$true }; if (-not $bad) { throw 'Accepted deliberately invalid controlled fixture' } }
 function Put([string]$p,[string]$s) { New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null; [IO.File]::WriteAllText($p,$s) }
 function Hash([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
+$staticControls=Join-Path $Scratch 'static-host-controls'
+Case 'StaticHostParserControls' { & (Join-Path $Source 'tests/package/Test-WindowsStaticHost.ps1') -Source $Source -Scratch $staticControls }
 Case 'TrxValid' { Write-Fixture 1 1 0; $c=Read-ApexTestCounts $fixture; if ($c.total -ne 1 -or $c.passed -ne 1) { throw 'Wrong counts' } }
 foreach ($v in @(@(0,0,0),@(1,0,1),@(2,2,0))) { $vv=$v; Case ('TrxRejected-'+($v -join '-')) { Write-Fixture $vv[0] $vv[1] $vv[2]; Reject { Read-ApexTestCounts $fixture } } }
 # Controlled files are never executed. This valid control must pass before negative mutations.
@@ -25,6 +27,7 @@ $package=[IO.Path]::GetFullPath((Join-Path $Scratch 'controlled-package'))
 # an explicitly controlled parser fixture, not a claim of native publication.
 $windowsRuntimeText='{"runtimeOptions":{"tfm":"net8.0","includedFrameworks":[{"name":"Microsoft.NETCore.App","version":"8.0.0"},{"name":"Microsoft.AspNetCore.App","version":"8.0.0"}]}}'
 function Set-WindowsControl {
+    Copy-Item -LiteralPath (Join-Path $staticControls 'controlled.exe') -Destination (Join-Path $package 'APEX-Desktop/ApexDesktop.exe') -Force
     Copy-Item -LiteralPath (Join-Path $real 'presentation') -Destination (Join-Path $package 'APEX-Desktop/presentation') -Recurse
     Put (Join-Path $package 'PRZECZYTAJ.md') 'CONTROLLED_NOT_PRODUCT'
     Copy-Item $fixture (Join-Path $package 'Weryfikacja/windows.trx')
@@ -33,6 +36,7 @@ function Set-WindowsControl {
     $sha=[Security.Cryptography.SHA256]::Create()
     try { $digest=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($windowsRuntimeText)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
     $script:wp=@{schema='apex-windows-publish-v1';rid='win-x64';sdkVersion='8.0.427';exeSha256=(Hash (Join-Path $package 'APEX-Desktop/ApexDesktop.exe'));runtimeConfigUtf8=$windowsRuntimeText;runtimeConfigSha256=$digest;assetsSha256=('3'*64);publishArgv=@('publish','src/Apex.Desktop/Apex.Desktop.csproj','-c','Release','--no-restore','-r','win-x64','--self-contained','true','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:PublishTrimmed=false','-p:PublishReadyToRun=false','-p:IsTransformWebConfigDisabled=true','-o','APEX-Desktop');runtimePacks=@(@{name='Microsoft.NETCore.App.Runtime.win-x64';version='8.0.0';sha512=[Convert]::ToBase64String([byte[]]::new(64))},@{name='Microsoft.AspNetCore.App.Runtime.win-x64';version='8.0.0';sha512=[Convert]::ToBase64String([byte[]]::new(64))});nativeLibraries=@(@{name='coreclr.dll';pack='Microsoft.NETCore.App.Runtime.win-x64';bytes=1;sha256=('4'*64)})}
+    $wp.staticHost=@{pack='Microsoft.NETCore.App.Host.win-x64';version='8.0.0';templateSha256=(Hash (Join-Path $package 'APEX-Desktop/ApexDesktop.exe'));runtimeListSha256=('5'*64);codeSections=@(Read-ApexPeExecutableSections (Join-Path $package 'APEX-Desktop/ApexDesktop.exe'));droppedNativeComponents=@('coreclr.dll','clrjit.dll','hostfxr.dll','hostpolicy.dll')}
 }
 function Windows-Control { Reset-Package }
 function Seal-Windows { Put (Join-Path $package 'Weryfikacja/windows-publish.json') ($wp|ConvertTo-Json -Depth 12);Seal }
@@ -394,10 +398,12 @@ foreach ($casing in @('lower','upper','mixed','final-LF')) {
     }
 }
 Case 'WindowsTask5ShippedPositive' { Windows-Control;Seal-Windows;& (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package }
-foreach ($fault in @('missing-exe','missing-presentation','missing-runtime-proof','shared-framework','wrong-rid','wrong-default','wrong-profile','wrong-preserve','missing-windows-trx','zero-windows-trx','failed-windows-trx','skip-windows-trx','loose-dll','replay-exe','private-map','session-cache')) {
+foreach ($fault in @('missing-static-host','changed-static-code','missing-exe','missing-presentation','missing-runtime-proof','shared-framework','wrong-rid','wrong-default','wrong-profile','wrong-preserve','missing-windows-trx','zero-windows-trx','failed-windows-trx','skip-windows-trx','loose-dll','replay-exe','private-map','session-cache')) {
     Case ('WindowsTask5-'+$fault) {
         Windows-Control
         switch ($fault) {
+            'missing-static-host' { $wp.Remove('staticHost') }
+            'changed-static-code' { $p=Join-Path $package 'APEX-Desktop/ApexDesktop.exe';$b=[IO.File]::ReadAllBytes($p);$b[512]=0;[IO.File]::WriteAllBytes($p,$b);$wp.exeSha256=Hash $p }
             'missing-exe' { Remove-Item (Join-Path $package 'APEX-Desktop/ApexDesktop.exe') }
             'missing-presentation' { Remove-Item (Join-Path $package 'APEX-Desktop/presentation/presentation.json') }
             'shared-framework' { $wp.runtimeConfigUtf8=$windowsRuntimeText.Replace('includedFrameworks','frameworks');$sha=[Security.Cryptography.SHA256]::Create();try {$wp.runtimeConfigSha256=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($wp.runtimeConfigUtf8)))).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()} }
