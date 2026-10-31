@@ -1,4 +1,20 @@
-# Task8A — lokalna dostawa Linux odebrana
+# Dostawy NAVAL COMMAND — Windows x64 odebrany
+
+## Aktualna dyspozycja Windows
+
+**ODEBRANY w hostowanym zakresie Windows**, źródło `a03c28892db1e6b731bd9d3e78c607c6e0bedfd8`, CI https://github.com/kubson1995xx-cloud/bottt/actions/runs/41174857151 SUCCESS. Niezależny `task-7-final-review.md`: spec PASS, quality APPROVED z jednym Minor F2 dotyczącym przyszłych CI, bez Critical/Important. Task5 F1 i Task6 P2 zamknięte.
+
+Paczka `/home/ubuntu/projects/apex-deliveries/naval-windows-a03c288/APEX-NAVAL-COMMAND-Windows-x64.zip`, 43 207 306 bajtów, SHA256 `fe07c008531794b99ec622abdacc00932078d642e7a1555ef69f3ce59a50bec5`. ZIP po testach niezmieniony, CRC51/manifest50/source419 odczytane; artifact produktu13032946137/dowodów13032756602. `ODBIOR-I-START.md` jest końcową dyspozycją dla historycznego nagłówka kandydata wewnątrz ZIP-a i jego build-time flag.
+
+Świeże wyniki końcowe: bot850/850, platform126/126, backtester168/168, WindowsSource75/75, extractedEXE110/110, Package6/6, Browser2/2, frontend58/58+build4/4, root22/22, packaging220/220, notices14/14, causalF1 native12/12, isolatedEXEsmoke PASS. Odrębne warstwy, nie dodawać do jednego total. No-argument/modal/DPAPI/defaultassociation/loopback/privateACL, pięć widoków/oldpanel/3D/fallback/retry/privacy i syntheticEmergency/restart sprawdzone na tym payloadzie. Żadnych realnych kont ani transakcji.
+
+Granice: host Windows Server2025/SDK8.0.427/PS5.1/SwiftShader, nie fizyczny Windows11/hardwareGPU ani prywatny broker E2E. Zachowany wcześniejszy nieodtworzony scenetimeout — nie deklarować naprawy. Nieprodukcyjny AI Lab180/181, testowy Windows.git ACL failure jawnie nieblokujący. Rentowność nieudowodniona.
+
+Minor F2 jawnie odłożony: przyszły workflow zależy od historycznego fixture Actions wygasającego `2026-11-30T04:15:29Z`. Przed przyszłymi buildami utrwalić go albo oddzielić zamknięty causal replay od obowiązkowego buildera; nie wpływa na bieżące ZIP/lokalny start. Nie deklarować bezterminowej odtwarzalności CI. Nie wykonano merge/deploy.
+
+## Historia — Task8A lokalna dostawa Linux
+
+Poniższy końcowy status dotyczy starszego wydania Linux. Dawne wpisy o braku zgody lub niewykonanym Windows CI są historyczne.
 
 ## Końcowa dyspozycja
 **ZAAKCEPTOWANY LOKALNIE/Linux engineering delivery**, kod `0720f29`, po `task-8a-fix2-review.md`: I3-R1 ADDRESSED, brak nowych Critical/Important, I1/I2 wcześniej zamknięte. 150kontroli weryfikatora i root18/18, exactreviewinput0/1/1. Nie deklarować całej misji ani Windows/broker acceptance.
