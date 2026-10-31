@@ -7,7 +7,7 @@ using System.Text.Json;
 using Apex.Core.Engine;
 namespace Apex.Core.Naval;
 
-internal enum NavalPublicationOperation { Reservation, Evidence, Safety, Mode }
+internal enum NavalPublicationOperation { Reservation, Evidence, Safety, Mode, ExecutionMaintenance }
 // Deliberately not a receipt: neither OwnerToken nor raw conflicts can enter publication.
 internal sealed record NavalPublicationCause(NavalPublicationOperation Operation, string Code, string NewEpoch,
     NavalEvidenceKind? Kind=null, DateTimeOffset? CaptureUtc=null, DateTimeOffset? ReceiveUtc=null,
@@ -84,6 +84,7 @@ public static class NavalReadJournal
                 break;
             case NavalPublicationOperation.Safety:Add(NavalReadFactKind.OfflineSafetyChanged,operation:Operation());break;
             case NavalPublicationOperation.Mode:Add(NavalReadFactKind.OfflineModeChanged,operation:Operation());break;
+            case NavalPublicationOperation.ExecutionMaintenance:break; // Revision continuity, deliberately no public execution facts.
             default:throw new InvalidDataException("Unknown publication cause");
         }
         if(cause.Operation==NavalPublicationOperation.Evidence&&(old.Mode!=s.Mode||old.DailyLatch!=s.DailyLatch||old.DrawdownLatch!=s.DrawdownLatch||old.EmergencyLatch!=s.EmergencyLatch))

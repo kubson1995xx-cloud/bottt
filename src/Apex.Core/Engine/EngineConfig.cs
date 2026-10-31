@@ -56,6 +56,8 @@ namespace Apex.Core.Engine
         public ExecutionTestCertificate? ExecutionTest { get; set; }
         public long DurableRevision { get; set; }
         public Apex.Core.Naval.NavalPortfolioState? Naval { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public Apex.Core.Naval.NavalExecutionState? NavalExecution { get; set; }
         public Apex.Core.Naval.NavalReadJournalState? NavalReadJournal { get; set; }
         public RecoveryBaseline? Baseline { get; set; }
         public List<OpenAdmission> OpenAdmissions { get; set; } = new();

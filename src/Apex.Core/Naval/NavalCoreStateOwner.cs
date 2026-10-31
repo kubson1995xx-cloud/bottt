@@ -42,12 +42,18 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
             }
             else
             {
-                if(!File.Exists(marker))throw new InvalidDataException("Authority without initialization manifest");
-                using var doc=JsonDocument.Parse(raw);RequireProperties(doc.RootElement.GetProperty("Naval"),typeof(NavalPortfolioState));
-                foreach(var r in doc.RootElement.GetProperty("Naval").GetProperty("Reservations").EnumerateArray())RequireProperties(r,typeof(NavalReservation));
-                if(doc.RootElement.EnumerateObject().Count(p=>p.Name=="NavalReadJournal")>1)throw new InvalidDataException("Duplicate publication metadata");
-                if(doc.RootElement.TryGetProperty("NavalReadJournal",out var metadata)&&metadata.ValueKind!=JsonValueKind.Null)NavalReadJournal.RequireMetadata(metadata);
-                _state=JsonSerializer.Deserialize<EngineState>(raw,NavalJson.Options)??throw new InvalidDataException("Null authority");Validate(_state);
+                using var doc=JsonDocument.Parse(raw);
+                bool execution=doc.RootElement.EnumerateObject().Any(p=>string.Equals(p.Name,"NavalExecution",StringComparison.OrdinalIgnoreCase)&&p.Value.ValueKind!=JsonValueKind.Null);
+                try
+                {
+                    if(!File.Exists(marker))throw new InvalidDataException("Authority without initialization manifest");
+                    NavalExecutionValidation.RequireRaw(doc.RootElement);RequireProperties(doc.RootElement.GetProperty("Naval"),typeof(NavalPortfolioState));
+                    foreach(var r in doc.RootElement.GetProperty("Naval").GetProperty("Reservations").EnumerateArray())RequireProperties(r,typeof(NavalReservation));
+                    if(doc.RootElement.EnumerateObject().Count(p=>p.Name=="NavalReadJournal")>1)throw new InvalidDataException("Duplicate publication metadata");
+                    if(doc.RootElement.TryGetProperty("NavalReadJournal",out var metadata)&&metadata.ValueKind!=JsonValueKind.Null)NavalReadJournal.RequireMetadata(metadata);
+                    _state=JsonSerializer.Deserialize<EngineState>(raw,NavalJson.Options)??throw new InvalidDataException("Null authority");Validate(_state);
+                }
+                catch(Exception ex) when(execution&&ex is not OutOfMemoryException){throw NavalExecutionValidation.Invalid();}
             }
         }
         catch{_lease.Dispose();throw;}
@@ -66,6 +72,8 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
                 candidate=NavalJson.Clone(candidate);
                 if(candidate.DurableRevision!=checked(expectedRevision+1))throw new InvalidDataException("Revision discontinuity");
                 candidate.Naval=Seal(candidate.Naval??throw new InvalidDataException("Missing Naval state"));
+                if(candidate.NavalExecution is {} execution)candidate.NavalExecution=NavalExecutionValidation.Seal(execution,candidate.DurableRevision);
+                NavalExecutionValidation.ValidateTransition(_state,candidate);
                 NavalReadJournal.ValidateTransition(_state,candidate);
                 Validate(candidate);_store.Set(StateKey,NavalJson.Serialize(candidate));_store.Flush();_state=candidate;return NavalCommitResult.Committed;
             }
@@ -78,7 +86,8 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
         NavalCashRiskPolicy.ValidateDefinition(_definition);
         var s=envelope.Naval??throw new InvalidDataException("Unconfigured authority");
         if(s.StateDigest!=Seal(s).StateDigest)throw new InvalidDataException("Naval state integrity digest mismatch");
-        var c=NavalJson.Clone(envelope);c.Naval=null;c.NavalReadJournal=null;c.DurableRevision=0;c.SavedUtc=default;
+        NavalExecutionValidation.Validate(envelope,_definition);
+        var c=NavalJson.Clone(envelope);c.Naval=null;c.NavalReadJournal=null;c.NavalExecution=null;c.DurableRevision=0;c.SavedUtc=default;
         if(NavalJson.Serialize(c)!=NavalJson.Serialize(new EngineState()))throw new InvalidDataException("CFD-populated envelope is not a Naval scope");
         if(s.Schema!="naval-cash-risk-v1"||s.Id!=_definition.Id||s.ConfigDigest!=_definition.Digest||s.Revision!=envelope.DurableRevision||s.Generation<0||s.Sequence<0||
             (s.Mode!="STOP"&&s.Mode!="RUNNING"))throw new InvalidDataException("Naval schema/config/scope/revision mismatch");

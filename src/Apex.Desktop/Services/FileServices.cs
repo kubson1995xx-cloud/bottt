@@ -25,6 +25,9 @@ namespace Apex.Desktop.Services
             Directory.CreateDirectory(dir);
         }
 
+        private readonly Action<AtomicWriteBoundary>? _observer;
+        internal FileStore(string dir, Action<AtomicWriteBoundary> observer) : this(dir) { _observer = observer; }
+
         private string PathFor(string key)
         {
             var sb = new StringBuilder();
@@ -53,7 +56,7 @@ namespace Apex.Desktop.Services
         {
             lock (_lock)
             {
-                try { AtomicFile.Write(PathFor(key), value); }
+                try { AtomicFile.Write(PathFor(key), new UTF8Encoding(false).GetBytes(value), _observer); }
                 catch { _hasFault = true; throw; }
             }
         }

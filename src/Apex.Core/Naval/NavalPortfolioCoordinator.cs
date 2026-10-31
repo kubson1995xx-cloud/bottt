@@ -4,7 +4,7 @@ using System.Linq;
 using Apex.Core.Engine;
 namespace Apex.Core.Naval;
 
-public sealed class NavalPortfolioCoordinator
+public sealed partial class NavalPortfolioCoordinator
 {
     private readonly INavalStateOwner _owner;
     private readonly NavalPortfolioDefinition _definition;
@@ -40,7 +40,7 @@ public sealed class NavalPortfolioCoordinator
         long old=envelope.DurableRevision;envelope.DurableRevision=checked(old+1);envelope.Naval=s with{Revision=envelope.DurableRevision};
         envelope.NavalReadJournal=NavalReadJournal.Append(previous,envelope,cause,_clock.UtcNow,_definition);
         var result=_owner.TryCommit(old,envelope);
-        if(result!=NavalCommitResult.Committed){_frozen=true;_ready=false;_started=false;return new(NavalMutationStatus.Stopped,result==NavalCommitResult.Conflict?"COMMIT_CONFLICT":"STORAGE_FROZEN",id,old);}
+        if(result!=NavalCommitResult.Committed){_frozen=true;_ready=false;_started=false;return new(NavalMutationStatus.Stopped,result==NavalCommitResult.Conflict?"COMMIT_CONFLICT":"STORAGE_FROZEN",null,old);}
         return new(status,code,id,envelope.DurableRevision);
     }
     private NavalRiskResult StopCandidate(EngineState e,string reason,bool emergency=false,string? conflict=null)
