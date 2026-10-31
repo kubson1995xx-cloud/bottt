@@ -21,3 +21,16 @@
 4. Block malicious browser origins/cross-site reads/commands and simple-form writes; retain strict loopback/Host checks and command CSRF token. Local processes/users able to reach loopback are inside this explicit desktop-local trust boundary; no reusable operator credential is published or auto-START granted.
 5. Update Polish start instructions and native browser/package evidence to use no auth interception or credentials in desktop-local mode; retain isolated explicitly protected reader/operator tests.
 6. Commit explicit paths, push only authorized feature branch, dispatch and read back native RED/GREEN/full-delivery, download independently verify actual ZIP/evidence/hashes and preserve separately from old release. Stop for parent independent review before user delivery.
+
+## Recovery checkpoint — RED dispatch
+- Commit 864bdcc00014ad0505c31b5cd8852707bac42c10 (tests + this report only), pushed to authorized feature branch; remote SHA read back equal.
+- Native Windows task3-source RED run 41202681657: https://github.com/kubson1995xx-cloud/bottt/actions/runs/41202681657; running. Existing source driver records pre-build source maps and pre-behavior binary/asset maps. No product changes before this native gate.
+- New tests exercise actual Program first-run and existing genuine v1 Ready profile + restart with a prompt adapter that refuses any manual login; shell callback performs anonymous real HTTP document/API requests. Expected RED: first run invokes forbidden prompt; existing run gets Basic401 instead of redirect200 flow. No injected credentials.
+- Local controller located SDK8.0.427 at /home/ubuntu/.dotnet/dotnet. Supporting old protected-mode trace: actual production-process credential/scope and exact root redirect tests passed 2/2 (baseline-auth.trx under scratch/apex-no-login-baseline); no pre-run map was taken for that supporting probe, so it is not claimed as full source-bound acceptance. Native driver supplies stronger ordered evidence.
+- Artifact expiry probe: historical causal fixture still available, expires 2026-11-30; no unrelated workflow-maintenance change required.
+- Next gate: read native RED reached assertions before product implementation.
+
+## Recovery checkpoint — first native RED readback
+- Run 41202681657 FAILED as intended, downloaded intact to `/home/ubuntu/projects/apex-deliveries/naval-windows-no-login/red-41202681657`. Native setup 33/34; first-start test reached forbidden prompt count expected0/actual1. Existing protected auth/frontend 41/41 PASS; user-machine Basic loop was not reproduced by these tests.
+- Test-harness issue found before product edits: DesktopBrowser.TryOpen intentionally catches launcher exceptions. The initial existing-profile case therefore swallowed its HTTP assertion and passed after cancellation timeout. That passing case is NOT accepted evidence. Tests now capture callback failures and assert outside the production catch, with cancellation in finally; mutable startup log files are excluded from configuration/private-state preservation comparisons. First-run RED remains valid.
+- Added request-boundary/explicit protected-opt-out matrix for the forthcoming mode. No product changes yet. Next: commit strengthened tests and native RED on unchanged product bytes.
