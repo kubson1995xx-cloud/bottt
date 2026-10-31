@@ -103,11 +103,22 @@ public sealed class OkxExecutionClient : IAsyncDisposable
             {
                 if(!Admitted()) return new(false,"ExpiredOrStopped");
                 if(ExecutionDiagnostics.Unsafe) return new(false,"UnsafeHttpDiagnostics");
-                if(!fence.CanDispatch(r,clock.GetUtcNow()) || !Admitted()) return new(false,"FinalFenceDenied");
-                // No await between caller fence, deadline/cancellation/lifetime check and invocation.
-                lane.Next=clock.GetUtcNow()+TimeSpan.FromMilliseconds(r.Operation is OkxExecutionOperation.PlaceProtection or OkxExecutionOperation.CancelProtection?110:40);
-                invoked=true;
-                sending=http.SendAsync(request,ct);
+                IDisposable? guard=null;
+                try
+                {
+                    if(fence is IOkxSerializedDispatchFence serialized)
+                    {
+                        guard=serialized.TryEnterDispatch(r,clock.GetUtcNow());
+                        if(guard is null) return new(false,"FinalFenceDenied");
+                    }
+                    else if(!fence.CanDispatch(r,clock.GetUtcNow())) return new(false,"FinalFenceDenied");
+                    if(!Admitted()) return new(false,"ExpiredOrStopped");
+                    // Guard remains held through synchronous invocation, never across response await.
+                    lane.Next=clock.GetUtcNow()+TimeSpan.FromMilliseconds(r.Operation is OkxExecutionOperation.PlaceProtection or OkxExecutionOperation.CancelProtection?110:40);
+                    invoked=true;
+                    sending=http.SendAsync(request,ct);
+                }
+                finally { guard?.Dispose(); }
             }
             using var response=await sending.ConfigureAwait(false);
             if(!response.IsSuccessStatusCode) return new(true,(int)response.StatusCode is >=300 and <=399?"RedirectDenied":"HttpUncertain");

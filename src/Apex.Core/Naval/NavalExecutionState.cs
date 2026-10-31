@@ -195,14 +195,28 @@ internal static class NavalExecutionValidation
             bool placement=i.Operation is NavalExecutionOperation.Submit or NavalExecutionOperation.PlaceProtection;
             var role=i.Operation is NavalExecutionOperation.Submit or NavalExecutionOperation.Cancel?NavalClientIdRole.Parent:NavalClientIdRole.ProtectionAlgo;
             if(original.Role!=role||placement&&(original.ExecutionCommandId!=i.IntentId||!usedPlacements.Add(i.OriginalClientId)||i.OrderId!=null))throw Invalid();
-            // P understands but refuses every later stage: a P writer is not an approved D downgrade writer.
-            switch(i.Stage)
-            {
-                case NavalExecutionStage.Prepared:if(i.DispatchRevision!=null||i.Outcome!=null)throw Invalid();break;
-                case NavalExecutionStage.Dispatching:case NavalExecutionStage.Accepted:case NavalExecutionStage.SubmitUnknown:case NavalExecutionStage.NotSent:throw Invalid();
-                default:throw Invalid();
-            }
+            ValidateStage(i,x.FinancialRevision);
+            if(i.Stage==NavalExecutionStage.SubmitUnknown&&(s.Mode!="STOP"||r.Stage!=NavalReservationStage.Uncertain))throw Invalid();
             ValidateBody(i,ids,usedPlacements);
+        }
+    }
+    internal static bool ValidOutcome(NavalExecutionIntent i,NavalExecutionOutcome o)
+        =>o!=null&&Enum.IsDefined(typeof(NavalDispatchDisposition),o.Disposition)&&o.OriginalClientId==i.OriginalClientId&&
+            (o.OrderId==null||Match(o.OrderId,"[0-9]{1,32}"))&&(i.OrderId==null||o.OrderId==i.OrderId)&&
+            (o.Disposition!=NavalDispatchDisposition.Acknowledged||o.OrderId!=null&&o.Code=="0"&&o.SCode=="0"&&o.SubCode==null)&&
+            o.Reason==(o.Disposition==NavalDispatchDisposition.Acknowledged?"TRANSPORT_ACK":o.Disposition==NavalDispatchDisposition.NotSent?"TRANSPORT_NOT_SENT":"TRANSPORT_UNKNOWN")&&new[]{o.Code,o.SCode,o.SubCode}.All(c=>c==null||c=="0"||Match(c,"[1-9][0-9]{4,7}"));
+    private static void ValidateStage(NavalExecutionIntent i,long revision)
+    {
+        if(i.DispatchRevision is {} attempt&&(attempt!=checked(i.PreparedRevision+1)||attempt>revision))throw Invalid();
+        switch(i.Stage)
+        {
+            case NavalExecutionStage.Prepared:if(i.DispatchRevision!=null||i.Outcome!=null)throw Invalid();break;
+            case NavalExecutionStage.Dispatching:if(i.DispatchRevision==null||i.Outcome!=null)throw Invalid();break;
+            case NavalExecutionStage.Accepted:case NavalExecutionStage.SubmitUnknown:case NavalExecutionStage.NotSent:
+                if(i.Outcome==null||!ValidOutcome(i,i.Outcome)||
+                    i.Outcome.Disposition!=(i.Stage==NavalExecutionStage.Accepted?NavalDispatchDisposition.Acknowledged:i.Stage==NavalExecutionStage.NotSent?NavalDispatchDisposition.NotSent:NavalDispatchDisposition.Unknown)||
+                    i.Stage!=NavalExecutionStage.NotSent&&i.DispatchRevision==null)throw Invalid();break;
+            default:throw Invalid();
         }
     }
     internal static void ValidateTransition(EngineState previous,EngineState candidate)
@@ -218,7 +232,18 @@ internal static class NavalExecutionValidation
             next.FinancialConfigDigest!=old.FinancialConfigDigest||next.HighWater<old.HighWater||next.StopEpoch<old.StopEpoch||
             next.IdAllocations.Count<old.IdAllocations.Count||next.Intents.Count<old.Intents.Count)throw Invalid();
         for(int n=0;n<old.IdAllocations.Count;n++)if(NavalJson.Serialize(old.IdAllocations[n])!=NavalJson.Serialize(next.IdAllocations[n]))throw Invalid();
-        for(int n=0;n<old.Intents.Count;n++)if(NavalJson.Serialize(old.Intents[n])!=NavalJson.Serialize(next.Intents[n]))throw Invalid();
+        for(int n=0;n<old.Intents.Count;n++)
+        {
+            var a=old.Intents[n];var b=next.Intents[n];
+            if(NavalJson.Serialize(a with{Stage=b.Stage,DispatchRevision=b.DispatchRevision,Outcome=b.Outcome})!=NavalJson.Serialize(b))throw Invalid();
+            if(NavalJson.Serialize(a)==NavalJson.Serialize(b))continue;
+            bool dispatch=a.Stage==NavalExecutionStage.Prepared&&b.Stage==NavalExecutionStage.Dispatching&&b.DispatchRevision==candidate.DurableRevision;
+            bool unsent=a.Stage==NavalExecutionStage.Prepared&&b.Stage==NavalExecutionStage.NotSent&&b.DispatchRevision==null;
+            bool finish=a.Stage==NavalExecutionStage.Dispatching&&b.Stage is NavalExecutionStage.Accepted or NavalExecutionStage.SubmitUnknown or NavalExecutionStage.NotSent&&a.DispatchRevision==b.DispatchRevision;
+            if(!dispatch&&!unsent&&!finish)throw Invalid();
+        }
+        foreach(var appended in next.Intents.Skip(old.Intents.Count))
+            if(appended.Stage!=NavalExecutionStage.Prepared||appended.PreparedRevision!=candidate.DurableRevision||appended.DispatchRevision!=null||appended.Outcome!=null)throw Invalid();
         foreach(var c in previous.Naval!.Commands)
             if(!candidate.Naval!.Commands.Any(n=>NavalJson.Serialize(n)==NavalJson.Serialize(c)))throw Invalid();
         foreach(var r in previous.Naval.Reservations.Where(r=>old.IdAllocations.Any(a=>a.ReservationId==r.Id)))

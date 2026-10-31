@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Apex.Core\Apex.Core.csproj" />
+    <ProjectReference Include="..\Apex.Adapters.Okx\Apex.Adapters.Okx.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

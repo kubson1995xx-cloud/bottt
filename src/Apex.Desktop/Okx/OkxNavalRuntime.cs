@@ -30,6 +30,10 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     internal static OkxNavalRuntime Compose(string admittedDataRoot, IReadOnlyList<OkxScopeBinding> bindings) => new(admittedDataRoot, bindings, () => new WindowsOkxCredentialStore(admittedDataRoot), new UnavailableOkxActivationProvider());
     // Direct existing friend-test seam only; never selected by Program/JSON/CLI/env.
     internal static OkxNavalRuntime Compose(string admittedDataRoot, IReadOnlyList<OkxScopeBinding> bindings, IOkxExecutionSecretProvider secrets, IOkxProtectedActivationProvider activation) => new(admittedDataRoot, bindings, () => secrets, activation);
+    // Synthetic Offline factory is reachable only by already trusted friend code, never startup/configuration.
+    internal static OkxNavalExecutionDispatcher ComposeOfflineExecutionForTests(Apex.Core.Naval.NavalExecutionTransactions transactions,
+        Func<Apex.Adapters.Okx.Execution.IOkxSerializedDispatchFence,Apex.Adapters.Okx.Execution.OkxExecutionClient> offlineClientFactory)
+        =>new(transactions,offlineClientFactory);
     internal ValueTask StartAsync(CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();

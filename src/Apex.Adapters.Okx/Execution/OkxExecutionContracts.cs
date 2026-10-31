@@ -59,6 +59,11 @@ public sealed record OkxOrderObservation
 /// Caller must validate its current STOP/session/source/catalog/reservation epoch, and serialize changes with dispatch.
 /// This callback is not an authority issuer, durable send permit or authenticated readiness proof.</summary>
 public interface IOkxFinalDispatchFence { bool CanDispatch(OkxPreparedRequest request, DateTimeOffset utcNow); }
+/// <summary>Transport synchronization only; the guard spans synchronous handler invocation, never response await.</summary>
+public interface IOkxSerializedDispatchFence : IOkxFinalDispatchFence
+{
+    IDisposable? TryEnterDispatch(OkxPreparedRequest request, DateTimeOffset utcNow);
+}
 public sealed record OkxAttachedProtection(string ClientId, string TakeProfitTrigger, string StopLossTrigger);
 
 /// <summary>Closed immutable request. Persistence must retain every field and these exact bytes; no re-quote on recovery.</summary>

@@ -25,13 +25,14 @@ internal sealed class OkxExecutionFixture : IDisposable
     internal IKeyValueStore Store=null!;
     internal NavalExecutionTransactions Transactions=null!;
     internal long Generation=1;
-    internal OkxExecutionFixture(string? directory=null)
+    internal OkxExecutionFixture(string? directory=null,Action<AtomicWriteBoundary>? observer=null,Func<IKeyValueStore,IKeyValueStore>? wrapStore=null)
     {
         DirectoryPath=directory??Path.Combine(Environment.GetEnvironmentVariable("TMPDIR")??Path.GetTempPath(),"okx-p-"+Guid.NewGuid().ToString("N"));
         Definition=new(new("p","USD"),new(),new[]{new NavalSeed(Account,10000m)},
             new[]{new NavalInstrument("BTC-USD","BTC","USD",.001m,.001m,.01m)},new(),
-            Enumerable.Range(0,50).Select(n=>new NavalSignal("s-"+n,Account,NavalFleet.Alpha,"BTC-USD","fixture-rule",Clock.Now.AddDays(-1),Clock.Now.AddDays(1))));
-        Open();
+            Enumerable.Range(0,50).Select(n=>new NavalSignal("s-"+n,Account,NavalFleet.Alpha,"BTC-USD","fixture-rule",Clock.Now.AddDays(-1),Clock.Now.AddDays(1)))
+                .Append(new NavalSignal("bravo-0",Account,NavalFleet.Bravo,"BTC-USD","fixture-rule",Clock.Now.AddDays(-1),Clock.Now.AddDays(1))));
+        var initialStore=new FileStore(DirectoryPath,observer!);Open(wrapStore==null?initialStore:wrapStore(initialStore));
     }
     internal void Open(IKeyValueStore? store=null)
     {Store=store??new FileStore(DirectoryPath);Owner=new(DirectoryPath,Store,Definition);Coordinator=new(Owner,Definition,Clock);}
@@ -56,7 +57,7 @@ internal sealed class OkxExecutionFixture : IDisposable
             Instrument=wire.Instrument,OriginalClientId=wire.OriginalClientId,OrderId=wire.OrderId,AllocationKeys=allocationKeys.Length==0?new[]{id}:allocationKeys,
             Body=wire.CopyBody(),RequestDigest=wire.Digest,Deadline=wire.Deadline,PreparedRevision=e.DurableRevision+1,
             ReservationDigest=NavalJson.Hash(r),DefinitionDigest=Definition.Digest,CatalogDigest=NavalJson.Hash(Definition.Catalog),
-            SourceGeneration=s.Generation,SourceSequence=s.Sequence,Stage=NavalExecutionStage.Prepared};
+            SourceGeneration=s.Generation,SourceSequence=s.Sequence,StopEpoch=e.NavalExecution!.StopEpoch,Stage=NavalExecutionStage.Prepared};
     }
     internal void Holds()
     {

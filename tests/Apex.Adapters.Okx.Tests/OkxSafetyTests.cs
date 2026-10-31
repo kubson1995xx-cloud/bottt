@@ -166,7 +166,15 @@ public class OkxSafetyTests
     { using var f = new OkxHttpFixture(); f.Add("/api/v5/public/time", "{}", HttpStatusCode.TooManyRequests, retryAfter: "25"); f.Add("/api/v5/public/time", "{}", HttpStatusCode.TooManyRequests, retryAfter: "25"); await using var c = f.Client(false); var r = await c.GetTimeAsync(default); Assert.Equal("RateLimited", r.ErrorCode); Assert.Equal(2, f.Sent.Count); Assert.InRange((f.Clock.Now - f.Sent[0].At).TotalSeconds, 25, 26); }
     [Fact]
     public void AssemblyCannotIssueCoreAuthority()
-    { var a = typeof(OkxEeaDemoReadClient).Assembly; Assert.DoesNotContain(a.GetReferencedAssemblies(), r => r.Name!.Contains("Apex.Core") || r.Name.Contains("Backtest")); Assert.Equal("Apex.Adapters.Okx.Tests", Assert.Single(a.GetCustomAttributes(typeof(System.Runtime.CompilerServices.InternalsVisibleToAttribute), false).Cast<System.Runtime.CompilerServices.InternalsVisibleToAttribute>()).AssemblyName); }
+    {
+        var a = typeof(OkxEeaDemoReadClient).Assembly;
+        Assert.DoesNotContain(a.GetReferencedAssemblies(), r => r.Name!.Contains("Apex.Core") || r.Name.Contains("Backtest"));
+        // D permits only the protocol tests and the trusted Offline Core/Desktop composition tests.
+        Assert.Equal(new[] { "Apex.Adapters.Okx.Tests", "Apex.Tests" },
+            a.GetCustomAttributes(typeof(System.Runtime.CompilerServices.InternalsVisibleToAttribute), false)
+                .Cast<System.Runtime.CompilerServices.InternalsVisibleToAttribute>()
+                .Select(friend => friend.AssemblyName).OrderBy(name => name, StringComparer.Ordinal).ToArray());
+    }
 
     [Fact]
     public async Task LateResponseCannotBecomeObservedAfterLogicalBudget()

@@ -37,15 +37,22 @@ public sealed partial class NavalPortfolioCoordinator
     {
         if(_frozen)return Result(envelope.Naval!,NavalMutationStatus.Stopped,"STORAGE_FROZEN");
         var previous=_owner.Read();
+        if(previous.NavalExecution is {} oldExecution&&envelope.NavalExecution is {} execution&&
+            (s.Mode=="STOP"||s.Generation!=previous.Naval!.Generation||s.Sequence!=previous.Naval.Sequence))
+        {
+            _offlineExecutionSession?.Invalidate();
+            if(execution.StopEpoch==oldExecution.StopEpoch)envelope.NavalExecution=execution with{StopEpoch=checked(execution.StopEpoch+1)};
+        }
         long old=envelope.DurableRevision;envelope.DurableRevision=checked(old+1);envelope.Naval=s with{Revision=envelope.DurableRevision};
         envelope.NavalReadJournal=NavalReadJournal.Append(previous,envelope,cause,_clock.UtcNow,_definition);
         var result=_owner.TryCommit(old,envelope);
-        if(result!=NavalCommitResult.Committed){_frozen=true;_ready=false;_started=false;return new(NavalMutationStatus.Stopped,result==NavalCommitResult.Conflict?"COMMIT_CONFLICT":"STORAGE_FROZEN",null,old);}
+        if(result!=NavalCommitResult.Committed){_frozen=true;_ready=false;_started=false;_offlineExecutionSession?.Invalidate();return new(NavalMutationStatus.Stopped,result==NavalCommitResult.Conflict?"COMMIT_CONFLICT":"STORAGE_FROZEN",null,old);}
         return new(status,code,id,envelope.DurableRevision);
     }
     private NavalRiskResult StopCandidate(EngineState e,string reason,bool emergency=false,string? conflict=null)
     {
-        _ready=false;_started=false;var s=e.Naval!;
+        _ready=false;_started=false;_offlineExecutionSession?.Invalidate();var s=e.Naval!;
+        if(e.NavalExecution is {} execution)e.NavalExecution=execution with{StopEpoch=checked(execution.StopEpoch+1)};
         return Commit(e,s with{Mode="STOP",Reason=reason,EmergencyLatch=s.EmergencyLatch||emergency,
             Conflicts=conflict==null?s.Conflicts:s.Conflicts.Append(conflict).ToArray()},NavalMutationStatus.Stopped,reason,
             new(NavalPublicationOperation.Safety,reason,_publicationEpoch));
@@ -106,7 +113,10 @@ public sealed partial class NavalPortfolioCoordinator
     {
         lock(_owner)
         {
-            var s=_owner.Read().Naval!;bool fresh=Fresh(s)&&!_frozen&&!s.EmergencyLatch;
+            var envelope=_owner.Read();var s=envelope.Naval!;
+            bool executionUnknown=s.Reservations.Any(r=>ExecutionUnknown(envelope,r.Id));
+            if(executionUnknown)s=s with{Reservations=s.Reservations.Select(r=>ExecutionUnknown(envelope,r.Id)?r with{Stage=NavalReservationStage.Uncertain}:r).ToArray()};
+            bool fresh=Fresh(s)&&!_frozen&&!s.EmergencyLatch&&!executionUnknown;
             var accounts=s.Accounts.Select(a=>{decimal held=s.Reservations.Where(r=>r.Account==a.Account).Sum(NavalCashRiskPolicy.Held);return new NavalAccountView(a.Account,a.Cash,held,a.Cash-held);}).ToArray();
             decimal? eq=fresh?s.LiquidationEquity:null;
             var fleets=new[]{NavalFleet.Alpha,NavalFleet.Bravo}.Select(fleet=>
@@ -145,6 +155,7 @@ public sealed partial class NavalPortfolioCoordinator
                 (s.ReconciledUtc.HasValue&&r.CaptureUtc<s.ReconciledUtc))return StopCandidate(e,"SOURCE_ORDER_OR_TIME");
             if((expected==NavalEvidenceKind.Reconcile&&!r.Complete)||((expected==NavalEvidenceKind.Reject||expected==NavalEvidenceKind.Terminal)&&(!r.Complete||!r.Final||r.TerminalIds.Count==0)))
                 return StopCandidate(e,"FINAL_COVERAGE_REQUIRED");
+            if(r.Fills.Any(f=>ExecutionObligation(e,f.ReservationId))||r.TerminalIds.Any(id=>ExecutionObligation(e,id)))return StopCandidate(e,"UNCERTAIN");
             try
             {
                 var candidate=s;
@@ -205,7 +216,7 @@ public sealed partial class NavalPortfolioCoordinator
                 candidate=candidate with{Generation=r.Generation,Sequence=r.Sequence,Receipts=candidate.Receipts.Append(new NavalAcceptedReceipt(key,r.Digest)).ToArray()};
                 if(expected==NavalEvidenceKind.Reconcile)
                     candidate=candidate with{ReconciledUtc=r.CaptureUtc,Mode="STOP",Reason="RECONCILED_EXPLICIT_START_REQUIRED",
-                        Reservations=candidate.Reservations.Select(p=>p.Stage==NavalReservationStage.Uncertain?p with{Stage=p.Filled>0?NavalReservationStage.Confirmed:NavalReservationStage.Reserved}:p).ToArray()};
+                        Reservations=candidate.Reservations.Select(p=>ExecutionUnknown(e,p.Id)?p with{Stage=NavalReservationStage.Uncertain}:p.Stage==NavalReservationStage.Uncertain?p with{Stage=p.Filled>0?NavalReservationStage.Confirmed:NavalReservationStage.Reserved}:p).ToArray()};
                 candidate=NavalCashRiskPolicy.Refresh(candidate,_definition,r.CaptureUtc,expected==NavalEvidenceKind.Reconcile);
                 var result=Commit(e,candidate,NavalMutationStatus.Applied,"EVIDENCE_APPLIED",NavalPublicationCause.Evidence(r,_publicationEpoch));
                 if(result.Status==NavalMutationStatus.Applied&&expected==NavalEvidenceKind.Reconcile){_ready=true;_started=false;}
@@ -225,7 +236,7 @@ public sealed partial class NavalPortfolioCoordinator
         lock(_owner){var e=_owner.Read();var s=e.Naval!;
             if(_frozen)return Result(s,NavalMutationStatus.Stopped,"STORAGE_FROZEN");
             if(permit==null||permit.OwnerToken!=OwnerToken||permit.Revision!=s.Revision||permit.Generation!=s.Generation||!permit.ExplicitOfflineIntent||!Fresh(s)||
-                s.DailyLatch||s.DrawdownLatch||s.EmergencyLatch||s.Reservations.Any(p=>p.Stage==NavalReservationStage.Uncertain)||s.LiquidationEquity<=0||
+                s.DailyLatch||s.DrawdownLatch||s.EmergencyLatch||s.Reservations.Any(p=>p.Stage==NavalReservationStage.Uncertain||ExecutionUnknown(e,p.Id))||s.LiquidationEquity<=0||
                 NavalCashRiskPolicy.Gross(s)>s.LiquidationEquity*_definition.Limits.MaxLeverage||NavalCashRiskPolicy.AccountNotionalBreach(s,_definition)||s.Accounts.Any(a=>a.Cash-s.Reservations.Where(p=>p.Account==a.Account).Sum(NavalCashRiskPolicy.Held)<0))return Result(s,NavalMutationStatus.Refused,"START_NOT_PERMITTED");
             var result=Commit(e,s with{Mode="RUNNING",Reason="EXPLICIT_OFFLINE_START"},NavalMutationStatus.Applied,"STARTED",new(NavalPublicationOperation.Mode,"STARTED",_publicationEpoch));if(result.Status==NavalMutationStatus.Applied)_started=true;return result;}
     }
