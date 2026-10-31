@@ -93,6 +93,37 @@ public sealed class OkxCredentialTests
         }
         finally { CryptographicOperations.ZeroMemory(original); if (changed != null) CryptographicOperations.ZeroMemory(changed); }
     }
+    [Theory]
+    [InlineData(1, 1, 1, false)]
+    [InlineData(24, 32, 24, false)]
+    [InlineData(4096, 4096, 4096, false)]
+    [InlineData(4096, 4096, 4096, true)]
+    public void EnvelopePreservesClosedWireFormatAtAcceptedBounds(int keyLength, int secretLength, int passphraseLength, bool live)
+    {
+        // Largest allowed metadata plus field bounds must fit, with no unused
+        // fixed-capacity suffix becoming part of the persisted envelope.
+        var b = OkxConfiguration.Bind(new OkxNavalOptions { Schema = "okx-naval-config-v1", Scopes = new[] { new OkxScopeOptions {
+            ScopeId = new string('s', 64), Environment = live ? "Live" : "OkxDemo", Region = "EEA", ExpectedUid = new string('1', 32),
+            ExpectedMainUid = new string('1', 32), QuoteCurrency = new string('E', 12), CredentialBindingId = new string('b', 64), SafetyVersion = "okx-cash-v1" } } })[0];
+        using var lease = new OkxExecutionCredentialLease(b, live ? "LiveAccountApi" : "DemoTradingApi",
+            RandomNumberGenerator.GetBytes(keyLength), RandomNumberGenerator.GetBytes(secretLength), RandomNumberGenerator.GetBytes(passphraseLength));
+        byte[] encoded = OkxCredentialEnvelope.Encode(lease);
+        try
+        {
+            Assert.InRange(encoded.Length, 1, 65536);
+            using var stream = new System.IO.MemoryStream(encoded, writable: false);
+            using var reader = new System.IO.BinaryReader(stream);
+            Assert.Equal("okx-execution-credential-v1", reader.ReadString());
+            Assert.Equal(JsonSerializer.Serialize(b), reader.ReadString());
+            Assert.Equal(live ? "LiveAccountApi" : "DemoTradingApi", reader.ReadString());
+            Assert.True(reader.ReadString() == lease.Fingerprint, "Private fingerprint comparison only");
+            foreach (int size in new[] { keyLength, secretLength, passphraseLength }) { Assert.Equal(size, reader.ReadInt32()); stream.Position += size; }
+            Assert.Equal(stream.Length, stream.Position);
+            using var decoded = OkxCredentialEnvelope.Decode(encoded, b);
+            Assert.True(decoded.ApiKey.SequenceEqual(lease.ApiKey) && decoded.Secret.SequenceEqual(lease.Secret) && decoded.Passphrase.SequenceEqual(lease.Passphrase));
+        }
+        finally { CryptographicOperations.ZeroMemory(encoded); }
+    }
     [Fact]
     public void UnsupportedNativeStoreNeverWrites()
     {

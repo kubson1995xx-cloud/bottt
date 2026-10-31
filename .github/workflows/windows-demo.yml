@@ -13,9 +13,9 @@ on:
         options: [red, green]
         default: green
       okx_gate:
-        description: 'OKX Task1 source subset; windows-setup replays only a missing native setup/startup gate'
+        description: 'OKX Task1 source subset; credentials only credential/DPAPI; windows-setup only setup/startup'
         type: choice
-        options: [all, windows-setup]
+        options: [all, windows-setup, credentials]
         default: all
   push:
     branches: ["claude/beautiful-mccarthy-9cibo1"]

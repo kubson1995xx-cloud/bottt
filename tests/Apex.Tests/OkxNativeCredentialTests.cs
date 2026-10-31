@@ -60,6 +60,25 @@ public sealed class OkxNativeCredentialTests
         Assert.ThrowsAny<Exception>(() => Create(store, b, p, f)); Assert.Equal(before, Inventory(h.Root));
         using var reopened = store.Open(b, p); Assert.True(f.Key.AsSpan().SequenceEqual(reopened.ApiKey));
     }
+    [Theory]
+    [InlineData(false)][InlineData(true)]
+    public async Task MaximumAcceptedFieldsRoundTripThroughNativeDpapi(bool live)
+    {
+        NativePrerequisite(); await using var h = new OkxCompositionFixture();
+        var b = CredentialFixture.Binding(live ? NavalEnvironment.Live : NavalEnvironment.OkxDemo);
+        var p = OkxConfiguration.Paths(h.Root, b); var store = new WindowsOkxCredentialStore(h.Root);
+        byte[] key = RandomNumberGenerator.GetBytes(4096), secret = RandomNumberGenerator.GetBytes(4096), passphrase = RandomNumberGenerator.GetBytes(4096);
+        try
+        {
+            store.Create(b, p, live ? "LiveAccountApi" : "DemoTradingApi", key, secret, passphrase);
+            using var opened = store.Open(b, p);
+            Assert.True(key.AsSpan().SequenceEqual(opened.ApiKey) && secret.AsSpan().SequenceEqual(opened.Secret) && passphrase.AsSpan().SequenceEqual(opened.Passphrase));
+            var before = Inventory(h.Root);
+            Assert.ThrowsAny<Exception>(() => store.Create(b, p, live ? "LiveAccountApi" : "DemoTradingApi", key, secret, passphrase));
+            Assert.Equal(before, Inventory(h.Root));
+        }
+        finally { CryptographicOperations.ZeroMemory(key); CryptographicOperations.ZeroMemory(secret); CryptographicOperations.ZeroMemory(passphrase); }
+    }
     [Fact]
     public async Task CopiedWrongRootEnvironmentBindingAndPurposeRefuseUnchanged()
     {

@@ -75,15 +75,20 @@ internal static class OkxCredentialEnvelope
     internal const string Schema = "okx-execution-credential-v1";
     internal static byte[] Encode(OkxExecutionCredentialLease lease)
     {
-        using var stream = new MemoryStream();
+        // Decode bounds envelopes to 64 KiB; validated metadata and three fields
+        // of at most 4096 bytes fit within it. A fixed array-backed stream cannot
+        // grow and abandon plaintext copies. Allocate before any secret writes.
+        byte[] owned = new byte[65536];
         try
         {
+            using var stream = new MemoryStream(owned, 0, owned.Length, writable: true, publiclyVisible: true);
+            stream.SetLength(0);
             using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
             writer.Write(Schema); writer.Write(JsonSerializer.Serialize(lease.Binding)); writer.Write(lease.Provenance); writer.Write(lease.Fingerprint);
             Write(writer, lease.ApiKey); Write(writer, lease.Secret); Write(writer, lease.Passphrase); writer.Flush();
             return stream.ToArray();
         }
-        finally { if (stream.TryGetBuffer(out var owned)) CryptographicOperations.ZeroMemory(owned.AsSpan()); }
+        finally { CryptographicOperations.ZeroMemory(owned); }
     }
     private static void Write(BinaryWriter writer, ReadOnlySpan<byte> bytes) { writer.Write(bytes.Length); writer.Write(bytes); }
     internal static OkxExecutionCredentialLease Decode(byte[] plaintext, OkxScopeBinding expected)
