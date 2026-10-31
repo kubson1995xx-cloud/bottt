@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -13,6 +14,7 @@ using Apex.Desktop.Bridge;
 using Apex.Desktop.Runtime;
 using Apex.Desktop.Services;
 using Apex.Desktop.Naval;
+using Apex.Desktop.Okx;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -79,6 +81,7 @@ namespace Apex.Desktop
             using var startupLock = lockFile;
             ConfigStore config;
             NavalRuntimeOptions? naval;
+            IReadOnlyList<OkxScopeBinding> okxBindings;
             bool desktopLocal = false;
             try
             {
@@ -101,6 +104,7 @@ namespace Apex.Desktop
                 else config = new ConfigStore(dataDir);
                 config.TrustedSyntheticComposition = trustedSyntheticComposition;
                 naval = NavalAccessPolicy.Load(config.Config.NavalRead, desktopLocal);
+                okxBindings = OkxConfiguration.Bind(config.Config.OkxNaval);
             }
             catch (WindowsDataException ex)
             {
@@ -110,6 +114,11 @@ namespace Apex.Desktop
             catch (NavalAccessException ex)
             {
                 Console.Error.WriteLine(ex.Code);
+                return 2;
+            }
+            catch (InvalidDataException ex) when (ex.Message is "OKX_CONFIG_INVALID" or "OKX_SCOPE_INVALID")
+            {
+                Console.Error.WriteLine(ex.Message);
                 return 2;
             }
             catch (Exception ex) when (ex is InvalidDataException or JsonException or UnauthorizedAccessException or IOException)
@@ -130,6 +139,7 @@ namespace Apex.Desktop
             AccountManager? accounts = null;
             BridgeServer? bridge = null;
             WebApplication? app = null;
+            OkxNavalRuntime? okx = null;
             CancellationTokenRegistration stopping = default;
             void StopBackground()
             {
@@ -139,6 +149,9 @@ namespace Apex.Desktop
             try
             {
                 cancellation.ThrowIfCancellationRequested();
+                okx = OkxNavalRuntime.Compose(dataDir, okxBindings);
+                startupObserver?.Invoke("okx", okx);
+                await okx.StartAsync(cts.Token);
                 var log = new AppLog(Path.Combine(dataDir, "logi"));
                 var news = new NewsCalendar();
                 newsService = new NewsService(news, config, log);
@@ -369,7 +382,11 @@ namespace Apex.Desktop
                             finally
                             {
                                 try { if (app != null) await app.DisposeAsync(); }
-                                finally { stopping.Dispose(); }
+                                finally
+                                {
+                                    try { stopping.Dispose(); }
+                                    finally { if (okx != null) await okx.DisposeAsync(); }
+                                }
                             }
                         }
                     }

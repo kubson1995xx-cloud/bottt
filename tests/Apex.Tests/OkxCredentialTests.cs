@@ -41,7 +41,7 @@ public sealed class OkxCredentialTests
         using var f = new CredentialFixture(); byte[] original = f.Key.ToArray();
         var lease = f.Lease();
         Assert.True(original.AsSpan().SequenceEqual(lease.ApiKey), "Lease must expose the original synthetic key bytes without publishing them");
-        Assert.Equal(Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant(), lease.Fingerprint);
+        Assert.True(Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant() == lease.Fingerprint, "Private fingerprint must match the synthetic key");
         Assert.Equal(CredentialFixture.Binding(), lease.Binding);
         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(lease));
         lease.Dispose(); lease.Dispose();
@@ -74,6 +74,24 @@ public sealed class OkxCredentialTests
         using var invalid = new CredentialFixture();
         Assert.ThrowsAny<Exception>(() => invalid.Lease(demo with { ConfigDigest = live.ConfigDigest }));
         Assert.All(invalid.Key.Concat(invalid.Secret).Concat(invalid.Passphrase), x => Assert.Equal((byte)0, x));
+    }
+    [Fact]
+    public void CredentialEnvelopeRejectsUnknownBindingFieldsWithGenuinePositiveControl()
+    {
+        using var f = new CredentialFixture(); using var lease = f.Lease();
+        byte[] original = OkxCredentialEnvelope.Encode(lease); byte[]? changed = null;
+        try
+        {
+            using (var decoded = OkxCredentialEnvelope.Decode(original, lease.Binding)) Assert.True(lease.ApiKey.SequenceEqual(decoded.ApiKey));
+            using var source = new System.IO.MemoryStream(original); using var reader = new System.IO.BinaryReader(source);
+            string schema = reader.ReadString(), binding = reader.ReadString();
+            using var output = new System.IO.MemoryStream(); using var writer = new System.IO.BinaryWriter(output);
+            writer.Write(schema); writer.Write(binding[..^1] + ",\"Unknown\":true}"); writer.Write(original.AsSpan((int)source.Position)); writer.Flush();
+            changed = output.ToArray();
+            Assert.ThrowsAny<Exception>(() => OkxCredentialEnvelope.Decode(changed, lease.Binding));
+            CryptographicOperations.ZeroMemory(output.GetBuffer());
+        }
+        finally { CryptographicOperations.ZeroMemory(original); if (changed != null) CryptographicOperations.ZeroMemory(changed); }
     }
     [Fact]
     public void UnsupportedNativeStoreNeverWrites()

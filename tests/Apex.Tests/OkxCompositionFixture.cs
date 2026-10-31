@@ -26,6 +26,7 @@ internal sealed class OkxCompositionFixture : IAsyncDisposable
     internal Task<int>? Running;
     private CancellationTokenSource stop = new(TimeSpan.FromSeconds(30));
     internal Action? HttpAction;
+    internal bool CancelAtOkx;
     internal OkxCompositionFixture()
     {
         Root = Path.Combine(OperatingSystem.IsWindows() ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) : Path.GetTempPath(), "ApexOkx-" + Guid.NewGuid().ToString("N"));
@@ -54,7 +55,7 @@ internal sealed class OkxCompositionFixture : IAsyncDisposable
         if (stop.IsCancellationRequested) { stop.Dispose(); stop = new(TimeSpan.FromSeconds(30)); }
         Resources.Clear(); ReachedHttp = false;
         Running = Task.Run(() => Apex.Desktop.Program.Run(new[] { "--data", Root, "--no-browser" }, synthetic, null, null, stop.Token,
-            (stage, value) => { Resources[stage] = value; if (stage == "http") { ReachedHttp = true; try { HttpAction?.Invoke(); } finally { stop.Cancel(); } } }));
+            (stage, value) => { Resources[stage] = value; if (stage == "okx" && CancelAtOkx) stop.Cancel(); if (stage == "http") { ReachedHttp = true; try { HttpAction?.Invoke(); } finally { stop.Cancel(); } } }));
         return Running.WaitAsync(TimeSpan.FromSeconds(35));
     }
     internal SortedDictionary<string, string> Inventory() => new(Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories)

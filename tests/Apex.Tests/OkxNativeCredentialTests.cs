@@ -13,6 +13,7 @@ using Apex.Desktop.Services;
 using Xunit;
 namespace Apex.Tests;
 
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 [Collection("OKX composition"), Trait("Gate", "NativeWindows")]
 public sealed class OkxNativeCredentialTests
 {

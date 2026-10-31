@@ -35,11 +35,27 @@ try {
     } finally { Pop-Location }
     $project=Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj'
     if ((Invoke-ApexSourceDotnet 'build' @('build',$project,'-c','Release','-p:NuGetAudit=false')) -ne 0) { throw 'Source setup/compile failure, not behavioral RED' }
+    if ($Phase -eq 'green') {
+        foreach ($pair in @(@('producer','tools/Apex.Backtester/Apex.Backtester.csproj'),@('windows','tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj'))) {
+            if ((Invoke-ApexSourceDotnet ('build-'+$pair[0]) @('build',(Join-Path $repo $pair[1]),'-c','Release','-p:NuGetAudit=false')) -ne 0) { throw ('Affected source prerequisite failed: '+$pair[0]) }
+        }
+    }
     Save-Map 'behavior-inputs.json' 'Before tests: actual executed binary and staged asset bytes; private fixtures never uploaded' @(Get-ChildItem -LiteralPath (Join-Path $repo 'src/Apex.Desktop/bin/Release/net8.0') -File -Recurse | ForEach-Object { $_.FullName.Substring($repo.Length+1) })
     Save-Map 'test-inputs.json' 'Before tests: compiled test bytes' @('tests/Apex.Tests/bin/Release/net8.0/Apex.Tests.dll','tests/Apex.Tests/bin/Release/net8.0/ApexDesktop.dll')
     $filter='FullyQualifiedName~OkxConfigTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxNativeCredentialTests'
     $code=Invoke-ApexSourceDotnet 'okx' @('test',$project,'-c','Release','--no-build','--no-restore','--filter',$filter,'--logger',('trx;LogFileName=okx-'+$Phase+'.trx'),'--results-directory',$evidence)
-    [ordered]@{sourceCommit=(& git -C $repo rev-parse HEAD);phase=$Phase;exit=$code;filter=$filter;sourceOnly=$true;packageTested=$false;secureUiTested=$false;brokerTested=$false}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $evidence 'summary.json') -Encoding UTF8
+    $windowsExit=0; $affectedExit=0
+    if ($Phase -eq 'green') {
+        Save-Map 'affected-inputs.json' 'Before affected native setup/startup and portable access/config/durability regressions' @('tests/Apex.Windows.Tests/bin/Release/net8.0/Apex.Windows.Tests.dll','tests/Apex.Windows.Tests/bin/Release/net8.0/ApexDesktop.dll','tools/Apex.Backtester/bin/Release/net8.0/Apex.Backtester.dll')
+        $windowsExit=Invoke-ApexSourceDotnet 'windows-affected' @('test',(Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj'),'-c','Release','--no-build','--no-restore','--filter','FullyQualifiedName~WindowsLocalSetupTests|FullyQualifiedName~WindowsStartupTests','--logger','trx;LogFileName=windows-affected.trx','--results-directory',$evidence)
+        $affectedExit=Invoke-ApexSourceDotnet 'portable-affected' @('test',$project,'-c','Release','--no-build','--no-restore','--filter','FullyQualifiedName~NavalReadAccessTests|FullyQualifiedName~NavalCashDurabilityTests|FullyQualifiedName~DesktopSafetyTests|FullyQualifiedName~FreshInstallationCanRestartBeforeReadOnlySetupWithoutManualFileEdits','--logger','trx;LogFileName=portable-affected.trx','--results-directory',$evidence)
+    }
+    [ordered]@{sourceCommit=(& git -C $repo rev-parse HEAD);phase=$Phase;exit=$code;windowsExit=$windowsExit;affectedExit=$affectedExit;filter=$filter;sourceOnly=$true;packageTested=$false;secureUiTested=$false;brokerTested=$false}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $evidence 'summary.json') -Encoding UTF8
     if ($code -ne 0) { throw 'Native source tests failed; RED is retained as failure' }
     $null=Read-ApexTestCounts (Join-Path $evidence ('okx-'+$Phase+'.trx'))
+    if ($Phase -eq 'green') {
+        if ($windowsExit -ne 0 -or $affectedExit -ne 0) { throw 'Affected source regressions failed' }
+        $null=Read-ApexTestCounts (Join-Path $evidence 'windows-affected.trx')
+        $null=Read-ApexTestCounts (Join-Path $evidence 'portable-affected.trx')
+    }
 } finally { Pop-Location; Write-Output ('OKX_TASK1_EVIDENCE='+$evidence) }
