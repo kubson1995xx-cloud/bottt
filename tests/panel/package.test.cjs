@@ -62,6 +62,13 @@ test('Task5 candidate lane selects actual SDK8 without changing default delivery
   assert.match(workflow, /default: full-delivery/);
 });
 
+test('static-host resolver preserves colon options across the PowerShell function boundary', () => {
+  const build = fs.readFileSync(path.join(root, 'tools/windows/Zbuduj-APEX.ps1'), 'utf8');
+  assert.match(build, /\$hostResolve=@\('msbuild','src\/Apex.Desktop\/Apex.Desktop.csproj','-t:_GetAppHostPaths'/);
+  assert.match(build, /\$hostPath=\(Invoke-ApexBuildDotnet @hostResolve\)/);
+  assert.doesNotMatch(build, /Invoke-ApexBuildDotnet msbuild/);
+});
+
 test('Windows runtime smoke isolates only the EXE child and checks module origins', () => {
   const smoke = fs.readFileSync(path.join(root, 'tools/windows/Smoke-Windows.ps1'), 'utf8');
   assert.match(smoke, /\[string\]\$Evidence/);

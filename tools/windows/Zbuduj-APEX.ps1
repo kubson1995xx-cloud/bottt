@@ -155,8 +155,9 @@ try {
             if (Test-Path -LiteralPath $native) { foreach ($file in Get-ChildItem -LiteralPath $native -File -Filter '*.dll') { $nativeLibraries+=@{name=$file.Name;pack=$name;bytes=$file.Length;sha256=(Hash $file.FullName)} } }
         }
         # Resolve the ACTUAL SDK-selected static host, rather than invent DLL loading.
-        $hostPath=(Invoke-ApexBuildDotnet msbuild src/Apex.Desktop/Apex.Desktop.csproj -t:_GetAppHostPaths -p:Configuration=Release -p:RuntimeIdentifier=win-x64 -p:SelfContained=true -p:PublishSingleFile=true -getProperty:SingleFileHostSourcePath)
-        Sprawdz 'Resolve actual singlefilehost source'
+        $hostResolve=@('msbuild','src/Apex.Desktop/Apex.Desktop.csproj','-t:_GetAppHostPaths','-p:Configuration=Release','-p:RuntimeIdentifier=win-x64','-p:SelfContained=true','-p:PublishSingleFile=true','-getProperty:SingleFileHostSourcePath')
+        $hostPath=(Invoke-ApexBuildDotnet @hostResolve)
+        if ($LASTEXITCODE -ne 0) { throw ('Resolve actual singlefilehost source failed: '+($hostPath -join ' ')) }
         $hostFile=Get-Item -LiteralPath ([string]$hostPath).Trim()
         if ($hostFile.Name -cne 'singlefilehost.exe' -or $hostFile.Directory.Parent.Parent.Parent.Parent.Name -ine 'Microsoft.NETCore.App.Host.win-x64') { throw 'Unexpected SDK singlefilehost source' }
         $dropped=@('coreclr.dll','clrjit.dll','hostfxr.dll','hostpolicy.dll')
