@@ -113,11 +113,17 @@ internal sealed class WindowsTestHost : IAsyncDisposable
     {
         IntPtr modal=IntPtr.Zero;
         await Until(()=> { if(Child!.HasExited) throw new Exception("Native credential UI unavailable: process exited (no --no-browser substitution)"); EnumWindows((h,_)=>{GetWindowThreadProcessId(h,out uint pid); var cls=new StringBuilder(100); GetClassName(h,cls,100); if(pid==Pid && cls.ToString()=="#32770") modal=h; return true;},IntPtr.Zero); return Task.FromResult(modal!=IntPtr.Zero); },"Native credential modal not observed");
-        var text=new StringBuilder(); EnumChildWindows(modal,(h,_)=>{var s=new StringBuilder(4096);GetWindowText(h,s,s.Capacity);text.Append(s);return true;},IntPtr.Zero);
         var credentials=WindowsLocalAccess.Load(DataRoot,"presentation");
-        // Boolean assertions only: xUnit must never format credential text.
-        Assert.True(text.ToString().Contains(credentials.OperatorSecret) && text.ToString().Contains("operator"),"Native modal did not match CurrentUser DPAPI");
-        Assert.False(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(p=>p.Port==Port && Port!=0),"Credential display started listener");
+        // EnumWindows can see a newly created #32770 before its static children
+        // carry text. Wait for native content readiness, never a fixed sleep.
+        int contentPolls=0;
+        await Until(()=>
+        {
+            contentPolls++;var text=new StringBuilder();EnumChildWindows(modal,(h,_)=>{var s=new StringBuilder(4096);GetWindowText(h,s,s.Capacity);text.Append(s);return true;},IntPtr.Zero);
+            return Task.FromResult(text.ToString().Contains(credentials.OperatorSecret)&&text.ToString().Contains("operator"));
+        },"Native modal did not match CurrentUser DPAPI");
+        Evidence("modal-"+Pid,new{pid=Pid,nativeModal=true,dpapiMatched=true,contentPolls,noScreenshot=true});
+        Assert.Empty(OwnedListeners(Pid));
         SendMessage(modal,0x111,new IntPtr(1),IntPtr.Zero); // WM_COMMAND IDOK, private native acknowledgement
     }
     internal void CheckPrivateTree(string root)
@@ -129,6 +135,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
             FileSystemSecurity acl=directory?new DirectoryInfo(path).GetAccessControl():new FileInfo(path).GetAccessControl();
             var owner=acl.GetOwner(typeof(SecurityIdentifier))!.Value;
             Assert.Contains(owner,new[]{user.Value,"S-1-5-18","S-1-5-32-544"});
+            if(path==root){Assert.Equal(user.Value,owner);Assert.True(acl.AreAccessRulesProtected,"New private root lacks protected DACL");}
             var rules=acl.GetAccessRules(true,true,typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray(); Assert.NotEmpty(rules);
             Assert.All(rules,r=>{Assert.Equal(AccessControlType.Allow,r.AccessControlType);Assert.Contains(r.IdentityReference.Value,new[]{user.Value,"S-1-5-18","S-1-5-32-544"});});
             records.Add(new{relative=Path.GetRelativePath(root,path).Replace('\\','/'),directory,ownerIsCurrentUser=owner==user.Value,protectedDacl=acl.AreAccessRulesProtected,grants=rules.Select(r=>new{principal=r.IdentityReference==user?"current-user":r.IdentityReference.Value,rights=r.FileSystemRights.ToString(),inherited=r.IsInherited}).ToArray()});
@@ -143,6 +150,14 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         {
             string name=m.ModuleName!,path=Path.GetFullPath(m.FileName!);
             bool os=path.StartsWith(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32")+"\\",StringComparison.OrdinalIgnoreCase);
+            bool restricted=System.Text.RegularExpressions.Regex.IsMatch(name,@"^(coreclr|clrjit|hostpolicy|hostfxr|vcruntime.*|msvcp.*)\.dll$",System.Text.RegularExpressions.RegexOptions.IgnoreCase)&&!name.Equals("msvcp_win.dll",StringComparison.OrdinalIgnoreCase);
+            if(restricted)os=false; // Never call machine .NET/VC redist an OS component.
+            if(!os&&IsCommonControlsPath(name,path))
+            {
+                var signature=VerifyOsSignature(path);Evidence("os-common-controls-"+Pid,new{pid=Pid,name,path,signature});
+                os=signature.GetProperty("status").GetString()=="Valid" && signature.GetProperty("subject").GetString()!.StartsWith("CN=Microsoft Windows,",StringComparison.Ordinal);
+                Assert.True(os,"WinSxS common-controls lacks valid Microsoft Windows signature");
+            }
             bool main=path.Equals(Path.GetFullPath(Exe),StringComparison.OrdinalIgnoreCase);
             if(!os && !main)
             {
@@ -151,7 +166,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
                 var proof=publish.RootElement.GetProperty("nativeLibraries").EnumerateArray().Single(n=>n.GetProperty("name").GetString()!.Equals(name,StringComparison.OrdinalIgnoreCase));
                 Assert.Equal(proof.GetProperty("sha256").GetString(),Hash(path));
             }
-            modules.Add(new{name,origin=main?"APEX-Desktop/ApexDesktop.exe":os?"Windows/System32/"+name:"bundle/"+Path.GetRelativePath(Extract,path).Replace('\\','/'),sha256=Hash(path)});
+            modules.Add(new{name,origin=main?"APEX-Desktop/ApexDesktop.exe":os?"Windows/"+Path.GetRelativePath(Environment.GetFolderPath(Environment.SpecialFolder.Windows),path).Replace('\\','/'):"bundle/"+Path.GetRelativePath(Extract,path).Replace('\\','/'),sha256=Hash(path)});
         }
         Assert.Equal(PayloadHash,Hash(Child.MainModule!.FileName!)); CheckPrivateTree(Extract);
         Evidence("modules-"+Pid,new{pid=Pid,payloadSha256=PayloadHash,modules});
@@ -164,7 +179,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         if(Credentials!=null) foreach(string secret in new[]{Credentials.OperatorSecret,Credentials.ReaderSecret}) Assert.True(!text.Contains(secret)&&!text.Contains(Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(secret))).ToLowerInvariant()),"Secret leaked to process output");
         Assert.False(text.Contains("Authorization:",StringComparison.OrdinalIgnoreCase),"Authorization leaked");
         bool exited=Child.HasExited; Child.Dispose();Child=null;
-        if(Port!=0) Assert.DoesNotContain(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners(),p=>p.Port==Port);
+        await Until(()=>Task.FromResult(OwnedListeners(pid).Length==0),"Owned PID listener survived process exit",10);
         Processes.Add(new{pid,exited,listenersRemoved=true,outputSanitized=true});
         Evidence("exit-"+pid,new{pid,exited,listenersRemoved=true,outputSanitized=true});
     }
@@ -182,6 +197,48 @@ internal sealed class WindowsTestHost : IAsyncDisposable
             Evidence("cleanup-"+Guid.NewGuid().ToString("N"),new{processes=Processes,dataRemoved=deleteData?!Directory.Exists(DataRoot):(bool?)null,fixtureRemoved=!Directory.Exists(FixtureRoot),packageUnchanged=Before.OrderBy(x=>x.Key).SequenceEqual(Inventory(PackageRoot).OrderBy(x=>x.Key))});
         }
     }
+    internal static bool IsCommonControlsPath(string name,string path)
+    {
+        if(!name.Equals("comctl32.dll",StringComparison.OrdinalIgnoreCase))return false;
+        string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"WinSxS")+Path.DirectorySeparatorChar;
+        if(!path.StartsWith(root,StringComparison.OrdinalIgnoreCase))return false;
+        string relative=path[root.Length..];
+        return System.Text.RegularExpressions.Regex.IsMatch(relative,@"\Aamd64_microsoft\.windows\.common-controls_6595b64144ccf1df_6\.0\.[0-9]+\.[0-9]+_none_[0-9a-f]+\\comctl32\.dll\z",System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+    private static JsonElement VerifyOsSignature(string path)
+    {
+        string script="$s=Get-AuthenticodeSignature -LiteralPath '"+path.Replace("'","''")+"';@{status=$s.Status.ToString();subject=$s.SignerCertificate.Subject;thumbprint=$s.SignerCertificate.Thumbprint}|ConvertTo-Json -Compress";
+        var start=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell","v1.0","powershell.exe")){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
+        start.ArgumentList.Add("-NoProfile");start.ArgumentList.Add("-EncodedCommand");start.ArgumentList.Add(Convert.ToBase64String(Encoding.Unicode.GetBytes(script)));
+        using var p=Process.Start(start)!;string result=p.StandardOutput.ReadToEnd();_=p.StandardError.ReadToEnd();if(!p.WaitForExit(15000)){p.Kill(true);throw new TimeoutException("OS signature check");}Assert.Equal(0,p.ExitCode);using var doc=JsonDocument.Parse(result);return doc.RootElement.Clone();
+    }
+    internal sealed record Listener(int Pid,string Address,int Port,string Family);
+    internal static Listener[] OwnedListeners(int pid)
+    {
+        var result=new List<Listener>();
+        foreach(int family in new[]{2,23})
+        {
+            int size=0;uint code=GetExtendedTcpTable(IntPtr.Zero,ref size,false,family,3,0);
+            if(code!=0&&code!=122)throw new Exception("Native listener table size failed");
+            IntPtr table=Marshal.AllocHGlobal(size);
+            try
+            {
+                code=GetExtendedTcpTable(table,ref size,false,family,3,0);if(code!=0)throw new Exception("Native listener table failed");
+                byte[] bytes=new byte[size];Marshal.Copy(table,bytes,0,size);int count=BitConverter.ToInt32(bytes,0),row=family==2?24:56;
+                Assert.True(count>=0 && 4L+count*(long)row<=size,"Listener table bounds");
+                for(int i=0;i<count;i++)
+                {
+                    int offset=4+i*row;int owner=BitConverter.ToInt32(bytes,offset+(family==2?20:52));if(owner!=pid)continue;
+                    int portOffset=offset+(family==2?8:20);int port=(bytes[portOffset]<<8)|bytes[portOffset+1];
+                    byte[] ip=bytes.Skip(offset+(family==2?4:0)).Take(family==2?4:16).ToArray();
+                    result.Add(new(owner,new IPAddress(ip).ToString(),port,family==2?"IPv4":"IPv6"));
+                }
+            }
+            finally{Marshal.FreeHGlobal(table);}
+        }
+        return result.ToArray();
+    }
+    [DllImport("iphlpapi.dll")]private static extern uint GetExtendedTcpTable(IntPtr table,ref int size,[MarshalAs(UnmanagedType.Bool)]bool order,int family,int tableClass,uint reserved);
     internal static async Task Until(Func<Task<bool>> condition,string failure,int seconds=35)
     {var end=DateTime.UtcNow.AddSeconds(seconds);while(DateTime.UtcNow<end){if(await condition())return;await Task.Delay(75);}throw new TimeoutException(failure);}
     private delegate bool EnumProc(IntPtr h,IntPtr p);

@@ -16,6 +16,10 @@ public sealed class WindowsPackagedProcessTests
     {
         await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());
         await h.InitializeAsync(); h.Modules(); h.CheckPrivateTree(h.DataRoot);
+        string controls=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"WinSxS","amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.26100.33648_none_ee38cd5ddaee2cd9","comctl32.dll");
+        Assert.True(WindowsTestHost.IsCommonControlsPath("comctl32.dll",controls));
+        Assert.False(WindowsTestHost.IsCommonControlsPath("vcruntime140.dll",controls.Replace("comctl32.dll","vcruntime140.dll")));
+        Assert.False(WindowsTestHost.IsCommonControlsPath("comctl32.dll",Path.Combine(h.FixtureRoot,"comctl32.dll")));
         var status=await h.Json("/api/status"); Assert.Empty(status.GetProperty("data").GetProperty("accounts").EnumerateArray());Assert.False(status.GetProperty("host").GetProperty("liveFeature").GetBoolean());
     }
     [Fact,Trait("Gate","Package")]
@@ -48,9 +52,9 @@ public sealed class WindowsPackagedProcessTests
         var path=Path.Combine(h.DataRoot,"apex.config.json");var c=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(path))!;c["BridgeTcpPort"]=tcp;File.WriteAllText(path,c.ToJsonString());
         await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();
         await WindowsTestHost.Until(()=>Task.FromResult(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(p=>p.Port==tcp)),"TCP did not bind");
-        var listeners=IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Where(p=>p.Port==tcp||p.Port==h.Port).ToArray();Assert.Equal(2,listeners.Length);Assert.All(listeners,p=>Assert.Equal(IPAddress.Loopback,p.Address));
-        WindowsTestHost.Evidence("listeners",new{pid=h.Pid,listeners=listeners.Select(p=>new{address=p.Address.ToString(),port=p.Port}).ToArray(),webSocketSharesHttp=true});
-        await h.StopAsync();Assert.DoesNotContain(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners(),p=>p.Port==tcp);
+        var listeners=WindowsTestHost.OwnedListeners(h.Pid);Assert.Equal(2,listeners.Length);Assert.All(listeners,p=>{Assert.Equal("IPv4",p.Family);Assert.Equal("127.0.0.1",p.Address);});
+        WindowsTestHost.Evidence("listeners",new{pid=h.Pid,listeners,webSocketSharesHttp=true,allOwnedIpv4AndIpv6TablesInspected=true});
+        int pid=h.Pid;await h.StopAsync();Assert.Empty(WindowsTestHost.OwnedListeners(pid));
     }
     [Fact,Trait("Gate","Package")]
     public async Task ConfiguredSourceFailurePreservesEmergency()
