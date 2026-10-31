@@ -109,7 +109,7 @@ function confirmModal(title, body, confirmText, danger, extra) {
 
 async function api(path, body) {
   const opts = { headers: { 'X-Apex-Token': TOKEN } };
-  if (body !== undefined) { opts.method = 'POST'; opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  if (body !== undefined) { opts.method = 'POST'; opts.headers['X-Apex-Local'] = '1'; opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   // Termin tylko odczytu statusu. Mutacji POST nie ponawiamy automatycznie.
   const controller = path === '/api/status' && body === undefined ? new AbortController() : null;
   if (controller) opts.signal = controller.signal;

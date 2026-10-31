@@ -79,6 +79,7 @@ namespace Apex.Desktop
             using var startupLock = lockFile;
             ConfigStore config;
             NavalRuntimeOptions? naval;
+            bool desktopLocal = false;
             try
             {
                 if (args.Contains("--show-local-access"))
@@ -93,15 +94,13 @@ namespace Apex.Desktop
                     var setup = WindowsLocalSetup.Ensure(dataDir, Path.Combine(AppContext.BaseDirectory, "presentation"));
                     config = setup.Store;
                     privateData?.ValidateDirectories();
-                    if (setup.NeedsCredentialPrompt && !WindowsLocalAccess.Show(dataDir, localAccessPrompt ?? WindowsLocalAccessPrompt.Show))
-                    {
-                        Console.Error.WriteLine("HOST_LOCAL_ACCESS_CANCELLED: Serwer nie został uruchomiony. Zachowano prywatny profil; dane dostępu wyświetlisz przez --show-local-access.");
-                        return 2;
-                    }
+                    // Runtime-only capability from complete validated Windows presentation
+                    // state; never inferred from a client header or arbitrary custom config.
+                    desktopLocal = setup.DesktopLocal;
                 }
                 else config = new ConfigStore(dataDir);
                 config.TrustedSyntheticComposition = trustedSyntheticComposition;
-                naval = NavalAccessPolicy.Load(config.Config.NavalRead);
+                naval = NavalAccessPolicy.Load(config.Config.NavalRead, desktopLocal);
             }
             catch (WindowsDataException ex)
             {

@@ -21,6 +21,22 @@ public sealed class WindowsBrowserAcceptanceTests
         Assert.False(buffer.Contains("Authorization",StringComparison.OrdinalIgnoreCase),"Authorization in DOM; content withheld");
         WindowsTestHost.Evidence("privacy-dom-"+stage,new{stage,currentDomChecked=true,operatorAndReaderExcluded=true,bothDigestsExcluded=true,noDomRetained=true});
     }
+    private static async Task<string> OpenDesktopLocal(WindowsCdpBrowser b,WindowsTestHost h)
+    {
+        string sid=await b.NewPage();
+        await b.Navigate(sid,new Uri(h.Origin,"/?view=naval").AbsoluteUri);
+        await b.Wait(sid,"location.pathname==='/naval/' && document.querySelector('[data-testid=revision]')?.textContent !== 'UNKNOWN'","Anonymous desktop-local redirect/checkpoint not rendered");
+        await b.CommandAsync("Page.reload",new{ignoreCache=true},sid);
+        await b.Wait(sid,"document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')?.textContent !== 'UNKNOWN'","Anonymous reload failed");
+        AssertNoAuthentication(b,h,"initial");
+        return sid;
+    }
+    private static void AssertNoAuthentication(WindowsCdpBrowser b,WindowsTestHost h,string stage)
+    {
+        h.AssertNoCredentialModal();Assert.Equal(0,b.AuthenticationCommands);Assert.Equal(0,b.AuthorizationRequests);Assert.Equal(0,b.BasicChallenges);Assert.True(b.RequestsObserved>0);
+        WindowsTestHost.Evidence("desktop-local-no-auth-"+stage,new{stage,nativeCredentialModal=false,authenticationCommands=0,authorizationRequests=0,basicChallenges=0,observedRequests=b.RequestsObserved,anonymousReloadRendered=true});
+    }
+    // Isolated explicitly configured protected lane only, never local startup.
     private static async Task<string> Authenticate(WindowsCdpBrowser b,WindowsTestHost h)
     {
         string sid=await b.NewPage();int challenges=0;
@@ -49,7 +65,7 @@ public sealed class WindowsBrowserAcceptanceTests
     {
         await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();
         WindowsTestHost.Evidence("privacy-negative-controls",WindowsPrivacyTests.Controls());
-        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"edge"));string sid=await Authenticate(b,h);
+        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"edge"));string sid=await OpenDesktopLocal(b,h);
         var snapshot=await h.Json("/api/naval/snapshot");
         using var export=JsonDocument.Parse(File.ReadAllBytes(Path.Combine(h.PackageRoot,"APEX-Desktop","presentation","naval-publication.json")));
         Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(export.RootElement.GetProperty("publication").GetProperty("journal").GetProperty("checkpoint").GetRawText()),System.Text.Json.Nodes.JsonNode.Parse(snapshot.GetProperty("checkpoint").GetRawText())),"Served checkpoint differs from shipped genuine producer export");
@@ -100,6 +116,14 @@ public sealed class WindowsBrowserAcceptanceTests
         else await b.Wait(sid,"document.querySelector('.scene-fallback svg')!==null","Unavailable WebGL must retain SVG");
         await b.CommandAsync("Page.removeScriptToEvaluateOnNewDocument",new{identifier=injected.GetProperty("identifier").GetString()},sid);
         await CheckDom(b,h,sid,"restored-retry");
+        await AssertUntrustedBrowserBlocked(b,h,sid);
+        AssertNoAuthentication(b,h,"five-views-retry");
+        // Reconfigure this owned fixture explicitly to test the retained protected lane.
+        // No real config is touched; both mode transitions preserve private credentials.
+        await h.StopAsync();
+        string config=Path.Combine(h.DataRoot,"apex.config.json");var cfg=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(config))!;cfg["NavalRead"]!["RequireAuthentication"]=true;File.WriteAllText(config,cfg.ToJsonString());
+        h.ProtectedMode=true;await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();
+        sid=await Authenticate(b,h);using(var protectedSnapshot=await h.Send("/api/naval/snapshot","operator")){using var doc=JsonDocument.Parse(await protectedSnapshot.Content.ReadAsByteArrayAsync());snapshot=doc.RootElement.Clone();}
         // A new isolated context has no inherited Basic cache. Only reader Bearer;
         // exactly the two documented GET APIs, never documents/modules/styles.
         string reader=await b.NewPage();await b.CommandAsync("Network.setExtraHTTPHeaders",new{headers=new{Authorization="Bearer "+h.Credentials!.ReaderSecret}},reader);
@@ -121,7 +145,7 @@ public sealed class WindowsBrowserAcceptanceTests
     public async Task H503TextEmergencyOwn77Foreign78DurableRestart()
     {
         await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();
-        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"edge"));string sid=await Authenticate(b,h);
+        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"edge"));string sid=await OpenDesktopLocal(b,h);
         var original=await h.Json("/api/naval/snapshot");string publication=Path.Combine(h.DataRoot,"publication","naval-publication.json");byte[] good=File.ReadAllBytes(publication);
         await using(var peer=new SyntheticPeer(h))
         {
@@ -145,7 +169,35 @@ public sealed class WindowsBrowserAcceptanceTests
         File.WriteAllBytes(publication,good);await h.StopAsync();await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();
         var restarted=await h.Json("/api/naval/snapshot");Assert.NotEqual(original.GetProperty("hostEpoch").GetString(),restarted.GetProperty("hostEpoch").GetString());Assert.Equal(original.GetProperty("checkpoint").GetRawText(),restarted.GetProperty("checkpoint").GetRawText());
         await using(var peer=new SyntheticPeer(h)){await peer.Connect();await peer.Ready();var status=await h.Json("/api/status");Assert.Equal("EmergencyStopped",status.GetProperty("data").GetProperty("accounts")[0].GetProperty("engine").GetProperty("mode").GetString());Assert.Equal(latch,File.ReadAllBytes(control));Assert.Empty(peer.RiskCommands);}
+        await b.CommandAsync("Page.reload",new{},sid);await b.Wait(sid,"document.querySelector('meta[name=apex-token]')!==null","Anonymous restart panel failed");
+        AssertNoAuthentication(b,h,"emergency-restart");
         WindowsTestHost.Evidence("emergency-browser",new{syntheticLocalPeerOnly=true,h503=true,staticOldPanelLink=true,originalPanelConfirmation=true,closedPosition=77,fullClose=true,foreign78Untouched=true,noOpenTestModify=true,decisions200=true,csv200=true,durableLatch=true,restartNewHostEpoch=true,checkpointUnchanged=true,brokerTested=false});
+    }
+    private static async Task AssertUntrustedBrowserBlocked(WindowsCdpBrowser b,WindowsTestHost h,string local)
+    {
+        // Same-origin scripts still need the nonsecret anti-CSRF header.
+        var missing=await b.Evaluate(local,"fetch('/api/accounts/missing/command',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.status)",true);
+        Assert.Equal(403,missing.GetInt32());
+        using var listener=new System.Net.Sockets.TcpListener(IPAddress.Loopback,0);listener.Start();
+        int port=((IPEndPoint)listener.LocalEndpoint).Port;
+        var serve=Task.Run(async()=>
+        {
+            using var client=await listener.AcceptTcpClientAsync();using var stream=client.GetStream();
+            using var reader=new StreamReader(stream,Encoding.ASCII,false,1024,true);string? line;
+            do{line=await reader.ReadLineAsync();}while(!string.IsNullOrEmpty(line));
+            byte[] body=Encoding.UTF8.GetBytes("<!doctype html><title>Untrusted local origin</title><body>isolated attack fixture</body>");
+            byte[] header=Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: "+body.Length+"\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(header);await stream.WriteAsync(body);
+        });
+        string evil=await b.NewPage();await b.Navigate(evil,$"http://127.0.0.1:{port}/");await serve.WaitAsync(TimeSpan.FromSeconds(10));listener.Stop();
+        string target=new Uri(h.Origin,"/api/accounts/missing/command").AbsoluteUri;
+        var blocked=await b.Evaluate(evil,"fetch("+J(target)+",{method:'POST',headers:{'Content-Type':'application/json','X-Apex-Local':'1'},body:'{}'}).then(()=>false,()=>true)",true);
+        Assert.True(blocked.GetBoolean(),"Cross-origin fetch/preflight unexpectedly accepted");
+        await b.Evaluate(evil,"(()=>{const f=document.createElement('form');f.method='POST';f.action="+J(target)+";document.body.append(f);f.submit();})()");
+        await b.Wait(evil,"location.port==="+J(h.Port.ToString())+" && document.body.textContent.includes('ACCESS_DENIED')","Cross-origin form did not fail closed");
+        var response=b.Events.Last(e=>e.Method=="Network.responseReceived"&&e.Session==evil&&e.Data.GetProperty("type").GetString()=="Document");
+        Assert.Equal(403,response.Data.GetProperty("response").GetProperty("status").GetInt32());
+        WindowsTestHost.Evidence("untrusted-browser",new{differentOriginPage=true,sameOriginMissingCsrf403=true,corsPreflightBlocked=true,crossOriginForm403=true,noCredentialsUsed=true});
     }
     private sealed class SyntheticPeer:IAsyncDisposable
     {

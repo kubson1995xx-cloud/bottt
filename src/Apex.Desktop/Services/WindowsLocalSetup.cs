@@ -10,7 +10,7 @@ using Apex.Desktop.Naval;
 namespace Apex.Desktop.Services;
 
 internal enum LocalSetupState { Empty, Existing, Pending, Ready }
-internal sealed record LocalSetupResult(ConfigStore Store, bool Initialized, bool NeedsCredentialPrompt);
+internal sealed record LocalSetupResult(ConfigStore Store, bool Initialized, bool NeedsCredentialPrompt, bool DesktopLocal = false);
 
 // Called only under the admitted private-root lease and exclusive apex.lock.
 // A pending marker is durable before anything that could look like a usable config.
@@ -54,7 +54,8 @@ internal static class WindowsLocalSetup
             if (state == LocalSetupState.Ready)
             {
                 ValidateReady(dataDirectory);
-                return new(new ConfigStore(dataDirectory), false, false);
+                var readyStore = new ConfigStore(dataDirectory);
+                return new(readyStore, false, false, !readyStore.Config.NavalRead!.RequireAuthentication);
             }
 
             var (bytes, scope, hash) = ReadPresentation(presentationDirectory);
@@ -76,7 +77,7 @@ internal static class WindowsLocalSetup
             // Check the complete private state while still pending; no anonymous fallback.
             ValidateState(dataDirectory, scope, hash, initial);
             WriteMarker("ready"); afterWrite?.Invoke("ready");
-            return new(store, true, true);
+            return new(store, true, false, true);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or NavalAccessException or CryptographicException or InvalidOperationException or ArgumentException or NullReferenceException)
         { throw Incomplete(); }

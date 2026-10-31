@@ -1,16 +1,16 @@
 # APEX Naval Command — Windows x64
 
-**Kandydat inżynieryjny, nie końcowo odebrana dostawa.** Testy Task5 nie zastępują Task6: pierwszego uruchomienia bez argumentów, rzeczywistego okna poświadczeń i przeglądarki. Sprawdź osobne wyniki dla dokładnego SHA źródeł i ZIP-a. Hosted Windows Server nie jest fizycznym Windows 11 Pro użytkownika.
+**Windows desktop-local — bez ręcznego logowania. Kandydat oczekuje niezależnego odbioru.** Wymagane są testy dokładnego EXE: pierwszy start, aktualizacja poprzedniego profilu, przeglądarka bez podawania poświadczeń i restart. Sprawdź osobne wyniki dla dokładnego SHA źródeł i ZIP-a. Hosted Windows Server nie jest fizycznym Windows 11 Pro użytkownika.
 
 ## Rozpakowanie i start
 
 1. Porównaj SHA-256 pliku `APEX-NAVAL-COMMAND-Windows-x64.zip` z otrzymanym z zaufanego źródła plikiem `.zip.sha256` (`Get-FileHash -Algorithm SHA256`). Suma i manifest nie są podpisem wydawcy. Pliki nie są podpisane: nie omijaj bezrefleksyjnie SmartScreen ani ostrzeżeń systemu; przy nieznanym źródle przerwij.
 2. Rozpakuj **cały ZIP** do nowego lokalnego folderu. Nie uruchamiaj z wnętrza ZIP i nie przenoś samego EXE. Zachowaj `wwwroot`, `presentation`, dokumentację i weryfikator.
 3. Główne wejście: dwuklik `APEX-Desktop\ApexDesktop.exe`. `Uruchom APEX.cmd` jest tylko opcjonalnym skrótem. Pakiet self-contained zawiera .NET 8; odbiorca nie instaluje .NET SDK, Node, Pythona, Visual Studio ani osobnego VC++ redistributable. Opcjonalne narzędzia weryfikacji/budowania nie są zależnością aplikacji. MT5 wymaga osobnego MetaEditora wyłącznie do użycia opcjonalnego źródła mostu.
-4. Nowy, pusty katalog danych Windows otrzymuje prywatny profil `windows-local-presentation-v1`. Okno systemowe pokazuje lokalny login Operatora i losowe hasło. Zapisz je prywatnie, np. w menedżerze haseł, zatwierdź OK i wpisz w **natywne okno Basic przeglądarki**, nie w konsolę/URL/JS/chat. Anulowanie nie uruchamia serwera, ale zachowuje gotowy prywatny stan.
-5. Po poprawnym związaniu portu aplikacja prosi domyślną przeglądarkę o otwarcie `http://127.0.0.1:5077/?view=naval` (lub ustawionego portu). Po uwierzytelnieniu następuje stałe przekierowanie `/naval/`. Jeżeli system nie otworzy przeglądarki, otwórz ręcznie lokalny adres bez sekretu pokazany w komunikacie. `/` bez query pozostaje starym polskim panelem. Reader Bearer ma tylko dwa GET API, nie dostęp do dokumentów/UI.
+4. Nowy, pusty katalog danych Windows otrzymuje prywatny profil `windows-local-presentation-v1`. **Nie wpisujesz loginu ani hasła i nie zatwierdzasz okna poświadczeń.** Ten sam start bez logowania działa na kompletnym, prawidłowym profilu prezentacyjnym poprzedniego wydania, bez usuwania ani resetowania danych.
+5. Po poprawnym związaniu portu aplikacja prosi domyślną przeglądarkę o otwarcie `http://127.0.0.1:5077/?view=naval` (lub ustawionego portu). W trybie desktop-local następuje od razu stałe przekierowanie `/naval/`, bez Basic popup. Jeżeli system nie otworzy przeglądarki, otwórz ręcznie lokalny adres bez sekretu pokazany w komunikacie. `/` bez query pozostaje starym polskim panelem. Reader Bearer ma tylko dwa GET API, nie dostęp do dokumentów/UI.
 
-Ponowny podgląd poświadczeń, bez uruchamiania hosta i bez ich rotacji:
+Opcjonalny podgląd prywatnych poświadczeń do **jawnie chronionego trybu/API**, bez uruchamiania hosta i rotacji (nie jest potrzebny do zwykłego startu):
 
 ```powershell
 & '.\APEX-Desktop\ApexDesktop.exe' --show-local-access
@@ -22,7 +22,7 @@ Dla własnego katalogu dodaj `--data 'C:\pełna\prywatna-ścieżka'`. Nie przeka
 
 Domyślny katalog danych: `%LOCALAPPDATA%\APEX Trading AI`. Precedencja: `--data`, następnie `APEX_DATA_DIR`, następnie domyślny KnownFolder. Dane są **poza całym pakietem**, chronione natywnymi ACL dla bieżącego użytkownika, SYSTEM i Administratorów. Poświadczenia webowe przechowuje CurrentUser DPAPI oraz mapa skrótów; nie są to klucze brokera. Nie wysyłaj konfiguracji, map, plików DPAPI ani prywatnych logów. Pliki natywne, jeśli są potrzebne, rozpakowuje mechanizm .NET poza ZIP-em. W tym wariancie .NET 8 kod CoreCLR/JIT/hostingu jest statycznie związany z EXE: smoke wiąże sekcje wykonywalne z rzeczywistym szablonem hosta SDK, sprawdza pochodzenie załadowanych modułów i ACL katalogu ekstrakcji oraz raportuje faktyczną liczbę rozpakowanych plików (również zero).
 
-Istniejąca poprawna konfiguracja i własne profile pozostają zachowane, również `NavalRead` wyłączone. To tryb legacy, a nie portal bezpieczny dla roli Reader. Nie przenoś poświadczeń między użytkownikami: DPAPI wiąże je z kontem Windows. Nie usuwaj ani nie resetuj danych po błędzie.
+Istniejąca poprawna konfiguracja i własne profile pozostają zachowane, również `NavalRead` wyłączone. Rozpoznany kompletny profil prezentacyjny Windows dostaje desktop-local wyłącznie w pamięci procesu; pliki konfiguracji, mapy i DPAPI nie są migrowane ani nadpisywane. Własne chronione konfiguracje bez znacznika prezentacji pozostają chronione. Jawne `NavalRead.RequireAuthentication=true` zachowuje Basic Operator / Bearer Reader również dla profilu prezentacji. To tryb legacy, a nie portal bezpieczny dla roli Reader. Nie przenoś poświadczeń między użytkownikami: DPAPI wiąże je z kontem Windows. Nie usuwaj ani nie resetuj danych po błędzie.
 
 - `HOST_DATA_PATH_INVALID`, `HOST_DATA_PERMISSIONS_INVALID`, `HOST_DATA_UNAVAILABLE`: wybierz nowy prywatny lokalny katalog poza wydaniem albo zleć administratorowi analizę ścieżki/ACL, linków i miejsca na dysku. **Nie** nadawaj Everyone/Users pełnego dostępu i nie obchodź kontroli. Program nie naprawia niebezpiecznych istniejących ACL.
 - `HOST_LOCAL_SETUP_INCOMPLETE` lub problem DPAPI: zachowaj wszystkie pliki i kopię zapasową. Przerwanej inicjalizacji nie leczy się kasowaniem map/konfiguracji. Użyj tego samego konta Windows i zweryfikowanego kompletu danych; odzyskanie wymaga świadomej diagnozy.
@@ -30,6 +30,10 @@ Istniejąca poprawna konfiguracja i własne profile pozostają zachowane, równi
 - `HOST_HTTP_BIND_FAILED`: sprawdź własny proces/port, bez przechodzenia na obcy serwer. Program nie szuka innego portu automatycznie. Opcjonalny zajęty TCP mostu daje degradację, nie oznacza poprawnego połączenia z platformą.
 
 Aktualizuj ręcznie do **nowego folderu**, po finansowym STOP, sprawdzeniu pozycji i zakończeniu własnego procesu. Zachowaj cały prywatny katalog danych z ACL; backup również musi być prywatny. Nie usuwaj rejestrów sygnałów, limitów, planów ani latch STOP. Nie kopiuj prywatnych danych do wydania.
+
+## Granica zaufania desktop-local
+
+Brak hasła oznacza świadome zaufanie do **procesów/użytkowników tego samego komputera mających dostęp do loopback**. To nie izolacja między użytkownikami Windows ani tryb dla współdzielonego/niezaufanego komputera. Program nadal wiąże tylko `127.0.0.1`, kontroluje Host (DNS rebinding), Origin i Fetch Metadata. Obce strony, formularze cross-origin i preflight nie mogą sterować API; mutacje wymagają JSON oraz niestandardowego nagłówka anty-CSRF `X-Apex-Local: 1`. Nie jest on hasłem ani prawem do START. Nie publikuj portu przez proxy/LAN/Internet. Dla wymaganej izolacji użyj jawnie chronionego trybu, nie wyłączaj ACL/DPAPI. Rola Reader pozostaje API-only; podane Bearer credentials nie są podnoszone do Operatora.
 
 ## Ograniczenia i handel
 

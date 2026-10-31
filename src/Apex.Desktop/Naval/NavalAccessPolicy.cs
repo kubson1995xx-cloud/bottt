@@ -19,6 +19,8 @@ namespace Apex.Desktop.Naval;
 public sealed class NavalReadOptions
 {
     public bool Enabled { get; set; }
+    // Explicit protected-mode opt-out; local mode still requires trusted Windows setup.
+    public bool RequireAuthentication { get; set; }
     public string? PublicationPath { get; set; }
     public string? CredentialFilePath { get; set; }
     public NavalReadScopeOptions? Scope { get; set; }
@@ -54,7 +56,12 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
     private sealed record Principal(string Id, NavalReadAccess Access, byte[] Digest, string[] Grants);
     private readonly Principal[] principals;
     private readonly object verifiedKey = new();
-    private NavalAccessPolicy(Principal[] principals) { this.principals = principals; }
+    private readonly Principal? desktopLocal;
+    private NavalAccessPolicy(Principal[] principals, NavalReadScope? localScope = null)
+    {
+        this.principals = principals;
+        if (localScope != null) desktopLocal = new("windows-desktop-local", NavalReadAccess.Operator, Array.Empty<byte>(), new[] { localScope.Id });
+    }
     internal static bool Identifier(string? s) => s is { Length: >= 1 and <= 64 } && s.All(c => char.IsAsciiLetterOrDigit(c) || c == '-' || c == '_');
     internal static bool Hex(string? s) => s is { Length: 64 } && s.All(Uri.IsHexDigit);
     internal static void ValidateRawConfig(string json)
@@ -69,8 +76,9 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
             if (sections.Length == 0) return;
             if (sections.Length != 1 || sections[0].Name != "NavalRead") throw new NavalAccessException("NAVAL_CONFIG_INVALID");
             var e = sections[0].Value;
-            Fields(e, new[] { "Enabled" }, new[] { "Enabled", "PublicationPath", "CredentialFilePath", "Scope" });
+            Fields(e, new[] { "Enabled" }, new[] { "Enabled", "RequireAuthentication", "PublicationPath", "CredentialFilePath", "Scope" });
             if (e.GetProperty("Enabled").ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new NavalAccessException("NAVAL_CONFIG_INVALID");
+            if (e.TryGetProperty("RequireAuthentication", out var required) && required.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new NavalAccessException("NAVAL_CONFIG_INVALID");
             if (e.TryGetProperty("Scope", out var scope) && scope.ValueKind != JsonValueKind.Null)
             {
                 Fields(scope, new[] { "Id", "PublicationScopeId", "PortfolioId", "ConfigDigest", "Accounts" });
@@ -80,11 +88,12 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
         }
         catch (Exception e) when (e is not OutOfMemoryException && e is not NavalAccessException) { throw new NavalAccessException("NAVAL_CONFIG_INVALID"); }
     }
-    internal static NavalRuntimeOptions? Load(NavalReadOptions? options)
+    internal static NavalRuntimeOptions? Load(NavalReadOptions? options, bool windowsDesktopLocal = false)
     {
         if (options?.Enabled != true) return null;
         try
         {
+            if (windowsDesktopLocal && (!OperatingSystem.IsWindows() || options.RequireAuthentication)) throw new NavalAccessException("NAVAL_CONFIG_INVALID");
             var s = options.Scope;
             if (s == null || !Identifier(s.Id) || !Hex(s.PublicationScopeId) || !Hex(s.ConfigDigest) || s.PortfolioId == null ||
                 !Text(s.PortfolioId.PortfolioId) || !Text(s.PortfolioId.ReportingCurrency) || s.Accounts is not { Length: > 0 } ||
@@ -118,7 +127,7 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
                 ps.Add(new(id, role == "Operator" ? NavalReadAccess.Operator : NavalReadAccess.ReadOnly, Convert.FromHexString(hash), grants));
             }
             if (!ps.Any(p => p.Access == NavalReadAccess.Operator) || !ps.Any(p => p.Access == NavalReadAccess.ReadOnly)) throw new NavalAccessException("NAVAL_CREDENTIAL_INVALID");
-            return new(options.PublicationPath, scope, new(ps.ToArray()));
+            return new(options.PublicationPath, scope, new(ps.ToArray(), windowsDesktopLocal ? scope : null));
         }
         catch (NavalAccessException) { throw; }
         catch (Exception e) when (e is not OutOfMemoryException) { throw new NavalAccessException("NAVAL_CREDENTIAL_INVALID"); }
@@ -136,12 +145,27 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
     {
         if (ctx.Request.Path.Value == "/bridge")
         { if (ctx.Request.Headers.ContainsKey("Authorization") || ctx.Request.Headers.ContainsKey("Origin")) { await Error(ctx, 403); return false; } return true; }
-        var p = Authenticate(ctx);
+        if (desktopLocal != null)
+        {
+            // Desktop-local trusts same-machine processes, not arbitrary web origins.
+            // Apply even to documents/GET/preflight, before minting the local principal.
+            var origin = ctx.Request.Headers["Origin"];
+            var site = ctx.Request.Headers["Sec-Fetch-Site"];
+            string expected = "http://" + ctx.Request.Host.Value;
+            if (!System.Net.IPAddress.Loopback.Equals(ctx.Connection.RemoteIpAddress) ||
+                (origin.Count != 0 && (origin.Count != 1 || origin[0] != expected)) ||
+                (site.Count != 0 && (site.Count != 1 || site[0] is not ("same-origin" or "none"))))
+            { await Error(ctx, 403); return false; }
+            bool unsafeMethod = !HttpMethods.IsGet(ctx.Request.Method) && !HttpMethods.IsHead(ctx.Request.Method) && !HttpMethods.IsOptions(ctx.Request.Method);
+            var csrf = ctx.Request.Headers["X-Apex-Local"];
+            if (unsafeMethod && (csrf.Count != 1 || csrf[0] != "1")) { await Error(ctx, 403); return false; }
+        }
+        var p = desktopLocal != null && !ctx.Request.Headers.ContainsKey("Authorization") && string.IsNullOrEmpty(ctx.Request.Headers["X-Apex-Token"].ToString()) ? desktopLocal : Authenticate(ctx);
         string? path = ctx.Request.Path.Value;
         bool naval = path == "/api/naval/snapshot" || path == "/api/naval/events";
         if (p == null)
         {
-            ctx.Response.Headers["WWW-Authenticate"] = naval ? "Bearer" : "Basic realm=\"APEX Local Operator\", charset=\"UTF-8\"";
+            if (desktopLocal == null) ctx.Response.Headers["WWW-Authenticate"] = naval ? "Bearer" : "Basic realm=\"APEX Local Operator\", charset=\"UTF-8\"";
             await Error(ctx, 401); return false;
         }
         if (p.Access == NavalReadAccess.ReadOnly && (!naval || !HttpMethods.IsGet(ctx.Request.Method))) { await Error(ctx, 403); return false; }

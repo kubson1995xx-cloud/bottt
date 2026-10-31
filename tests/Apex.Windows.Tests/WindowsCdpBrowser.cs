@@ -17,6 +17,7 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
     private readonly ConcurrentDictionary<int,TaskCompletionSource<JsonElement>> replies=new();
     private readonly ConcurrentDictionary<int,Task> handlers=new();
     private int serial,eventSerial;
+    internal int AuthenticationCommands, AuthorizationRequests, BasicChallenges, RequestsObserved;
     private Process child=null!;
     private Task receiving=null!;
     private string profile=null!;
@@ -62,6 +63,7 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
     }
     internal async Task<JsonElement> CommandAsync(string method,object parameters,string? sessionId=null)
     {
+        if(method.StartsWith("Fetch.",StringComparison.Ordinal)||method=="Network.setExtraHTTPHeaders")Interlocked.Increment(ref AuthenticationCommands);
         int id=Interlocked.Increment(ref serial);var completion=new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);replies[id]=completion;
         byte[] bytes=JsonSerializer.SerializeToUtf8Bytes(new{id,method,@params=parameters,sessionId},new JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
         await send.WaitAsync(stop.Token);try{await ws.SendAsync(bytes,WebSocketMessageType.Text,true,stop.Token);}finally{send.Release();}
@@ -82,6 +84,12 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
                 else if(root.TryGetProperty("method",out var method))
                 {
                     string name=method.GetString()!;var data=root.GetProperty("params").Clone();string? session=root.TryGetProperty("sessionId",out var s)?s.GetString():null;
+                    if(name=="Network.requestWillBeSentExtraInfo")
+                    {
+                        Interlocked.Increment(ref RequestsObserved);
+                        if(data.GetProperty("headers").EnumerateObject().Any(h=>h.Name.Equals("Authorization",StringComparison.OrdinalIgnoreCase)))Interlocked.Increment(ref AuthorizationRequests);
+                    }
+                    if(name=="Network.responseReceived" && data.GetProperty("response").GetProperty("headers").EnumerateObject().Any(h=>h.Name.Equals("WWW-Authenticate",StringComparison.OrdinalIgnoreCase)&&h.Value.ToString().StartsWith("Basic",StringComparison.OrdinalIgnoreCase)))Interlocked.Increment(ref BasicChallenges);
                     // Keep sensitive auth/request headers out of retained event records.
                     if(name is "Network.responseReceived" or "Network.loadingFinished" or "Page.javascriptDialogOpening")
                     {if(Events.Count>12000)throw new Exception("Event bound exceeded");Events.Enqueue((name,data,session));}

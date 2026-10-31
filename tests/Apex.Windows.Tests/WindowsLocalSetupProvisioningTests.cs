@@ -64,7 +64,7 @@ public sealed partial class WindowsLocalSetupTests
         Assert.Equal("Empty", State(f.Root)); File.WriteAllText(Path.Combine(f.Root, "apex.lock"), ""); Assert.Equal("Empty", State(f.Root));
         var writes = new List<string>(); var result = Ensure(f.Root, writes.Add);
         Assert.Equal(new[] { "pending", "access", "dpapi", "publication", "config", "ready" }, writes);
-        Assert.True(Property<bool>(result, "Initialized")); Assert.True(Property<bool>(result, "NeedsCredentialPrompt"));
+        Assert.True(Property<bool>(result, "Initialized")); Assert.False(Property<bool>(result, "NeedsCredentialPrompt")); Assert.True(Property<bool>(result, "DesktopLocal"));
         Assert.Equal("Ready", State(f.Root)); var cfg = Property<ConfigStore>(result, "Store").Config;
         Assert.True(cfg.NavalRead!.Enabled); Assert.Equal("presentation", cfg.NavalRead.Scope!.Id); Assert.Empty(cfg.Accounts);
         Assert.False(cfg.News.Enabled); Assert.False(cfg.LiveTradingFeature);
@@ -151,7 +151,9 @@ public sealed partial class WindowsLocalSetupTests
     [Fact, Trait("Gate", "Source")]
     public async Task PlaintextNeverReachesOutputOrDocuments()
     {
-        using var f = new SetupFixture(); Ensure(f.Root); var secrets = Secrets(f.Root); var before = f.Snapshot();
+        using var f = new SetupFixture(); Ensure(f.Root);
+        new ConfigStore(f.Root).Update(c => c.NavalRead!.RequireAuthentication = true); // explicit protected-mode regression
+        var secrets = Secrets(f.Root); var before = f.Snapshot();
         Assert.True((bool)Call("WindowsLocalAccess", "Show", f.Root, new Func<string, string, bool>((login, secret) => login == "operator" && secret == secrets.Operator))!); Same(before, f);
         foreach (string path in Directory.GetFiles(f.Root, "*", SearchOption.AllDirectories))
         {
@@ -216,10 +218,10 @@ public sealed partial class WindowsLocalSetupTests
         Assert.DoesNotContain("Authorization:", publicText, StringComparison.OrdinalIgnoreCase);
     }
     [Fact, Trait("Gate", "Source")]
-    public async Task SetupCancelledKeepsReadyPrivateStateWithoutListener()
+    public async Task ExplicitAccessDisplayCancellationKeepsReadyPrivateStateWithoutListener()
     {
-        using var f = new SetupFixture(); int port = FreeSetupPort(); bool shown = false;
-        var task = (Task<int>)CallProgram(new[] { "--data", f.Root, "--port", port.ToString(), "--no-browser" }, (_, _) => { shown = true; return false; });
+        using var f = new SetupFixture(); Ensure(f.Root); int port = FreeSetupPort(); bool shown = false;
+        var task = (Task<int>)CallProgram(new[] { "--data", f.Root, "--port", port.ToString(), "--show-local-access" }, (_, _) => { shown = true; return false; });
         Assert.Equal(2, await task.WaitAsync(TimeSpan.FromSeconds(30))); Assert.True(shown); Assert.Equal("Ready", State(f.Root)); Assert.False(await SetupListening(port));
         Assert.False(Directory.Exists(Path.Combine(f.Root, "logi")));
         var before = f.Snapshot(); Ensure(f.Root); Same(before, f);

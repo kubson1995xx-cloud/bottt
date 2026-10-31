@@ -116,7 +116,7 @@ public sealed class WindowsFirstRunUiTests
         try
         {
             await h.StartAsync(Array.Empty<string>());
-            await h.NativeDialogAsync();await h.ReadyAsync();h.Credentials=WindowsLocalAccess.Load(root,"presentation");
+            await h.ReadyAsync();h.AssertNoCredentialModal();h.Credentials=WindowsLocalAccess.Load(root,"presentation");
             await observer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(50));Assert.Equal(0,observer.ExitCode);
             using var proof=JsonDocument.Parse(await observation);var shell=proof.RootElement;
             WindowsTestHost.Evidence("default-shell",shell);
@@ -128,11 +128,14 @@ public sealed class WindowsFirstRunUiTests
             h.CheckPrivateTree(root);h.Modules();
             await h.StopAsync();
             var privateBefore=WindowsTestHost.Inventory(Path.Combine(root,"private"));
+            await h.StartAsync(Array.Empty<string>());await h.ReadyAsync();h.AssertNoCredentialModal();
+            using(var anonymous=await h.Client.GetAsync(new Uri(h.Origin,"/naval/"))){Assert.Equal(HttpStatusCode.OK,anonymous.StatusCode);Assert.Empty(anonymous.Headers.WwwAuthenticate);}
+            await h.StopAsync();
             await h.StartAsync(new[]{"--show-local-access"});await h.NativeDialogAsync();
             await h.Child!.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));Assert.Equal(0,h.Child.ExitCode);
             WindowsTestHost.SameInventory(privateBefore,Path.Combine(root,"private"));
             Assert.DoesNotContain(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners(),p=>p.Port==h.Port);
-            WindowsTestHost.Evidence("first-run-ui",new{noArguments=true,realKnownFolder=true,firstNativeModalAcknowledged=true,dpapiCurrentUserMatched=true,zeroAccounts=true,showLocalAccessNativeModal=true,credentialsUnchanged=true,noShowListener=true,brokerTested=false});
+            WindowsTestHost.Evidence("first-run-ui",new{noArguments=true,realKnownFolder=true,firstNativeModalAbsent=true,noManualLogin=true,restartAnonymous200=true,dpapiCurrentUserMatched=true,zeroAccounts=true,showLocalAccessNativeModal=true,credentialsUnchanged=true,noShowListener=true,brokerTested=false});
         }
         finally
         {

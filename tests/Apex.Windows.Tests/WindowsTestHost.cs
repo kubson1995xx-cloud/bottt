@@ -25,6 +25,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
     internal Process? Child;
     internal int Pid => Child?.Id ?? throw new InvalidOperationException("Not started");
     internal int Port = 0;
+    internal bool ProtectedMode;
     internal Uri Origin => new($"http://127.0.0.1:{Port}");
     internal HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
     private WindowsLocalAccess.Credentials? credentials;
@@ -90,7 +91,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
     {
         Port=FreePort();
         await StartAsync(new[]{"--data",DataRoot,"--port",Port.ToString(),"--no-browser"});
-        await NativeDialogAsync(); await ReadyAsync();
+        await ReadyAsync();
         Credentials=WindowsLocalAccess.Load(DataRoot,"presentation");
         // Subsequent starts use the generated production config, retaining all settings.
         await StopAsync();
@@ -101,13 +102,14 @@ internal sealed class WindowsTestHost : IAsyncDisposable
     }
     internal async Task ReadyAsync()
     {
-        await Until(async()=> { if (Child!.HasExited) throw new Exception("Extracted EXE exited before ready (private output withheld)"); try { using var r=await Client.GetAsync(Origin); return r.StatusCode==HttpStatusCode.Unauthorized; } catch(HttpRequestException){return false;} catch(TaskCanceledException){return false;} },"EXE did not bind before deadline");
+        await Until(async()=> { if (Child!.HasExited) throw new Exception("Extracted EXE exited before ready (private output withheld)"); try { using var r=await Client.GetAsync(Origin); AssertNoCredentialModal(); return r.StatusCode==(ProtectedMode?HttpStatusCode.Unauthorized:HttpStatusCode.OK); } catch(HttpRequestException){return false;} catch(TaskCanceledException){return false;} },"EXE did not bind before deadline");
     }
-    internal async Task<HttpResponseMessage> Send(string path, string role="operator", string method="GET", string? body=null)
+    internal async Task<HttpResponseMessage> Send(string path, string role="local", string method="GET", string? body=null)
     {
         using var r=new HttpRequestMessage(new HttpMethod(method),new Uri(Origin,path));
         if (role=="operator") r.Headers.TryAddWithoutValidation("Authorization","Basic "+Convert.ToBase64String(Encoding.ASCII.GetBytes("operator:"+Credentials!.OperatorSecret)));
         if (role=="reader") r.Headers.TryAddWithoutValidation("Authorization","Bearer "+Credentials!.ReaderSecret);
+        if (role=="local" && method is not ("GET" or "HEAD" or "OPTIONS")) r.Headers.Add("X-Apex-Local","1");
         if (body!=null) r.Content=new StringContent(body,Encoding.UTF8,"application/json");
         return await Client.SendAsync(r);
     }
@@ -115,6 +117,12 @@ internal sealed class WindowsTestHost : IAsyncDisposable
     {
         using var r=await Send(path); Assert.Equal(HttpStatusCode.OK,r.StatusCode);
         using var d=JsonDocument.Parse(await r.Content.ReadAsByteArrayAsync()); return d.RootElement.Clone();
+    }
+    internal void AssertNoCredentialModal()
+    {
+        bool modal=false;
+        EnumWindows((h,_)=>{GetWindowThreadProcessId(h,out uint pid);var cls=new StringBuilder(100);GetClassName(h,cls,100);if(pid==Pid&&cls.ToString()=="#32770")modal=true;return true;},IntPtr.Zero);
+        Assert.False(modal,"Desktop-local startup displayed a credential modal");
     }
     internal async Task NativeDialogAsync()
     {
