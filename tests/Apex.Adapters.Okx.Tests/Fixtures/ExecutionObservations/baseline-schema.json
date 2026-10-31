@@ -1,0 +1,2119 @@
+{
+  "source": "R = retained eea-reference.crawl.txt",
+  "sha256": "e13a741caf003cd48150d1a7ba8ce9e467f8dc7b2fe04db2879af591209f6da8",
+  "provenance": "Documented shapes, not captured account responses. Matrix transcribed from endpoint response tables before parser implementation. Optional means local observational presence policy, not upstream required guarantee. Selected absent numeric/time fields preserve Raw=null/Value=null; empty raw strings preserve unknown. Strings are not admission/enumeration claims.",
+  "rulings": [
+    {
+      "field": "account.settleCcyList",
+      "example": "R:2838 array of strings",
+      "conflict": "R:2934 declares String, but description calls it a list",
+      "decision": "Explicit parent compatibility ruling: optional array of strings only; absent/empty accepted, null/scalar/nonstring refused. Not independently confirmed upstream correction.",
+      "cost": "Venue scalar fails closed pending narrow repair."
+    }
+  ],
+  "maxUnits": {
+    "maxLmtSz": "base currency",
+    "maxMktSz": "USDT",
+    "maxLmtAmt": "USD",
+    "maxMktAmt": "USD",
+    "maxTwapSz": "base currency",
+    "maxIcebergSz": "base currency",
+    "maxTriggerSz": "base currency",
+    "maxStopSz": "USDT",
+    "maxPlatOILmt": "USD (derivatives only)",
+    "maxPlatOICoinLmt": "coins (derivatives only)"
+  },
+  "endpoints": {
+    "time": {
+      "method": "GET",
+      "path": "/api/v5/public/time",
+      "query": "",
+      "table": "R:16380-16380",
+      "example": "R:16365-16373",
+      "singleton": true,
+      "fields": [
+        {
+          "field": "ts",
+          "type": "String",
+          "anchor": "R:16380",
+          "presence": "selected essential",
+          "handling": "selected -> Ts",
+          "absent": "InvalidPayload",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        }
+      ],
+      "control": {
+        "code": "0",
+        "msg": "",
+        "data": [
+          {
+            "ts": "1597026383085"
+          }
+        ]
+      }
+    },
+    "account": {
+      "method": "GET",
+      "path": "/api/v5/account/config",
+      "query": "",
+      "table": "R:2849-2934",
+      "example": "R:2806-2842",
+      "singleton": true,
+      "fields": [
+        {
+          "field": "uid",
+          "type": "String",
+          "anchor": "R:2849",
+          "presence": "selected essential",
+          "handling": "selected -> Uid",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "mainUid",
+          "type": "String",
+          "anchor": "R:2850",
+          "presence": "selected essential",
+          "handling": "selected -> MainUid",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "acctLv",
+          "type": "String",
+          "anchor": "R:2853",
+          "presence": "selected essential",
+          "handling": "selected -> AccountLevel",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "acctStpMode",
+          "type": "String",
+          "anchor": "R:2858",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "posMode",
+          "type": "String",
+          "anchor": "R:2863",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "autoLoan",
+          "type": "Boolean",
+          "anchor": "R:2866",
+          "presence": "selected essential",
+          "handling": "selected -> AutoLoan",
+          "absent": "InvalidPayload",
+          "empty": "InvalidPayload: JSON bool literal required",
+          "unit": null
+        },
+        {
+          "field": "greeksType",
+          "type": "String",
+          "anchor": "R:2869",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "feeType",
+          "type": "String",
+          "anchor": "R:2872",
+          "presence": "selected essential",
+          "handling": "selected -> FeeType",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "level",
+          "type": "String",
+          "anchor": "R:2875",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "levelTmp",
+          "type": "String",
+          "anchor": "R:2876",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ctIsoMode",
+          "type": "String",
+          "anchor": "R:2877",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "mgnIsoMode",
+          "type": "String",
+          "anchor": "R:2880",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "spotOffsetType",
+          "type": "String",
+          "anchor": "R:2884",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "stgyType",
+          "type": "String",
+          "anchor": "R:2890",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "roleType",
+          "type": "String",
+          "anchor": "R:2893",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "traderInsts",
+          "type": "Array of strings",
+          "anchor": "R:2897",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "spotRoleType",
+          "type": "String",
+          "anchor": "R:2898",
+          "presence": "selected essential",
+          "handling": "selected -> SpotRoleType",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "spotTraderInsts",
+          "type": "Array of strings",
+          "anchor": "R:2900",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "opAuth",
+          "type": "String",
+          "anchor": "R:2901",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "kycLv",
+          "type": "String",
+          "anchor": "R:2904",
+          "presence": "selected essential",
+          "handling": "selected -> KycLevel",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "label",
+          "type": "String",
+          "anchor": "R:2911",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ip",
+          "type": "String",
+          "anchor": "R:2912",
+          "presence": "selected essential",
+          "handling": "selected -> Ip",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "perm",
+          "type": "String",
+          "anchor": "R:2913",
+          "presence": "selected essential",
+          "handling": "selected -> Permissions",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "liquidationGear",
+          "type": "String",
+          "anchor": "R:2917",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "enableSpotBorrow",
+          "type": "Boolean",
+          "anchor": "R:2920",
+          "presence": "selected essential",
+          "handling": "selected -> EnableSpotBorrow",
+          "absent": "InvalidPayload",
+          "empty": "InvalidPayload: JSON bool literal required",
+          "unit": null
+        },
+        {
+          "field": "spotBorrowAutoRepay",
+          "type": "Boolean",
+          "anchor": "R:2923",
+          "presence": "selected essential",
+          "handling": "selected -> SpotBorrowAutoRepay",
+          "absent": "InvalidPayload",
+          "empty": "InvalidPayload: JSON bool literal required",
+          "unit": null
+        },
+        {
+          "field": "type",
+          "type": "String",
+          "anchor": "R:2926",
+          "presence": "selected essential",
+          "handling": "selected -> AccountType",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "settleCcy",
+          "type": "String",
+          "anchor": "R:2933",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "settleCcyList",
+          "type": "Array of strings (parent ruling; table says String)",
+          "anchor": "R:2934",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        }
+      ],
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "acctLv": "1",
+            "acctStpMode": "cancel_maker",
+            "autoLoan": false,
+            "ctIsoMode": "automatic",
+            "enableSpotBorrow": false,
+            "greeksType": "PA",
+            "feeType": "0",
+            "ip": "",
+            "type": "0",
+            "kycLv": "3",
+            "label": "v5 test",
+            "level": "Lv1",
+            "levelTmp": "",
+            "liquidationGear": "-1",
+            "mainUid": "654321",
+            "mgnIsoMode": "automatic",
+            "opAuth": "1",
+            "perm": "read_only,trade",
+            "posMode": "long_short_mode",
+            "roleType": "0",
+            "spotBorrowAutoRepay": false,
+            "spotOffsetType": "",
+            "spotRoleType": "0",
+            "spotTraderInsts": [],
+            "stgyType": "0",
+            "traderInsts": [],
+            "uid": "654321",
+            "settleCcy": "USDC",
+            "settleCcyList": [
+              "USD",
+              "USDC",
+              "USDG"
+            ]
+          }
+        ],
+        "msg": ""
+      }
+    },
+    "balance": {
+      "method": "GET",
+      "path": "/api/v5/account/balance",
+      "query": "",
+      "table": "R:1418-1554",
+      "example": "R:1333-1411",
+      "singleton": true,
+      "fields": [
+        {
+          "field": "uTime",
+          "type": "String",
+          "anchor": "R:1418",
+          "presence": "selected essential",
+          "handling": "selected -> UTime",
+          "absent": "InvalidPayload",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "totalEq",
+          "type": "String",
+          "anchor": "R:1419",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "isoEq",
+          "type": "String",
+          "anchor": "R:1420",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "adjEq",
+          "type": "String",
+          "anchor": "R:1422",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "availEq",
+          "type": "String",
+          "anchor": "R:1427",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ordFroz",
+          "type": "String",
+          "anchor": "R:1429",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "imr",
+          "type": "String",
+          "anchor": "R:1431",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "mmr",
+          "type": "String",
+          "anchor": "R:1433",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "borrowFroz",
+          "type": "String",
+          "anchor": "R:1435",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "mgnRatio",
+          "type": "String",
+          "anchor": "R:1437",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "notionalUsd",
+          "type": "String",
+          "anchor": "R:1439",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "notionalUsdForBorrow",
+          "type": "String",
+          "anchor": "R:1441",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "notionalUsdForSwap",
+          "type": "String",
+          "anchor": "R:1443",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "notionalUsdForFutures",
+          "type": "String",
+          "anchor": "R:1445",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "notionalUsdForOption",
+          "type": "String",
+          "anchor": "R:1447",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "upl",
+          "type": "String",
+          "anchor": "R:1449",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "delta",
+          "type": "String",
+          "anchor": "R:1451",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "deltaLever",
+          "type": "String",
+          "anchor": "R:1452",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "deltaNeutralStatus",
+          "type": "String",
+          "anchor": "R:1454",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details",
+          "type": "Array of objects",
+          "anchor": "R:1458",
+          "presence": "selected essential",
+          "handling": "selected -> Details",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].ccy",
+          "type": "String",
+          "anchor": "R:1459",
+          "presence": "selected essential",
+          "handling": "selected -> Currency",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].eq",
+          "type": "String",
+          "anchor": "R:1460",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> Equity",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].cashBal",
+          "type": "String",
+          "anchor": "R:1461",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> Cash",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].uTime",
+          "type": "String",
+          "anchor": "R:1462",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> UTime",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].isoEq",
+          "type": "String",
+          "anchor": "R:1463",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].availEq",
+          "type": "String",
+          "anchor": "R:1465",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].disEq",
+          "type": "String",
+          "anchor": "R:1467",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].fixedBal",
+          "type": "String",
+          "anchor": "R:1469",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> FixedBalance",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].availBal",
+          "type": "String",
+          "anchor": "R:1470",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> Available",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].frozenBal",
+          "type": "String",
+          "anchor": "R:1471",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> Frozen",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].ordFrozen",
+          "type": "String",
+          "anchor": "R:1472",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> OrderFrozen",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].liab",
+          "type": "String",
+          "anchor": "R:1474",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> Liability",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].upl",
+          "type": "String",
+          "anchor": "R:1477",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].uplLiab",
+          "type": "String",
+          "anchor": "R:1479",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].crossLiab",
+          "type": "String",
+          "anchor": "R:1481",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> CrossLiability",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].rewardBal",
+          "type": "String",
+          "anchor": "R:1483",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].isoLiab",
+          "type": "String",
+          "anchor": "R:1484",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> IsolatedLiability",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].mgnRatio",
+          "type": "String",
+          "anchor": "R:1486",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].imr",
+          "type": "String",
+          "anchor": "R:1489",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].mmr",
+          "type": "String",
+          "anchor": "R:1491",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].interest",
+          "type": "String",
+          "anchor": "R:1493",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> Interest",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].twap",
+          "type": "String",
+          "anchor": "R:1496",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].frpType",
+          "type": "String",
+          "anchor": "R:1499",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].maxLoan",
+          "type": "String",
+          "anchor": "R:1505",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].eqUsd",
+          "type": "String",
+          "anchor": "R:1507",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].borrowFroz",
+          "type": "String",
+          "anchor": "R:1508",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].notionalLever",
+          "type": "String",
+          "anchor": "R:1510",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].stgyEq",
+          "type": "String",
+          "anchor": "R:1512",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> StrategyEquity",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "details[].isoUpl",
+          "type": "String",
+          "anchor": "R:1513",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].spotInUseAmt",
+          "type": "String",
+          "anchor": "R:1515",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].clSpotInUseAmt",
+          "type": "String",
+          "anchor": "R:1517",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].maxSpotInUse",
+          "type": "String",
+          "anchor": "R:1518",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].spotIsoBal",
+          "type": "String",
+          "anchor": "R:1520",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].smtSyncEq",
+          "type": "String",
+          "anchor": "R:1522",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].spotCopyTradingEq",
+          "type": "String",
+          "anchor": "R:1524",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].spotBal",
+          "type": "String",
+          "anchor": "R:1526",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].openAvgPx",
+          "type": "String",
+          "anchor": "R:1527",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].accAvgPx",
+          "type": "String",
+          "anchor": "R:1528",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].spotUpl",
+          "type": "String",
+          "anchor": "R:1529",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].spotUplRatio",
+          "type": "String",
+          "anchor": "R:1530",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].totalPnl",
+          "type": "String",
+          "anchor": "R:1531",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].totalPnlRatio",
+          "type": "String",
+          "anchor": "R:1532",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].colRes",
+          "type": "String",
+          "anchor": "R:1533",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].colBorrAutoConversion",
+          "type": "String",
+          "anchor": "R:1538",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].collateralRestrict",
+          "type": "Boolean",
+          "anchor": "R:1542",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "InvalidPayload: JSON bool literal required",
+          "unit": null
+        },
+        {
+          "field": "details[].collateralEnabled",
+          "type": "Boolean",
+          "anchor": "R:1545",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "InvalidPayload: JSON bool literal required",
+          "unit": null
+        },
+        {
+          "field": "details[].autoLendStatus",
+          "type": "String",
+          "anchor": "R:1548",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "details[].autoLendMtAmt",
+          "type": "String",
+          "anchor": "R:1553",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        }
+      ],
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "adjEq": "55415.624719833286",
+            "availEq": "55415.624719833286",
+            "borrowFroz": "0",
+            "delta": "0",
+            "deltaLever": "0",
+            "deltaNeutralStatus": "0",
+            "details": [
+              {
+                "autoLendStatus": "off",
+                "autoLendMtAmt": "0",
+                "availBal": "4834.317093622894",
+                "availEq": "4834.3170936228935",
+                "borrowFroz": "0",
+                "cashBal": "4850.435693622894",
+                "ccy": "USD",
+                "crossLiab": "0",
+                "colRes": "0",
+                "collateralEnabled": false,
+                "collateralRestrict": false,
+                "colBorrAutoConversion": "0",
+                "disEq": "4991.542013297616",
+                "eq": "4992.890093622894",
+                "eqUsd": "4991.542013297616",
+                "smtSyncEq": "0",
+                "spotCopyTradingEq": "0",
+                "fixedBal": "0",
+                "frozenBal": "158.573",
+                "frpType": "0",
+                "imr": "",
+                "interest": "0",
+                "isoEq": "0",
+                "isoLiab": "0",
+                "isoUpl": "0",
+                "liab": "",
+                "maxLoan": "0",
+                "mgnRatio": "",
+                "mmr": "",
+                "notionalLever": "",
+                "ordFrozen": "",
+                "rewardBal": "0",
+                "spotInUseAmt": "",
+                "clSpotInUseAmt": "",
+                "maxSpotInUse": "",
+                "spotIsoBal": "0",
+                "stgyEq": "150",
+                "twap": "0",
+                "uTime": "1705449605015",
+                "upl": "-7.545600000000006",
+                "uplLiab": "0",
+                "spotBal": "",
+                "openAvgPx": "",
+                "accAvgPx": "",
+                "spotUpl": "",
+                "spotUplRatio": "",
+                "totalPnl": "",
+                "totalPnlRatio": ""
+              },
+              {
+                "autoLendStatus": "off",
+                "autoLendMtAmt": "0",
+                "availBal": "0.1",
+                "availEq": "4834.3170936228935",
+                "borrowFroz": "0",
+                "cashBal": "0.1",
+                "ccy": "BTC",
+                "crossLiab": "0",
+                "colRes": "0",
+                "collateralEnabled": false,
+                "collateralRestrict": false,
+                "colBorrAutoConversion": "0",
+                "disEq": "4991.542013297616",
+                "eq": "4992.890093622894",
+                "eqUsd": "4991.542013297616",
+                "smtSyncEq": "0",
+                "spotCopyTradingEq": "0",
+                "fixedBal": "0",
+                "frozenBal": "158.573",
+                "frpType": "0",
+                "imr": "",
+                "interest": "0",
+                "isoEq": "0",
+                "isoLiab": "0",
+                "isoUpl": "0",
+                "liab": "",
+                "maxLoan": "0",
+                "mgnRatio": "",
+                "mmr": "",
+                "notionalLever": "",
+                "ordFrozen": "",
+                "rewardBal": "0",
+                "spotInUseAmt": "",
+                "clSpotInUseAmt": "",
+                "maxSpotInUse": "",
+                "spotIsoBal": "0",
+                "stgyEq": "150",
+                "twap": "0",
+                "uTime": "1705449605015",
+                "upl": "-7.545600000000006",
+                "uplLiab": "0",
+                "spotBal": "",
+                "openAvgPx": "",
+                "accAvgPx": "",
+                "spotUpl": "",
+                "spotUplRatio": "",
+                "totalPnl": "",
+                "totalPnlRatio": ""
+              }
+            ],
+            "imr": "0",
+            "isoEq": "0",
+            "mgnRatio": "",
+            "mmr": "0",
+            "notionalUsd": "0",
+            "notionalUsdForBorrow": "0",
+            "notionalUsdForFutures": "0",
+            "notionalUsdForOption": "0",
+            "notionalUsdForSwap": "0",
+            "ordFroz": "",
+            "totalEq": "55837.43556134779",
+            "uTime": "1705474164160",
+            "upl": "0"
+          }
+        ],
+        "msg": ""
+      }
+    },
+    "instruments": {
+      "method": "GET",
+      "path": "/api/v5/account/instruments",
+      "query": "?instType=SPOT",
+      "table": "R:1109-1274",
+      "example": "R:1039-1102",
+      "singleton": false,
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:1109",
+          "presence": "selected essential",
+          "handling": "selected -> InstrumentType",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "seriesId",
+          "type": "String",
+          "anchor": "R:1110",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:1111",
+          "presence": "selected essential",
+          "handling": "selected -> Instrument",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "uly",
+          "type": "String",
+          "anchor": "R:1112",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "groupId",
+          "type": "String",
+          "anchor": "R:1114",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> GroupId",
+          "absent": "null",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "instFamily",
+          "type": "String",
+          "anchor": "R:1147",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "baseCcy",
+          "type": "String",
+          "anchor": "R:1149",
+          "presence": "selected essential",
+          "handling": "selected -> BaseCurrency",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "quoteCcy",
+          "type": "String",
+          "anchor": "R:1151",
+          "presence": "selected essential",
+          "handling": "selected -> CatalogQuote",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "settleCcy",
+          "type": "String",
+          "anchor": "R:1153",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ctVal",
+          "type": "String",
+          "anchor": "R:1155",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ctMult",
+          "type": "String",
+          "anchor": "R:1157",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ctValCcy",
+          "type": "String",
+          "anchor": "R:1159",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "optType",
+          "type": "String",
+          "anchor": "R:1161",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "stk",
+          "type": "String",
+          "anchor": "R:1163",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "listTime",
+          "type": "String",
+          "anchor": "R:1165",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> ListTime",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "auctionEndTime",
+          "type": "String",
+          "anchor": "R:1166",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "contTdSwTime",
+          "type": "String",
+          "anchor": "R:1168",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "preMktSwTime",
+          "type": "String",
+          "anchor": "R:1170",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "openType",
+          "type": "String",
+          "anchor": "R:1172",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "elp",
+          "type": "String",
+          "anchor": "R:1177",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "rpi",
+          "type": "String",
+          "anchor": "R:1183",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "expTime",
+          "type": "String",
+          "anchor": "R:1189",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> ExpiryTime",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "lever",
+          "type": "String",
+          "anchor": "R:1191",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "tickSz",
+          "type": "String",
+          "anchor": "R:1193",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> TickSize",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "lotSz",
+          "type": "String",
+          "anchor": "R:1195",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> LotSize",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "minSz",
+          "type": "String",
+          "anchor": "R:1198",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MinimumSize",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "ctType",
+          "type": "String",
+          "anchor": "R:1201",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "state",
+          "type": "String",
+          "anchor": "R:1205",
+          "presence": "selected essential",
+          "handling": "selected -> State",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ruleType",
+          "type": "String",
+          "anchor": "R:1213",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "posLmtAmt",
+          "type": "String",
+          "anchor": "R:1218",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "posLmtPct",
+          "type": "String",
+          "anchor": "R:1219",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "maxPlatOILmt",
+          "type": "String",
+          "anchor": "R:1220",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxPlatOILmt].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "USD (derivatives only)"
+        },
+        {
+          "field": "maxPlatOICoinLmt",
+          "type": "String",
+          "anchor": "R:1222",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxPlatOICoinLmt].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "coins (derivatives only)"
+        },
+        {
+          "field": "longPosRemainingQuota",
+          "type": "String",
+          "anchor": "R:1224",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "shortPosRemainingQuota",
+          "type": "String",
+          "anchor": "R:1225",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "maxLmtSz",
+          "type": "String",
+          "anchor": "R:1226",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxLmtSz].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "base currency"
+        },
+        {
+          "field": "maxMktSz",
+          "type": "String",
+          "anchor": "R:1229",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxMktSz].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "USDT"
+        },
+        {
+          "field": "maxLmtAmt",
+          "type": "String",
+          "anchor": "R:1232",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxLmtAmt].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "USD"
+        },
+        {
+          "field": "maxMktAmt",
+          "type": "String",
+          "anchor": "R:1233",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxMktAmt].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "USD"
+        },
+        {
+          "field": "maxTwapSz",
+          "type": "String",
+          "anchor": "R:1235",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxTwapSz].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "base currency"
+        },
+        {
+          "field": "maxIcebergSz",
+          "type": "String",
+          "anchor": "R:1239",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxIcebergSz].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "base currency"
+        },
+        {
+          "field": "maxTriggerSz",
+          "type": "String",
+          "anchor": "R:1242",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxTriggerSz].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "base currency"
+        },
+        {
+          "field": "maxStopSz",
+          "type": "String",
+          "anchor": "R:1245",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> MaxValues[maxStopSz].Amount",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": "USDT"
+        },
+        {
+          "field": "futureSettlement",
+          "type": "Boolean",
+          "anchor": "R:1248",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "InvalidPayload: JSON bool literal required",
+          "unit": null
+        },
+        {
+          "field": "tradeQuoteCcyList",
+          "type": "Array of strings",
+          "anchor": "R:1250",
+          "presence": "selected essential",
+          "handling": "selected -> TradeQuoteCurrencies",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "instIdCode",
+          "type": "Integer or null (R:1251-1254)",
+          "anchor": "R:1251",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "instCategory",
+          "type": "String",
+          "anchor": "R:1255",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "initPxLmtPct",
+          "type": "String",
+          "anchor": "R:1262",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "floatPxLmtPct",
+          "type": "String",
+          "anchor": "R:1264",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "maxPxLmtPct",
+          "type": "String",
+          "anchor": "R:1266",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "upcChg",
+          "type": "Array of objects",
+          "anchor": "R:1268",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "upcChg[].param",
+          "type": "String",
+          "anchor": "R:1269",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "upcChg[].newValue",
+          "type": "String",
+          "anchor": "R:1273",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "upcChg[].effTime",
+          "type": "String",
+          "anchor": "R:1274",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        }
+      ],
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "auctionEndTime": "",
+            "baseCcy": "BTC",
+            "ctMult": "",
+            "ctType": "",
+            "ctVal": "",
+            "ctValCcy": "",
+            "contTdSwTime": "1704876947000",
+            "elp": "0",
+            "rpi": "0",
+            "expTime": "",
+            "futureSettlement": false,
+            "groupId": "4",
+            "instFamily": "",
+            "instId": "BTC-USDC",
+            "instType": "SPOT",
+            "lever": "",
+            "listTime": "1704876947000",
+            "lotSz": "0.00000001",
+            "maxIcebergSz": "9999999999.0000000000000000",
+            "maxLmtAmt": "1000000",
+            "maxLmtSz": "9999999999",
+            "maxMktAmt": "1000000",
+            "maxMktSz": "1000000",
+            "maxPlatOILmt": "1000000000",
+            "maxPlatOICoinLmt": "",
+            "maxStopSz": "1000000",
+            "maxTriggerSz": "9999999999.0000000000000000",
+            "maxTwapSz": "9999999999.0000000000000000",
+            "minSz": "0.00001",
+            "optType": "",
+            "openType": "call_auction",
+            "preMktSwTime": "",
+            "posLmtPct": "30",
+            "posLmtAmt": "2500000",
+            "quoteCcy": "USDC",
+            "tradeQuoteCcyList": [
+              "USD",
+              "USDC"
+            ],
+            "settleCcy": "",
+            "state": "live",
+            "ruleType": "normal",
+            "stk": "",
+            "tickSz": "1",
+            "uly": "",
+            "instIdCode": 1000000000,
+            "instCategory": "1",
+            "initPxLmtPct": "0.05",
+            "floatPxLmtPct": "0.03",
+            "maxPxLmtPct": "0.15",
+            "upcChg": [
+              {
+                "param": "tickSz",
+                "newValue": "0.0001",
+                "effTime": "1704876947000"
+              }
+            ]
+          }
+        ],
+        "msg": ""
+      }
+    },
+    "fees": {
+      "method": "GET",
+      "path": "/api/v5/account/trade-fee",
+      "query": "?instId=BTC-USDC&instType=SPOT",
+      "table": "R:3885-3920",
+      "example": "R:3848-3878",
+      "singleton": true,
+      "fields": [
+        {
+          "field": "level",
+          "type": "String",
+          "anchor": "R:3885",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "feeGroup",
+          "type": "Array of objects",
+          "anchor": "R:3886",
+          "presence": "selected essential",
+          "handling": "selected -> Groups",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "feeGroup[].taker",
+          "type": "String",
+          "anchor": "R:3888",
+          "presence": "selected essential",
+          "handling": "selected -> Taker",
+          "absent": "InvalidPayload",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "feeGroup[].maker",
+          "type": "String",
+          "anchor": "R:3890",
+          "presence": "selected essential",
+          "handling": "selected -> Maker",
+          "absent": "InvalidPayload",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "feeGroup[].groupId",
+          "type": "String",
+          "anchor": "R:3892",
+          "presence": "selected essential",
+          "handling": "selected -> GroupId",
+          "absent": "InvalidPayload",
+          "empty": "InvalidPayload: group ID must be nonempty",
+          "unit": null
+        },
+        {
+          "field": "feeGroup[].elpMaker",
+          "type": "String",
+          "anchor": "R:3895",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> ElpMaker",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "feeGroup[].rpiMaker",
+          "type": "String",
+          "anchor": "R:3896",
+          "presence": "optional; validate type if present",
+          "handling": "selected -> RpiMaker",
+          "absent": "Raw=null, parsed value unavailable",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "delivery",
+          "type": "String",
+          "anchor": "R:3898",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "exercise",
+          "type": "String",
+          "anchor": "R:3899",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:3900",
+          "presence": "selected essential",
+          "handling": "selected -> InstrumentType",
+          "absent": "InvalidPayload",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ts",
+          "type": "String",
+          "anchor": "R:3901",
+          "presence": "selected essential",
+          "handling": "selected -> Timestamp",
+          "absent": "InvalidPayload",
+          "empty": "Raw=\"\", parsed value unavailable",
+          "unit": null
+        },
+        {
+          "field": "taker",
+          "type": "String",
+          "anchor": "R:3902",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "maker",
+          "type": "String",
+          "anchor": "R:3904",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "takerU",
+          "type": "String",
+          "anchor": "R:3906",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "makerU",
+          "type": "String",
+          "anchor": "R:3907",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "takerUSDC",
+          "type": "String",
+          "anchor": "R:3908",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "makerUSDC",
+          "type": "String",
+          "anchor": "R:3910",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "ruleType",
+          "type": "String",
+          "anchor": "R:3912",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "category",
+          "type": "String",
+          "anchor": "R:3915",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "fiat",
+          "type": "Array of objects",
+          "anchor": "R:3916",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "fiat[].ccy",
+          "type": "String",
+          "anchor": "R:3917",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "fiat[].taker",
+          "type": "String",
+          "anchor": "R:3918",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "fiat[].maker",
+          "type": "String",
+          "anchor": "R:3919",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        },
+        {
+          "field": "settle",
+          "type": "String",
+          "anchor": "R:3920",
+          "presence": "optional; validate type if present",
+          "handling": "discarded after exact type/recursive text validation",
+          "absent": "accepted; no authority inferred",
+          "empty": "retained as observed string/array if selected; otherwise discarded",
+          "unit": null
+        }
+      ],
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "category": "1",
+            "delivery": "",
+            "exercise": "",
+            "feeGroup": [
+              {
+                "elpMaker": "-0.0008",
+                "rpiMaker": "-0.0008",
+                "groupId": "1",
+                "maker": "-0.0008",
+                "taker": "-0.001"
+              }
+            ],
+            "fiat": [
+              {
+                "ccy": "EUR",
+                "maker": "-0.001",
+                "taker": "-0.002"
+              }
+            ],
+            "instType": "SPOT",
+            "level": "Lv1",
+            "maker": "-0.0008",
+            "makerU": "",
+            "makerUSDC": "",
+            "ruleType": "normal",
+            "taker": "-0.001",
+            "takerU": "",
+            "takerUSDC": "",
+            "ts": "1763979985847"
+          }
+        ],
+        "msg": ""
+      }
+    }
+  }
+}

@@ -41,6 +41,20 @@ public sealed class OkxSigningMaterial : IDisposable
             // HTTP header strings and framework-internal copies cannot be reliably erased by this library.
         }
     }
+    // Additive read-only signer. Accepted mutation Authenticate above is unchanged.
+    internal void AuthenticateRead(HttpRequestMessage request,string timestamp,string exactPathAndQuery)
+    {
+        if(request.Method!=HttpMethod.Get || request.Content is not null || request.RequestUri?.PathAndQuery!=exactPathAndQuery)
+            throw new ArgumentException("InvalidObservationRequest");
+        lock(sync)
+        {
+            ObjectDisposedException.ThrowIf(disposed,this);
+            request.Headers.Add("OK-ACCESS-KEY",Encoding.ASCII.GetString(Key));
+            request.Headers.Add("OK-ACCESS-PASSPHRASE",Encoding.ASCII.GetString(Passphrase));
+            request.Headers.Add("OK-ACCESS-TIMESTAMP",timestamp);
+            request.Headers.Add("OK-ACCESS-SIGN",OkxRequestSigner.Sign(Secret,timestamp,"GET",exactPathAndQuery,ReadOnlySpan<byte>.Empty));
+        }
+    }
     public void Dispose() { lock(sync) { if(disposed)return; disposed=true; CryptographicOperations.ZeroMemory(Key); CryptographicOperations.ZeroMemory(Secret); CryptographicOperations.ZeroMemory(Passphrase); } }
     public override string ToString()=>"OKX signing material [REDACTED]";
 }
