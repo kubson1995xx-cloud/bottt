@@ -21,7 +21,7 @@ public sealed class OkxExecutionDurabilityTests
         using var f=new OkxExecutionFixture();f.Run();var reservation=f.Reserve();f.Init();
         if(!idCommit)Assert.Equal(NavalMutationStatus.Applied,f.Transactions.ReserveIds(reservation.ReservationId!,"execution-0",new[]{NavalClientIdRole.Parent}).Result.Status);
         f.Owner.Dispose();string barrier=f.DirectoryPath+"-barrier";
-        var start=new ProcessStartInfo("/home/ubuntu/.dotnet/dotnet"){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
+        var start=new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH")??"dotnet"){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
         foreach(string arg in new[]{typeof(SyntheticHostEntry).Assembly.Location,"--okx-p-crash",f.DirectoryPath,barrier,boundary,idCommit?"id":"prepare"})start.ArgumentList.Add(arg);
         start.Environment["APEX_OKX_PUBLIC_READ_SMOKE"]="0";
         _output.WriteLine("Owned crash fixture command: "+start.FileName+" "+string.Join(" ",start.ArgumentList));
