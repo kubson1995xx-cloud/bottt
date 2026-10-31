@@ -1,4 +1,12 @@
-# Dostawy NAVAL COMMAND — Windows x64 odebrany
+# Dostawy NAVAL COMMAND — aktualna Windows BEZ RĘCZNEGO LOGOWANIA
+
+## Aktualizacja no-login — odebrana
+
+Spec i security/quality `no-login-review.md`: PASS/Ship, bez severity findings. Paczka `/home/ubuntu/projects/apex-deliveries/naval-windows-no-login-517f274/APEX-NAVAL-COMMAND-Windows-x64.zip`, 43 211 704 bajty, SHA256 `a1dd95ed674535b94d7b3467676c013af8080b220ac66d897c855d57932def32`. Źródło produktu517f274, finaltesta7af252, CI41208628374 SUCCESS. NativePackage6/Browser2/Upgrade1/smoke PASS; sealed853/126/168/78/extracted113 passing reuse na tych samych bajtach, bez udawania nowego pełnego green buildu. Fullrun41205686076 zachowany FAIL po GPU context loss; późniejsza same-ZIP acceptance obejmuje poprawione tylko testy.
+
+Nowe i poprawne poprzednie Windows presentation profiles otwierają NAVAL bez ręcznego loginu/hasła/native prompt. Genuine old-EXE upgrade/dwa starty/6plików bez zmian sprawdzone. Custom/protected configs zachowane; tylko loopback, ACL/DPAPI/Host/Origin/Fetch Metadata/CSRF; tryb ufa lokalnym procesom/użytkownikom. Nie wystawiać LAN/Internet. Nie kasować danych. Końcowy `ODBIOR-I-START.md` wyjaśnia aktualizację i historyczny sealed banner. Bez Core/trade/riskchanges/kont/transakcji. PhysicalWin11/GPU/broker nieodebrane, oryginalnej przyczyny pętli Basic nie ustalono.
+
+## Poprzednia dostawa Windows z ręcznym logowaniem — historia
 
 ## Aktualna dyspozycja Windows
 
