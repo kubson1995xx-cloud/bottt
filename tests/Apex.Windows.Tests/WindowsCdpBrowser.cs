@@ -116,7 +116,7 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
         return r.GetProperty("result").TryGetProperty("value",out var v)?v.Clone():JsonSerializer.SerializeToElement<object?>(null);
     }
     internal async Task Wait(string sid,string expression,string failure,int seconds=35)=>await WindowsTestHost.Until(async()=>{try{return(await Evaluate(sid,expression)).ValueKind==JsonValueKind.True;}catch{return false;}},failure,seconds);
-    internal async Task Navigate(string sid,string url){await CommandAsync("Page.navigate",new{url},sid);await Wait(sid,"document.readyState === 'complete'","Page load deadline");}
+    internal async Task Navigate(string sid,string url){await CommandAsync("Page.navigate",new{url},sid);await CommandAsync("Page.bringToFront",new{},sid);await Wait(sid,"document.readyState === 'complete'","Page load deadline");}
     public async ValueTask DisposeAsync()
     {
         try{if(ws.State==WebSocketState.Open){OnEvent=null;foreach(var context in contexts)await CommandAsync("Target.disposeBrowserContext",new{browserContextId=context});await CommandAsync("Browser.close",new{});}}catch{}

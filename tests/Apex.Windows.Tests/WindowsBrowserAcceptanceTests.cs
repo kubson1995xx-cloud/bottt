@@ -56,13 +56,15 @@ public sealed class WindowsBrowserAcceptanceTests
         Assert.Equal(1,challenges);
         await b.CommandAsync("Fetch.disable",new{},sid);b.OnEvent=null;
         await b.CommandAsync("Page.reload",new{ignoreCache=true},sid);
+        await b.CommandAsync("Page.bringToFront",new{},sid);
+        await b.Wait(sid,"!document.hidden","Protected cache probe requires a genuinely visible browser document");
         try
         {
             await b.Wait(sid,"document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')!==null && document.querySelector('[data-testid=revision]').textContent !== 'UNKNOWN'","Native Basic cache failed after auth callback removed");
         }
         finally
         {
-            var state=await b.Evaluate(sid,"({navalPath:location.pathname==='/naval/',ready:document.readyState==='complete',connected:document.querySelector('.connection.connected')!==null,revisionPresent:document.querySelector('[data-testid=revision]')!==null,revisionKnown:!!document.querySelector('[data-testid=revision]')&&document.querySelector('[data-testid=revision]').textContent!=='UNKNOWN'})");
+            var state=await b.Evaluate(sid,"({hidden:document.hidden,focused:document.hasFocus(),documentHiddenReason:document.body.textContent.includes('DOCUMENT_HIDDEN'),navalPath:location.pathname==='/naval/',ready:document.readyState==='complete',connected:document.querySelector('.connection.connected')!==null,revisionPresent:document.querySelector('[data-testid=revision]')!==null,revisionKnown:!!document.querySelector('[data-testid=revision]')&&document.querySelector('[data-testid=revision]').textContent!=='UNKNOWN'})");
             var responses=b.Events.Where(e=>e.Session==sid&&e.Method=="Network.responseReceived").Select(e=>new{path=new Uri(e.Data.GetProperty("response").GetProperty("url").GetString()!).AbsolutePath,status=e.Data.GetProperty("response").GetProperty("status").GetInt32()}).ToArray();
             WindowsTestHost.Evidence("protected-cache-state",new{state,responses,callbackRemoved=true});
         }
@@ -206,8 +208,17 @@ public sealed class WindowsBrowserAcceptanceTests
             foreach(var(route,title)in new[]{("command","Command Center"),("radar","Tactical Radar"),("fleets","Fleet Operations"),("animations","Trade Animations"),("analytics","Analytics Center")})
             {await b.Evaluate(sid,"location.hash="+J("#/"+route));await b.Wait(sid,"document.querySelector('main h1')?.textContent==="+J(title),"Upgraded profile view missing");await CheckDom(b,h,sid,"upgrade-"+n+"-"+route);}
             var current=await h.Json("/api/naval/snapshot");Assert.Equal(prior.GetProperty("checkpoint").GetRawText(),current.GetProperty("checkpoint").GetRawText());
-            foreach(var pair in before)Assert.Equal(pair.Value,WindowsTestHost.Inventory(h.DataRoot)[pair.Key]);
             AssertNoAuthentication(b,h,"upgrade-"+n);await h.StopAsync();
+            // Never hash an actively owned lock with File.ReadAllBytes (which
+            // refuses the existing writer). Preserve its protection, then prove
+            // actual exclusive release before inspecting all persisted bytes.
+            await WindowsTestHost.Until(()=>
+            {
+                try{using var owned=new FileStream(Path.Combine(h.DataRoot,"apex.lock"),FileMode.Open,FileAccess.ReadWrite,FileShare.None);return Task.FromResult(true);}
+                catch(IOException){return Task.FromResult(false);}
+            },"Owned upgrade host did not release its data lock");
+            var after=WindowsTestHost.Inventory(h.DataRoot);
+            foreach(var pair in before)Assert.True(pair.Value==after[pair.Key],"Preserved profile bytes changed; contents and digests withheld");
         }
         WindowsTestHost.Evidence("legacy-upgrade",new{genuinePreviousExe=true,legacyExeSha256=Environment.GetEnvironmentVariable("APEX_LEGACY_EXE_SHA256"),correctedExeSha256=h.PayloadHash,configMapDpapiMarkerPublicationPreserved=true,privatePreservedFiles=before.Count,noCredentialInputToCorrectedExeOrBrowser=true,fiveViewsBothStarts=true,checkpointUnchanged=true,restart=true});
     }
