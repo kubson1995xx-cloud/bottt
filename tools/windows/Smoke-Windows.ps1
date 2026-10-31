@@ -76,9 +76,8 @@ try {
         $record=@($publish.nativeLibraries|Where-Object { $_.name -ieq $name })
         if ($record.Count -eq 0 -and $name -notmatch '^(coreclr|clrjit|hostpolicy|hostfxr|vcruntime.*|msvcp.*|ucrtbase)\.dll$') { continue }
         $path=(Get-Item -LiteralPath $module.FileName).FullName
-        if ($name -ieq 'ucrtbase.dll') {
-            if (-not $path.Equals((Join-Path $osSystem 'ucrtbase.dll'),[StringComparison]::OrdinalIgnoreCase)) { throw 'ucrtbase did not originate in Windows System32' }
-            $origin='Windows/System32/ucrtbase.dll';$kind='OS'
+        if (Test-ApexWindowsOsRuntimeModule $name $path $osSystem) {
+            $origin='Windows/System32/'+$name;$kind='OS'
         } else {
             if (-not $path.StartsWith($extract+'\',[StringComparison]::OrdinalIgnoreCase) -or $record.Count -ne 1 -or (Hash $path) -cne $record[0].sha256 -or (Get-Item $path).Length -ne $record[0].bytes) { throw ('Non-OS runtime borrowed or provenance mismatch: '+$name) }
             $origin='bundle/'+$path.Substring($extract.Length+1).Replace('\','/');$kind='authenticated-runtime-pack'

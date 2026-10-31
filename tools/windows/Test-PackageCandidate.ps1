@@ -12,6 +12,7 @@ $os=Get-CimInstance Win32_OperatingSystem
 [ordered]@{sourceCommit=(& git -C $repo rev-parse HEAD);sourceDirty=[bool](& git -C $repo status --porcelain);reason='Before Task5 genuine full builder and isolated legacy EXE smoke; not Task6/7 acceptance';osCaption=$os.Caption;osVersion=$os.Version;osArchitecture=$os.OSArchitecture;files=$files}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $evidence 'source-before.json') -Encoding UTF8
 $output=Join-Path $env:RUNNER_TEMP 'APEX-NAVAL-COMMAND-Windows-x64'
 try {
+    & (Join-Path $repo 'tests/package/Test-WindowsRuntimeOrigins.ps1') -Source $repo -EvidencePath (Join-Path $evidence 'runtime-origin-controls.json')
     & (Join-Path $PSScriptRoot 'Zbuduj-APEX.ps1') -Target win-x64 -Wyjscie $output
     & (Join-Path $PSScriptRoot 'Smoke-Windows.ps1') -Pakiet ($output+'-extracted') -Evidence ($output+'-smoke-evidence')
     $smoke=Get-Content -LiteralPath (Join-Path ($output+'-smoke-evidence') 'summary.json') -Raw|ConvertFrom-Json

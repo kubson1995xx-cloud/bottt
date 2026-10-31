@@ -174,6 +174,13 @@ function Get-ApexTextSha256([string]$Text) {
     $sha=[Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
 }
+# Only exact canonical System32 OS C/C++ components are exempt from pack binding.
+# Callers supply Get-Item canonical paths; this is NOT a loose runtime allowlist.
+function Test-ApexWindowsOsRuntimeModule([string]$Name,[string]$Path,[string]$SystemDirectory) {
+    if (@('ucrtbase.dll','msvcp_win.dll') -inotcontains $Name) { return $false }
+    return $Path.Equals((Join-Path $SystemDirectory $Name),[StringComparison]::OrdinalIgnoreCase)
+}
+
 function Test-ApexWindowsPublish([string]$Directory,[string]$EvidencePath) {
     $m=Read-ApexPresentationJson $EvidencePath 1048576
     Assert-ApexPresentationFields $m @('schema','rid','sdkVersion','exeSha256','runtimeConfigUtf8','runtimeConfigSha256','assetsSha256','publishArgv','runtimePacks','nativeLibraries')
