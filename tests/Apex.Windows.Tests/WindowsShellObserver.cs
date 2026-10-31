@@ -56,8 +56,16 @@ try {
   $original=$seen[$id]
   $current=Get-CimInstance Win32_Process -Filter ('ProcessId='+$id) -ErrorAction SilentlyContinue
   $same=$current -and $current.CreationDate -eq $original.CreationDate -and $current.ExecutablePath -ceq $original.ExecutablePath -and (IsExact $current)
-  if($same){Stop-Process -Id $id -Force -ErrorAction SilentlyContinue;Wait-Process -Id $id -Timeout 10 -ErrorAction SilentlyContinue}
-  $cleanup+=@{pid=[int]$id;alreadyExited=(-not $current);identityMatched=[bool]$same;exited=(-not [bool](Get-Process -Id $id -ErrorAction SilentlyContinue))}
+  $exited=(-not $current)
+  if($same){
+   $owned=[Diagnostics.Process]::GetProcessById($id)
+   try {
+    # Bind the opened process handle to the CIM creation identity, not PID alone.
+    $same=[Math]::Abs(($owned.StartTime.ToUniversalTime()-$original.CreationDate.ToUniversalTime()).TotalMilliseconds) -lt 1
+    if($same){$owned.Kill();$exited=$owned.WaitForExit(10000) -and $owned.HasExited}
+   } finally {$owned.Dispose()}
+  }
+  $cleanup+=@{pid=[int]$id;alreadyExited=(-not $current);identityMatched=[bool]$same;exited=[bool]$exited}
  }
  @{url=$url;handler=$handler;associationOverridden=$false;boundedSeconds=8;beganUtc=$began.ToString('o');endedUtc=[DateTime]::UtcNow.ToString('o');polls=$polls;processStartNotifications=$true;browserStartEvents=$startEvents;baselineBrowserPids=$baselineBrowsers;baselineExactUrlPids=$baselineUrl;newExactUrlPids=@($seen.Keys|ForEach-Object {[int]$_});unresolvedNewBrowserPids=@($uncertain.Keys|ForEach-Object {[int]$_});cleanup=$cleanup;rawCommandLinesRetained=$false}|ConvertTo-Json -Depth 5 -Compress
 } catch {
@@ -68,6 +76,7 @@ try {
  Get-Event -SourceIdentifier $source -ErrorAction SilentlyContinue|Remove-Event
 
 }
+exit 0
 """;
         script=script.Replace("__URL__",url);
         var start=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell","v1.0","powershell.exe")){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
@@ -92,7 +101,10 @@ try {
         Assert.True(proof.GetProperty("polls").GetInt32()>1);
         if(expected) Assert.NotEmpty(proof.GetProperty("newExactUrlPids").EnumerateArray());
         else Assert.Empty(proof.GetProperty("newExactUrlPids").EnumerateArray());
-        Assert.Empty(proof.GetProperty("unresolvedNewBrowserPids").EnumerateArray());
+        // The positive shell control legitimately creates short-lived browser
+        // children. Unresolved starts are fail-closed only in refusal windows.
+        if(!expected) Assert.Empty(proof.GetProperty("unresolvedNewBrowserPids").EnumerateArray());
+        Assert.All(proof.GetProperty("cleanup").EnumerateArray(),p=>Assert.True(p.GetProperty("exited").GetBoolean(),"Owned URL process did not exit"));
         if(refused!=null)
         {
             DateTime began=proof.GetProperty("beganUtc").GetDateTime().ToUniversalTime(),ended=proof.GetProperty("endedUtc").GetDateTime().ToUniversalTime();
