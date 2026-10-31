@@ -110,19 +110,25 @@ jobs:
           dotnet-version: '8.0.x'
       - uses: actions/download-artifact@v4
         with:
-          name: APEX-NAVAL-COMMAND-Windows-x64
-          run-id: 41167079728
+          name: Task7-Failed-Candidate-41205686076-1-NOT-ACCEPTED
+          run-id: 41205686076
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/task6-input
       - uses: actions/download-artifact@v4
         with:
-          name: Task5-Windows-Evidence-41167079728-1
-          run-id: 41167079728
+          name: Task7-Windows-Evidence-41205686076-1
+          run-id: 41205686076
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/task6-prior-evidence
-      - name: New Task6 acceptance on exact source-bound Task5 ZIP (PowerShell 5.1)
+      - uses: actions/download-artifact@v4
+        with:
+          name: APEX-NAVAL-COMMAND-Windows-x64
+          run-id: 41167079728
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/task6-legacy-input
+      - name: No-login acceptance on exact fresh candidate (PowerShell 5.1; no runtime rebuild)
         shell: powershell
-        run: ./tools/windows/Test-Task6Acceptance.ps1 -Download "$env:RUNNER_TEMP/task6-input" -PriorEvidence "$env:RUNNER_TEMP/task6-prior-evidence"
+        run: ./tools/windows/Test-Task6Acceptance.ps1 -Download "$env:RUNNER_TEMP/task6-input" -PriorEvidence "$env:RUNNER_TEMP/task6-prior-evidence" -LegacyDownload "$env:RUNNER_TEMP/task6-legacy-input"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

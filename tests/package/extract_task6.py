@@ -7,11 +7,15 @@ import stat
 import sys
 import zipfile
 
-archive, destination, evidence = map(pathlib.Path, sys.argv[1:])
+archive, destination, evidence = map(pathlib.Path, sys.argv[1:4])
+kind = sys.argv[4] if len(sys.argv) == 5 else "task5"
+assert kind in ("task5", "no-login")
 assert not destination.exists(), 'Existing destination refused'
 sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
-expected = '2ebcfa68834e8750831dc65877edbd07c5b1e0728e8250ba5e11868c5fc12aec'
-assert sha(archive) == expected and archive.stat().st_size == 43206842, 'Wrong Task5 ZIP'
+expected, size, product = (
+    ('2ebcfa68834e8750831dc65877edbd07c5b1e0728e8250ba5e11868c5fc12aec', 43206842, 'eed2fdf0bb4625260025e52a06e257c00fa38299') if kind == 'task5' else
+    ('a1dd95ed674535b94d7b3467676c013af8080b220ac66d897c855d57932def32', 43211704, '517f274d0ba0e9f658ada0f10a16b84632f643b0'))
+assert sha(archive) == expected and archive.stat().st_size == size, 'Wrong pinned Windows ZIP'
 files = {}
 seen = set()
 total = 0
@@ -59,6 +63,6 @@ for line in (destination / 'manifest.sha256').read_text(encoding='utf-8-sig').sp
     manifest[name] = digest
 assert manifest == {n: h for n, h in actual.items() if n != 'manifest.sha256'}
 metadata = json.loads((destination / 'apex-build.json').read_text(encoding='utf-8-sig'))
-assert metadata['sourceCommit'] == 'eed2fdf0bb4625260025e52a06e257c00fa38299'
+assert metadata['sourceCommit'] == product
 evidence.write_text(json.dumps(dict(zipSha256=expected, zipBytes=archive.stat().st_size, crc='PASS', regularFiles=len(files), manifestEntries=len(manifest), productCommit=metadata['sourceCommit'], sourceInputsSha256=metadata['sourceInputsSha256'], extractedSha256=actual), indent=2))
-print('Exact Task5 ZIP: CRC, paths, case, bytes, outer manifest, source identity PASS')
+print('Exact pinned Windows ZIP: CRC, paths, case, bytes, outer manifest, source identity PASS')

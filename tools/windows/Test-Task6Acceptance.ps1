@@ -1,6 +1,6 @@
 #Requires -Version 5.1
-# Nonshipped Task6 new/missing acceptance only on the exact accepted Task5 ZIP.
-param([Parameter(Mandatory=$true)][string]$Download,[Parameter(Mandatory=$true)][string]$PriorEvidence)
+# Nonshipped missing acceptance on exact fresh no-login ZIP; no runtime rebuild.
+param([Parameter(Mandatory=$true)][string]$Download,[Parameter(Mandatory=$true)][string]$PriorEvidence,[Parameter(Mandatory=$true)][string]$LegacyDownload)
 $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Actual Windows required' }
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -10,12 +10,12 @@ New-Item -ItemType Directory -Path $e|Out-Null
 $package=Join-Path $env:RUNNER_TEMP 'task6-extracted'
 $zip=Join-Path $Download 'APEX-NAVAL-COMMAND-Windows-x64.zip'
 $files=@(@(& git -C $repo ls-files)+@(& git -C $repo ls-files --others --exclude-standard)|Sort-Object -Unique|ForEach-Object {$p=Join-Path $repo $_;[ordered]@{path=$_;bytes=(Get-Item -LiteralPath $p).Length;sha256=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}})
-[ordered]@{testCommit=(& git -C $repo rev-parse HEAD);testDirty=[bool](& git -C $repo status --porcelain);productCommit='eed2fdf0bb4625260025e52a06e257c00fa38299';productRun=41167079728;productArtifact=13030195574;reason='Only new/missing Task6 acceptance; immutable approved Task5 payload. No unchanged full suite or runtime rebuild.';files=$files;osCaption=(Get-CimInstance Win32_OperatingSystem).Caption;ps=$PSVersionTable.PSVersion.ToString()}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $e 'source-before.json') -Encoding UTF8
+[ordered]@{testCommit=(& git -C $repo rev-parse HEAD);testDirty=[bool](& git -C $repo status --porcelain);productCommit='517f274d0ba0e9f658ada0f10a16b84632f643b0';productRun=41205686076;productArtifact=13044820747;reason='Only missing native browser/upgrade/smoke acceptance; immutable fresh candidate. Prior failed UI runs retained. No unchanged full suite or runtime rebuild.';files=$files;osCaption=(Get-CimInstance Win32_OperatingSystem).Caption;ps=$PSVersionTable.PSVersion.ToString()}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $e 'source-before.json') -Encoding UTF8
 $oldRoot=$env:APEX_PACKAGE_ROOT;$oldEvidence=$env:APEX_WINDOWS_EVIDENCE
 $before=@();$gates=[ordered]@{};$passed=$false;$failure=$null
 function Inventory { $root=(Get-Item -LiteralPath $package).FullName;@(Get-ChildItem -LiteralPath $root -Force -Recurse -File|Sort-Object FullName|ForEach-Object {$_.FullName.Substring($root.Length+1).Replace('\','/')+' '+(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}) }
 try {
-    & python (Join-Path $repo 'tests/package/extract_task6.py') $zip $package (Join-Path $e 'archive-readback.json')
+    & python (Join-Path $repo 'tests/package/extract_task6.py') $zip $package (Join-Path $e 'archive-readback.json') no-login
     if ($LASTEXITCODE -ne 0) { throw 'Exact artifact extraction failed' }
     & (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package
     $before=Inventory;[IO.File]::WriteAllLines((Join-Path $e 'package-before.sha256'),$before)
@@ -33,13 +33,14 @@ try {
         }
     }
     if ($matched.Count -lt 20) { throw 'Suspiciously narrow product input parity' }
-    [ordered]@{productCommit='eed2fdf0bb4625260025e52a06e257c00fa38299';testCommit=(& git -C $repo rev-parse HEAD);unchangedProductInputs=$matched}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $e 'product-test-map.json') -Encoding UTF8
-    # Reuse the ACTUAL same-ZIP Task5 extracted-host result; no fake rerun/counts.
-    $priorSummary=@(Get-ChildItem -LiteralPath $PriorEvidence -Recurse -Filter summary.json|Where-Object {$_.DirectoryName -like '*package-evidence*'})
+    [ordered]@{productCommit='517f274d0ba0e9f658ada0f10a16b84632f643b0';testCommit=(& git -C $repo rev-parse HEAD);unchangedProductInputs=$matched}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $e 'product-test-map.json') -Encoding UTF8
+    # Reuse only actually passing same-ZIP host suites; prior overall Browser failure
+    # remains explicit and is replaced only by new successful native assertions.
+    $priorSummary=@(Get-ChildItem -LiteralPath $PriorEvidence -Recurse -Filter summary.json|Where-Object {$_.Directory.Name -eq 'package'})
     $priorTrx=@(Get-ChildItem -LiteralPath $PriorEvidence -Recurse -Filter packaged.trx)
     if ($priorSummary.Count -ne 1 -or $priorTrx.Count -ne 1) { throw 'Exact prior packaged evidence missing/ambiguous' }
     $prior=Get-Content $priorSummary[0].FullName -Raw|ConvertFrom-Json
-    if ($prior.status -cne 'PASS' -or $prior.zipSha256 -cne '2ebcfa68834e8750831dc65877edbd07c5b1e0728e8250ba5e11868c5fc12aec') { throw 'Prior package evidence not same ZIP' }
+    if ($prior.nativeGates.Package.exitCode -ne 0 -or $prior.zipSha256 -cne 'a1dd95ed674535b94d7b3467676c013af8080b220ac66d897c855d57932def32') { throw 'Prior package evidence not same ZIP' }
     Copy-Item -LiteralPath $priorTrx[0].FullName -Destination (Join-Path $e 'packaged.trx')
     $reused=Read-ApexTestCounts (Join-Path $e 'packaged.trx')
     # SDK8 scoped to a throwaway SDK selection directory. No product publish.
@@ -55,15 +56,30 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Test restore failed' }
         & dotnet build (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-restore
         if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
+        $legacy=Join-Path $env:RUNNER_TEMP 'no-login-legacy-generator'
+        & python (Join-Path $repo 'tests/package/extract_task6.py') (Join-Path $LegacyDownload 'APEX-NAVAL-COMMAND-Windows-x64.zip') $legacy (Join-Path $e 'legacy-archive.json')
+        if($LASTEXITCODE -ne 0){throw 'Pinned genuine legacy generator extraction failed'}
+        $legacyProof=Get-Content (Join-Path $e 'legacy-archive.json') -Raw|ConvertFrom-Json
+        $env:APEX_LEGACY_EXE=Join-Path $legacy 'APEX-Desktop/ApexDesktop.exe'
+        $env:APEX_LEGACY_EXE_SHA256=$legacyProof.extractedSha256.'APEX-Desktop/ApexDesktop.exe'
         $env:APEX_PACKAGE_ROOT=$package;$env:APEX_WINDOWS_EVIDENCE=$e;$env:DOTNET_HOST_PATH=(Get-Command dotnet).Source
-        foreach ($gate in @('Package','Browser')) {
+        $executed=@('tests/Apex.Windows.Tests/bin/Release/net8.0/Apex.Windows.Tests.dll','tests/Apex.Windows.Tests/bin/Release/net8.0/ApexDesktop.dll','tests/Apex.Windows.Tests/bin/Release/net8.0/Apex.Core.dll')|ForEach-Object{$p=Join-Path $repo $_;@{path=$_;sha256=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant();bytes=(Get-Item $p).Length}}
+        @{testCommit=(& git -C $repo rev-parse HEAD);testBinaries=@($executed);executedExeSha256=(Get-FileHash (Join-Path $package 'APEX-Desktop/ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant();legacyExeSha256=$env:APEX_LEGACY_EXE_SHA256}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $e 'execution-before.json') -Encoding UTF8
+        foreach ($gate in @('Package','Browser','Upgrade')) {
             $trx='windows-'+$gate.ToLowerInvariant()+'.trx'
-            & dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$trx) --results-directory $e
-            $code=$LASTEXITCODE;$gates[$gate]=@{exitCode=$code;trx=$trx}
+            $oldPreference=$ErrorActionPreference
+            try{$ErrorActionPreference='Continue'; & dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$trx) --results-directory $e;$code=$LASTEXITCODE}finally{$ErrorActionPreference=$oldPreference}
+            $gates[$gate]=@{exitCode=$code;trx=$trx}
             # Retain partial progress even when a native UI gate fails; Browser still runs.
             $gates|ConvertTo-Json -Depth 6|Set-Content (Join-Path $e 'gate-checkpoint.json') -Encoding UTF8
-            if ($code -eq 0) { $gates[$gate].counts=Read-ApexTestCounts (Join-Path $e $trx) }
+            if ($code -eq 0) {
+                $gates[$gate].counts=Read-ApexTestCounts (Join-Path $e $trx)
+                $expected=@{Package=6;Browser=2;Upgrade=1}[$gate]
+                if($gates[$gate].counts.total -ne $expected){throw ('Incomplete native gate: '+$gate)}
+            }
         }
+        & (Join-Path $PSScriptRoot 'Smoke-Windows.ps1') -Pakiet $package -Evidence (Join-Path $e 'isolated-smoke')
+        Copy-Item (Join-Path $e 'isolated-smoke/summary.json') (Join-Path $e 'isolated-smoke.json')
     } finally { Pop-Location }
     $passed=(@($gates.Values|Where-Object {$_.exitCode -ne 0}).Count -eq 0)
 } catch { $failure=$_.Exception.Message;Write-Host ('TASK6_FAILED: '+$failure) }
@@ -75,15 +91,16 @@ finally {
         & (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package
     }
     $zipAfter=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($zipAfter -cne '2ebcfa68834e8750831dc65877edbd07c5b1e0728e8250ba5e11868c5fc12aec') { $passed=$false }
+    if ($zipAfter -cne 'a1dd95ed674535b94d7b3467676c013af8080b220ac66d897c855d57932def32') { $passed=$false }
     $owned=@(Get-ChildItem -LiteralPath $e -Filter 'owned-*.json'|ForEach-Object {Get-Content $_.FullName -Raw|ConvertFrom-Json})
     $exits=@(Get-ChildItem -LiteralPath $e -Filter 'exit-*.json'|ForEach-Object {Get-Content $_.FullName -Raw|ConvertFrom-Json})
     [ordered]@{owned=$owned;exits=$exits}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $e 'windows-process.json') -Encoding UTF8
     foreach ($p in $owned) {
+        if(@($exits|Where-Object {$_.pid -eq $p.pid -and $_.exited -and $_.listenersRemoved}).Count -gt 0){continue}
         $live=Get-CimInstance Win32_Process -Filter ('ProcessId='+$p.pid) -ErrorAction SilentlyContinue
         if ($live -and $live.ExecutablePath -ieq $p.exe) { Stop-Process -Id $p.pid -Force;$passed=$false }
     }
-    [ordered]@{status=$(if($passed){'PASS'}else{'FAIL'});failure=$failure;testCommit=(& git -C $repo rev-parse HEAD);productCommit='eed2fdf0bb4625260025e52a06e257c00fa38299';sdk=$actualSdk;gates=$gates;reusedPackagedCounts=$reused;reusedFromRun=41167079728;productArtifact=13030195574;packageUnchanged=$unchanged;zipSha256=$zipAfter;files=@('windows-package.trx','windows-browser.trx','packaged.trx','archive-readback.json','package-before.sha256','package-after.sha256','windows-browser.json','windows-process.json');brokerTested=$false;physicalWindows11Tested=$false;hardwareGpuTested=$false}|ConvertTo-Json -Depth 9|Set-Content (Join-Path $e 'summary.json') -Encoding UTF8
+    [ordered]@{status=$(if($passed){'PASS'}else{'FAIL'});failure=$failure;testCommit=(& git -C $repo rev-parse HEAD);productCommit='517f274d0ba0e9f658ada0f10a16b84632f643b0';sdk=$actualSdk;gates=$gates;reusedPackagedCounts=$reused;reusedFromRun=41205686076;productArtifact=13044820747;priorOverallStatus=$prior.status;reusedSourceCounts=(Get-Content (Join-Path $package 'apex-build.json') -Raw|ConvertFrom-Json).testCounts;packageUnchanged=$unchanged;zipSha256=$zipAfter;files=@('windows-package.trx','windows-browser.trx','windows-upgrade.trx','isolated-smoke.json','packaged.trx','archive-readback.json','package-before.sha256','package-after.sha256','windows-browser.json','windows-process.json');brokerTested=$false;physicalWindows11Tested=$false;hardwareGpuTested=$false}|ConvertTo-Json -Depth 9|Set-Content (Join-Path $e 'summary.json') -Encoding UTF8
     $env:APEX_PACKAGE_ROOT=$oldRoot;$env:APEX_WINDOWS_EVIDENCE=$oldEvidence
 }
 if (-not $passed) { throw 'Task6 acceptance failed; inspect retained individual gates' }

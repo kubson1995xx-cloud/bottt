@@ -96,14 +96,16 @@ public sealed class WindowsBrowserAcceptanceTests
             Assert.Equal(asset.GetProperty("sha256").GetString(),Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());Assert.Equal(asset.GetProperty("bytes").GetInt64(),bytes.LongLength);parity.Add(new{path,sha256=asset.GetProperty("sha256").GetString(),bytes=bytes.Length});
         }
         await b.Evaluate(sid,"location.hash='#/fleets'");await b.Wait(sid,"document.querySelector('.scene-status')!==null","Scene viewport missing");
-        try { await b.Wait(sid,"document.querySelector('.scene-status')?.textContent.includes('3D historical') || document.querySelector('.scene-status')?.textContent.includes('FAILED') || document.querySelector('.scene-status')?.textContent.includes('NO_WEBGL2')","Scene did not settle"); }
+        try { await b.Wait(sid,"document.querySelector('.scene-status')?.textContent.includes('3D historical') || document.querySelector('.scene-status')?.textContent.includes('FAILED') || document.querySelector('.scene-status')?.textContent.includes('NO_WEBGL2') || document.querySelector('.scene-status')?.textContent.includes('CONTEXT_LOST')","Scene did not settle"); }
         finally
         {
             // Only fixed enums/booleans/dimensions, never arbitrary DOM text or a screenshot.
             var state=await b.Evaluate(sid,"(()=>{const c=document.querySelector('canvas.naval-canvas'),r=c?.getBoundingClientRect(),s=document.querySelector('.scene-status')?.textContent??'';return {hidden:document.hidden,focused:document.hasFocus(),canvas:!!c,width:r?.width??0,height:r?.height??0,status:['3D historical','2D','loading','IMPORT_FAILED','RENDER_FAILED','CLEANUP_FAILED','CONTEXT_LOST','NO_WEBGL2','ZERO_SIZE_FAILED','RESOURCE_CAP_FAILED','IDENTITY_FAILED','RESIZE_FAILED'].find(x=>s.includes(x))??'UNKNOWN'};})()");
             WindowsTestHost.Evidence("scene-state",state);
         }
-        var gpu=await b.Evaluate(sid,"(()=>{const c=document.querySelector('canvas.naval-canvas');const g=c?.getContext('webgl2');if(!g)return {available:false};const e=g.getExtension('WEBGL_debug_renderer_info');return {available:true,version:g.getParameter(g.VERSION),renderer:e?g.getParameter(e.UNMASKED_RENDERER_WEBGL):g.getParameter(g.RENDERER)};})()");
+        if((await b.Evaluate(sid,"document.querySelector('.scene-status')?.textContent.includes('CONTEXT_LOST')===true")).GetBoolean())
+            Assert.True((await b.Evaluate(sid,"document.querySelector('.scene-fallback svg')!==null && Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Retry 3D')")).GetBoolean(),"Lost optional WebGL must expose SVG and Retry");
+        var gpu=await b.Evaluate(sid,"(()=>{const c=document.querySelector('canvas.naval-canvas');const g=c?.getContext('webgl2');if(!g||g.isContextLost())return {available:false,contextLost:!!g&&g.isContextLost()};const e=g.getExtension('WEBGL_debug_renderer_info');return {available:true,version:g.getParameter(g.VERSION),renderer:e?g.getParameter(e.UNMASKED_RENDERER_WEBGL):g.getParameter(g.RENDERER)};})()");
         var scripts=b.Events.Where(e=>e.Method=="Network.responseReceived"&&e.Session==sid&&e.Data.GetProperty("type").GetString()=="Script").ToArray();
         var lazy=scripts.FirstOrDefault(e=>e.Data.GetProperty("response").GetProperty("url").GetString()!.Contains("/naval/assets/chunk-"));Assert.NotEqual(default,lazy);
         string lazyUrl=lazy.Data.GetProperty("response").GetProperty("url").GetString()!;var lazyBody=await b.CommandAsync("Network.getResponseBody",new{requestId=lazy.Data.GetProperty("requestId").GetString()},sid);
