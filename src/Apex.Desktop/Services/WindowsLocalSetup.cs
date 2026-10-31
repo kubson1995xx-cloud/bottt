@@ -107,6 +107,7 @@ internal static class WindowsLocalSetup
     {
         byte[] bytes = ReadPrivate(Path.Combine(root, "apex.config.json"), 4 * 1024 * 1024);
         string raw = System.Text.Encoding.UTF8.GetString(bytes);
+        Apex.Desktop.Okx.OkxConfiguration.ValidateRaw(raw);
         NavalAccessPolicy.ValidateRawConfig(raw);
         var cfg = JsonSerializer.Deserialize<HostConfig>(raw, ConfigStore.Json) ?? throw Incomplete();
         // No constructor repairs on malformed existing/Ready state.

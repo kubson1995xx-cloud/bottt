@@ -8,6 +8,7 @@ using Apex.Core.Bridge;
 using Apex.Core.Engine;
 using Apex.Core.Risk;
 using Apex.Desktop.Naval;
+using Apex.Desktop.Okx;
 
 namespace Apex.Desktop.Services
 {
@@ -30,6 +31,8 @@ namespace Apex.Desktop.Services
     /// <summary>Konfiguracja aplikacji (plik apex.config.json w katalogu danych).</summary>
     public sealed class HostConfig
     {
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public OkxNavalOptions? OkxNaval { get; set; }
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public NavalReadOptions? NavalRead { get; set; }
         public int HttpPort { get; set; } = 5077;
@@ -97,6 +100,7 @@ namespace Apex.Desktop.Services
             if (File.Exists(Path_))
             {
                 try { string raw = File.ReadAllText(Path_);
+                    OkxConfiguration.ValidateRaw(raw);
                     NavalAccessPolicy.ValidateRawConfig(raw);
                     cfg = JsonSerializer.Deserialize<HostConfig>(raw, Json)
                     ?? throw new InvalidDataException("Pusty obiekt konfiguracji."); }
@@ -122,7 +126,9 @@ namespace Apex.Desktop.Services
         {
             lock (_lock)
             {
-                AtomicFile.Write(Path_, JsonSerializer.Serialize(Config, Json));
+                string raw = JsonSerializer.Serialize(Config, Json);
+                OkxConfiguration.ValidateRaw(raw);
+                AtomicFile.Write(Path_, raw);
             }
         }
 
@@ -133,7 +139,9 @@ namespace Apex.Desktop.Services
                 // Zmiana jest widoczna w pamięci dopiero po udanym trwałym zapisie.
                 var candidate = JsonSerializer.Deserialize<HostConfig>(JsonSerializer.Serialize(Config, Json), Json)!;
                 change(candidate);
-                AtomicFile.Write(Path_, JsonSerializer.Serialize(candidate, Json));
+                string raw = JsonSerializer.Serialize(candidate, Json);
+                OkxConfiguration.ValidateRaw(raw);
+                AtomicFile.Write(Path_, raw);
                 Config = candidate;
             }
         }

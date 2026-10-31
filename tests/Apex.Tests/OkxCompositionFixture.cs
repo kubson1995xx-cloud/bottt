@@ -24,7 +24,8 @@ internal sealed class OkxCompositionFixture : IAsyncDisposable
     internal readonly Dictionary<string, object?> Resources = new();
     internal bool ReachedHttp;
     internal Task<int>? Running;
-    private readonly CancellationTokenSource stop = new(TimeSpan.FromSeconds(30));
+    private CancellationTokenSource stop = new(TimeSpan.FromSeconds(30));
+    internal Action? HttpAction;
     internal OkxCompositionFixture()
     {
         Root = Path.Combine(OperatingSystem.IsWindows() ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) : Path.GetTempPath(), "ApexOkx-" + Guid.NewGuid().ToString("N"));
@@ -45,8 +46,15 @@ internal sealed class OkxCompositionFixture : IAsyncDisposable
     internal Task<int> StartHostAsync(string rawConfig, bool synthetic = false)
     {
         File.WriteAllText(ConfigPath, rawConfig);
+        return Launch(synthetic);
+    }
+    internal Task<int> RestartHostAsync() => Launch(false);
+    private Task<int> Launch(bool synthetic)
+    {
+        if (stop.IsCancellationRequested) { stop.Dispose(); stop = new(TimeSpan.FromSeconds(30)); }
+        Resources.Clear(); ReachedHttp = false;
         Running = Task.Run(() => Apex.Desktop.Program.Run(new[] { "--data", Root, "--no-browser" }, synthetic, null, null, stop.Token,
-            (stage, value) => { Resources[stage] = value; if (stage == "http") { ReachedHttp = true; stop.Cancel(); } }));
+            (stage, value) => { Resources[stage] = value; if (stage == "http") { ReachedHttp = true; try { HttpAction?.Invoke(); } finally { stop.Cancel(); } } }));
         return Running.WaitAsync(TimeSpan.FromSeconds(35));
     }
     internal SortedDictionary<string, string> Inventory() => new(Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories)
