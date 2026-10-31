@@ -98,7 +98,13 @@ with zipfile.ZipFile(archive) as z:
     & (Join-Path $Pakiet 'Sprawdz-Pakiet.ps1') -Pakiet $Pakiet
     $proof=@(Get-ChildItem -LiteralPath (Join-Path $Evidence 'host') -Filter 'process-*.json'|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
     if ($proof.Count -eq 0 -or @($proof|Where-Object {-not $_.packaged -or $_.desktop -cne (Join-Path $Pakiet 'APEX-Desktop')}).Count -gt 0) { throw 'Missing actual package process proof' }
-    foreach ($p in $proof) { if (Get-Process -Id $p.pid -ErrorAction SilentlyContinue) { throw 'Owned host still running after tests' } }
+    foreach ($p in $proof) {
+        # Native gates can reuse a legacy numeric PID. The actual child handle
+        # supplies exit proof under its unique launch id, not a later PID lookup.
+        if ($p.exitEvidence -notmatch '\Aexit-[a-f0-9]{32}\.json\z') { throw 'Missing identity-bound host exit evidence' }
+        $exit=Get-Content -LiteralPath (Join-Path (Join-Path $Evidence 'host') $p.exitEvidence) -Raw|ConvertFrom-Json
+        if ($exit.pid -ne $p.pid -or -not $exit.exited -or -not $exit.outputSanitized -or -not $exit.handleBound) { throw 'Owned host exit proof invalid' }
+    }
     [IO.File]::WriteAllText((Join-Path $Evidence 'summary.json'),(@{status=$(if($nativeFailed){'FAIL'}else{'PASS'});nativeGates=$native;evidenceFiles=@('windows-package.trx','windows-browser.trx','packaged.trx','archive-readback.json','package-before.sha256','package-after.sha256','windows-browser.json','windows-process.json');testCounts=$counts;packageUnchanged=$true;processCount=$proof.Count;target=$expected;zipSha256= $(if ($Zip) {(Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash.ToLowerInvariant()} else {$null});windowsNativeAclTested=($expected -eq 'win-x64');brokerTested=$false}|ConvertTo-Json -Depth 5))
     if ($nativeFailed) { throw 'Native Package/Browser gate failed; see individual TRX' }
     Write-Host "EXTRACTED PACKAGE TESTS PASS: $($counts.total) actual tests; $($proof.Count) packaged processes exited; package unchanged."
@@ -107,7 +113,8 @@ with zipfile.ZipFile(archive) as z:
     if (Test-Path -LiteralPath (Join-Path $Evidence 'host')) {
         foreach ($f in Get-ChildItem -LiteralPath (Join-Path $Evidence 'host') -Filter 'process-*.json') {
             $p=Get-Content -LiteralPath $f.FullName -Raw|ConvertFrom-Json
-            if ($env:OS -eq 'Windows_NT') { $live=Get-CimInstance Win32_Process -Filter ("ProcessId="+$p.pid) -ErrorAction SilentlyContinue; if ($live -and $live.CommandLine.Contains((Join-Path $Pakiet 'APEX-Desktop'))) { Stop-Process -Id $p.pid -Force } }
+            if ($p.exitEvidence -match '\Aexit-[a-f0-9]{32}\.json\z' -and (Test-Path -LiteralPath (Join-Path (Join-Path $Evidence 'host') $p.exitEvidence))) { continue }
+            if ($env:OS -eq 'Windows_NT') { $live=Get-CimInstance Win32_Process -Filter ("ProcessId="+$p.pid) -ErrorAction SilentlyContinue; if ($live -and $live.CommandLine.Contains((Join-Path $Pakiet 'APEX-Desktop')) -and $live.CommandLine.Contains($p.dataDirectory)) { Stop-Process -Id $p.pid -Force;Wait-Process -Id $p.pid -ErrorAction SilentlyContinue } }
             elseif (Test-Path -LiteralPath ('/proc/'+$p.pid+'/cmdline')) { $cmd=[IO.File]::ReadAllText(('/proc/'+$p.pid+'/cmdline'));if ($cmd.Contains((Join-Path $Pakiet 'APEX-Desktop/ApexDesktop.dll'))) { Stop-Process -Id $p.pid -Force } }
         }
     }

@@ -66,7 +66,7 @@ try {
         @{root=($output+'-build-evidence');name='build';patterns=@('*.json')},
         @{root=(Join-Path $output 'Weryfikacja');name='sealed';patterns=@('*.json','*.trx','frontend-*.txt')},
         @{root=($output+'-package-evidence');name='package';patterns=@('*.json','*.trx','*.sha256')},
-        @{root=(Join-Path ($output+'-package-evidence') 'host');name='host';patterns=@('process-*.json')},
+        @{root=(Join-Path ($output+'-package-evidence') 'host');name='host';patterns=@('process-*.json','exit-*.json')},
         @{root=($output+'-smoke-evidence');name='smoke';patterns=@('summary.json')}
     )
     foreach ($g in $groups) {

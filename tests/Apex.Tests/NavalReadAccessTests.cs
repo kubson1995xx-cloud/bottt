@@ -310,6 +310,7 @@ internal sealed class NavalProductionHost : IAsyncDisposable
     internal HttpClient Client { get; }
     internal Process? Process { get; private set; }
     private Task<string>? output, error;
+    private string? processEvidenceId;
     internal NavalProductionHost(bool enabled = true)
     {
         DirectoryPath = Path.Combine(Path.GetTempPath(), "apex-naval-task6a-host", "process-" + Guid.NewGuid().ToString("N")); PrivateDirectory(DirectoryPath);
@@ -329,7 +330,8 @@ internal sealed class NavalProductionHost : IAsyncDisposable
         if (!native) psi.ArgumentList.Add(Path.Combine(desktop,"ApexDesktop.dll"));
         psi.ArgumentList.Add("--data"); psi.ArgumentList.Add(DirectoryPath); psi.ArgumentList.Add("--no-browser");
         Process = System.Diagnostics.Process.Start(psi)!; output = Process.StandardOutput.ReadToEndAsync(); error = Process.StandardError.ReadToEndAsync();
-        Evidence("process-"+Guid.NewGuid().ToString("N"),new {pid=Process.Id,executable,desktop,packaged=Environment.GetEnvironmentVariable("APEX_PACKAGE_ROOT")!=null,payloadSha256=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(desktop,native?"ApexDesktop.exe":"ApexDesktop.dll")))).ToLowerInvariant(),ownedPrivateData=true,noBrowser=true});
+        processEvidenceId=Guid.NewGuid().ToString("N");
+        Evidence("process-"+processEvidenceId,new {pid=Process.Id,executable,desktop,dataDirectory=DirectoryPath,exitEvidence="exit-"+processEvidenceId+".json",packaged=Environment.GetEnvironmentVariable("APEX_PACKAGE_ROOT")!=null,payloadSha256=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(desktop,native?"ApexDesktop.exe":"ApexDesktop.dll")))).ToLowerInvariant(),ownedPrivateData=true,noBrowser=true});
         for (int i = 0; i < 200; i++) { if (Process.HasExited) { if (expectExit) return; throw new InvalidOperationException("Production host exited before readiness (output withheld)"); } if (await Listening()) { if (expectExit) Assert.Fail("Enabled invalid config bound HTTP instead of exiting closed"); return; } await Task.Delay(50); }
         throw new TimeoutException("Production host readiness deadline");
     }
@@ -360,7 +362,7 @@ internal sealed class NavalProductionHost : IAsyncDisposable
         if (Process == null || !Process.HasExited) return false; string text = await output! + await error!;
         return !text.Contains(ReadSecret) && !text.Contains(OperatorSecret) && !text.Contains(LegacyToken) && !text.Contains(Hash(ReadSecret)) && !text.Contains(Hash(OperatorSecret)) && !text.Contains("Authorization:");
     }
-    internal async Task Stop() { if (Process != null) { if (!Process.HasExited) { Process.Kill(true); await Process.WaitForExitAsync(); } await Task.WhenAll(output!, error!); Assert.True(await SafeOutput(), "Production output contains secret material"); Process.Dispose(); Process = null; } }
+    internal async Task Stop() { if (Process != null) { if (!Process.HasExited) { Process.Kill(true); await Process.WaitForExitAsync(); } await Task.WhenAll(output!, error!); Assert.True(await SafeOutput(), "Production output contains secret material"); Evidence("exit-"+processEvidenceId,new{pid=Process.Id,exited=Process.HasExited,outputSanitized=true,handleBound=true});Process.Dispose(); Process = null; } }
     public async ValueTask DisposeAsync() { await Stop(); Client.Dispose(); if (System.IO.Directory.Exists(DirectoryPath)) System.IO.Directory.Delete(DirectoryPath, true); }
     internal static void PrivateDirectory(string p) { System.IO.Directory.CreateDirectory(p); if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); else { var acl=new DirectorySecurity(); acl.SetAccessRuleProtection(true,false); var user=WindowsIdentity.GetCurrent().User!;acl.SetOwner(user);foreach(var sid in new[]{user,new SecurityIdentifier(WellKnownSidType.LocalSystemSid,null),new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null)})acl.AddAccessRule(new FileSystemAccessRule(sid,FileSystemRights.FullControl,InheritanceFlags.ContainerInherit|InheritanceFlags.ObjectInherit,PropagationFlags.None,AccessControlType.Allow));new DirectoryInfo(p).SetAccessControl(acl); } }
     internal static void PrivateFile(string p) { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(p, UnixFileMode.UserRead | UnixFileMode.UserWrite); else { var acl=new FileSecurity();acl.SetAccessRuleProtection(true,false);var user=WindowsIdentity.GetCurrent().User!;acl.SetOwner(user);foreach(var sid in new[]{user,new SecurityIdentifier(WellKnownSidType.LocalSystemSid,null),new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null)})acl.AddAccessRule(new FileSystemAccessRule(sid,FileSystemRights.FullControl,AccessControlType.Allow));new FileInfo(p).SetAccessControl(acl); } }
