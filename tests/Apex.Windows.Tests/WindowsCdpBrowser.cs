@@ -116,7 +116,33 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
         return r.GetProperty("result").TryGetProperty("value",out var v)?v.Clone():JsonSerializer.SerializeToElement<object?>(null);
     }
     internal async Task Wait(string sid,string expression,string failure,int seconds=35)=>await WindowsTestHost.Until(async()=>{try{return(await Evaluate(sid,expression)).ValueKind==JsonValueKind.True;}catch{return false;}},failure,seconds);
-    internal async Task Navigate(string sid,string url){await CommandAsync("Page.navigate",new{url},sid);await CommandAsync("Page.bringToFront",new{},sid);await Wait(sid,"document.readyState === 'complete'","Page load deadline");}
+    internal async Task Navigate(string sid,string url)
+    {
+        var navigation=await CommandAsync("Page.navigate",new{url},sid);
+        string? loader=navigation.TryGetProperty("loaderId",out var l)?l.GetString():null;
+        await WindowsTestHost.Until(async()=>
+        {
+            var tree=await CommandAsync("Page.getFrameTree",new{},sid);
+            return (loader==null||tree.GetProperty("frameTree").GetProperty("frame").GetProperty("loaderId").GetString()==loader) && (await Evaluate(sid,"document.readyState==='complete'")).GetBoolean();
+        },"Owned browser navigation did not commit its real document");
+        await CommandAsync("Page.bringToFront",new{},sid);
+        await Wait(sid,"!document.hidden","Committed browser document not visible");
+    }
+    internal async Task Reload(string sid)
+    {
+        var tree=await CommandAsync("Page.getFrameTree",new{},sid);
+        string old=tree.GetProperty("frameTree").GetProperty("frame").GetProperty("loaderId").GetString()!;
+        await CommandAsync("Page.reload",new{ignoreCache=true},sid);
+        await WindowsTestHost.Until(async()=>
+        {
+            var next=await CommandAsync("Page.getFrameTree",new{},sid);
+            return next.GetProperty("frameTree").GetProperty("frame").GetProperty("loaderId").GetString()!=old && (await Evaluate(sid,"document.readyState==='complete'")).GetBoolean();
+        },"Owned browser reload did not commit a new document");
+        // Foreground the NEW document, not the old still-complete loader. The
+        // real client intentionally invalidates data while document.hidden.
+        await CommandAsync("Page.bringToFront",new{},sid);
+        await Wait(sid,"!document.hidden","Reloaded browser document not visible");
+    }
     public async ValueTask DisposeAsync()
     {
         try{if(ws.State==WebSocketState.Open){OnEvent=null;foreach(var context in contexts)await CommandAsync("Target.disposeBrowserContext",new{browserContextId=context});await CommandAsync("Browser.close",new{});}}catch{}

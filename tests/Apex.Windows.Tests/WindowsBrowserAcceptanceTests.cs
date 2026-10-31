@@ -25,9 +25,9 @@ public sealed class WindowsBrowserAcceptanceTests
     {
         string sid=await b.NewPage();
         await b.Navigate(sid,new Uri(h.Origin,"/?view=naval").AbsoluteUri);
-        await b.Wait(sid,"location.pathname==='/naval/' && document.querySelector('[data-testid=revision]')?.textContent !== 'UNKNOWN'","Anonymous desktop-local redirect/checkpoint not rendered");
-        await b.CommandAsync("Page.reload",new{ignoreCache=true},sid);
-        await b.Wait(sid,"document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')?.textContent !== 'UNKNOWN'","Anonymous reload failed");
+        await b.Wait(sid,"location.pathname==='/naval/' && document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')!==null && document.querySelector('[data-testid=revision]').textContent !== 'UNKNOWN'","Anonymous desktop-local redirect/checkpoint not rendered");
+        await b.Reload(sid);
+        await b.Wait(sid,"document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')!==null && document.querySelector('[data-testid=revision]').textContent !== 'UNKNOWN'","Anonymous reload failed");
         AssertNoAuthentication(b,h,"initial");
         return sid;
     }
@@ -55,7 +55,7 @@ public sealed class WindowsBrowserAcceptanceTests
         await b.Wait(sid,"location.pathname==='/naval/' && document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')!==null && document.querySelector('[data-testid=revision]').textContent !== 'UNKNOWN'","Authenticated production redirect/checkpoint not rendered");
         Assert.Equal(1,challenges);
         await b.CommandAsync("Fetch.disable",new{},sid);b.OnEvent=null;
-        await b.CommandAsync("Page.reload",new{ignoreCache=true},sid);
+        await b.Reload(sid);
         await b.CommandAsync("Page.bringToFront",new{},sid);
         await b.Wait(sid,"!document.hidden","Protected cache probe requires a genuinely visible browser document");
         try
@@ -122,7 +122,7 @@ public sealed class WindowsBrowserAcceptanceTests
         // Test capability denial only, never auth or product state. Reload same document
         // with getContext returning null, restore prototype, click production Retry in same lane.
         string hook="window.__task6OriginalContext=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(t,...a){return t==='webgl2'?null:window.__task6OriginalContext.call(this,t,...a)}";
-        var injected=await b.CommandAsync("Page.addScriptToEvaluateOnNewDocument",new{source=hook},sid);await b.CommandAsync("Page.reload",new{ignoreCache=true},sid);
+        var injected=await b.CommandAsync("Page.addScriptToEvaluateOnNewDocument",new{source=hook},sid);await b.Reload(sid);
         await b.Wait(sid,"document.querySelector('.scene-fallback svg')!==null && Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Retry 3D')","No-WebGL fallback/Retry missing");
         await b.Evaluate(sid,"HTMLCanvasElement.prototype.getContext=window.__task6OriginalContext;delete window.__task6OriginalContext;Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Retry 3D').click()");
         if(gpu.GetProperty("available").GetBoolean())await b.Wait(sid,"document.querySelector('.scene-status')?.textContent.includes('3D historical')===true","Capability restored but same-lane Retry failed");
@@ -164,7 +164,7 @@ public sealed class WindowsBrowserAcceptanceTests
         {
             await peer.Connect();string key=await peer.Ready();
             File.WriteAllText(publication,"{");using var bad=await h.Send("/api/naval/snapshot");Assert.Equal(HttpStatusCode.ServiceUnavailable,bad.StatusCode);
-            await b.CommandAsync("Page.reload",new{},sid);await b.Wait(sid,"document.querySelector('.unavailable')!==null","H503 unavailable UI not shown");
+            await b.Reload(sid);await b.Wait(sid,"document.querySelector('.unavailable')!==null","H503 unavailable UI not shown");
             await CheckDom(b,h,sid,"h503");
             await b.Evaluate(sid,"Array.from(document.querySelectorAll('a')).find(a=>a.getAttribute('href')==='/').click()");
             await b.Wait(sid,"Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('AWARYJNY STOP'))","Text Emergency missing after static old-panel link");
@@ -182,7 +182,7 @@ public sealed class WindowsBrowserAcceptanceTests
         File.WriteAllBytes(publication,good);await h.StopAsync();await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();
         var restarted=await h.Json("/api/naval/snapshot");Assert.NotEqual(original.GetProperty("hostEpoch").GetString(),restarted.GetProperty("hostEpoch").GetString());Assert.Equal(original.GetProperty("checkpoint").GetRawText(),restarted.GetProperty("checkpoint").GetRawText());
         await using(var peer=new SyntheticPeer(h)){await peer.Connect();await peer.Ready();var status=await h.Json("/api/status");Assert.Equal("EmergencyStopped",status.GetProperty("data").GetProperty("accounts")[0].GetProperty("engine").GetProperty("mode").GetString());Assert.Equal(latch,File.ReadAllBytes(control));Assert.Empty(peer.RiskCommands);}
-        await b.CommandAsync("Page.reload",new{},sid);await b.Wait(sid,"document.querySelector('meta[name=apex-token]')!==null","Anonymous restart panel failed");
+        await b.Reload(sid);await b.Wait(sid,"document.querySelector('meta[name=apex-token]')!==null","Anonymous restart panel failed");
         AssertNoAuthentication(b,h,"emergency-restart");
         WindowsTestHost.Evidence("emergency-browser",new{syntheticLocalPeerOnly=true,h503=true,staticOldPanelLink=true,originalPanelConfirmation=true,closedPosition=77,fullClose=true,foreign78Untouched=true,noOpenTestModify=true,decisions200=true,csv200=true,durableLatch=true,restartNewHostEpoch=true,checkpointUnchanged=true,brokerTested=false});
     }
