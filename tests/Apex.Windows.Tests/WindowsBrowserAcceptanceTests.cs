@@ -52,11 +52,20 @@ public sealed class WindowsBrowserAcceptanceTests
         };
         await b.CommandAsync("Fetch.enable",new{handleAuthRequests=true},sid);
         await b.Navigate(sid,new Uri(h.Origin,"/?view=naval").AbsoluteUri);
-        await b.Wait(sid,"location.pathname==='/naval/' && document.querySelector('[data-testid=revision]')?.textContent !== 'UNKNOWN'","Authenticated production redirect/checkpoint not rendered");
+        await b.Wait(sid,"location.pathname==='/naval/' && document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')!==null && document.querySelector('[data-testid=revision]').textContent !== 'UNKNOWN'","Authenticated production redirect/checkpoint not rendered");
         Assert.Equal(1,challenges);
         await b.CommandAsync("Fetch.disable",new{},sid);b.OnEvent=null;
         await b.CommandAsync("Page.reload",new{ignoreCache=true},sid);
-        await b.Wait(sid,"document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')?.textContent !== 'UNKNOWN'","Native Basic cache failed after auth callback removed");
+        try
+        {
+            await b.Wait(sid,"document.querySelector('.connection.connected')!==null && document.querySelector('[data-testid=revision]')!==null && document.querySelector('[data-testid=revision]').textContent !== 'UNKNOWN'","Native Basic cache failed after auth callback removed");
+        }
+        finally
+        {
+            var state=await b.Evaluate(sid,"({navalPath:location.pathname==='/naval/',ready:document.readyState==='complete',connected:document.querySelector('.connection.connected')!==null,revisionPresent:document.querySelector('[data-testid=revision]')!==null,revisionKnown:!!document.querySelector('[data-testid=revision]')&&document.querySelector('[data-testid=revision]').textContent!=='UNKNOWN'})");
+            var responses=b.Events.Where(e=>e.Session==sid&&e.Method=="Network.responseReceived").Select(e=>new{path=new Uri(e.Data.GetProperty("response").GetProperty("url").GetString()!).AbsolutePath,status=e.Data.GetProperty("response").GetProperty("status").GetInt32()}).ToArray();
+            WindowsTestHost.Evidence("protected-cache-state",new{state,responses,callbackRemoved=true});
+        }
         WindowsTestHost.Evidence("native-basic-cache",new{challenges,callbackRemovedBeforeReload=true,fetchDisabled=true,fixedRedirect=true,pageInjectedAuthentication=false,cachedReloadRendered=true});
         return sid;
     }
