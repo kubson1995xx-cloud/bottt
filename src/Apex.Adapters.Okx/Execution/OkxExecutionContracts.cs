@@ -21,6 +21,8 @@ public sealed record OkxExecutionScope
     }
 }
 public enum OkxExecutionOperation { Submit, Cancel, PlaceProtection, CancelProtection, Lookup }
+/// <summary>Protocol result categories. Rejected is reserved for a future independently validated
+/// rejection contract; the current transport emits Unknown for every post-invocation error.</summary>
 public enum OkxWriteDisposition { ProvenNotSent, Acknowledged, Rejected, Unknown }
 /// <summary>Protocol result only. ACK is not a fill, protection coverage or settled cancellation.</summary>
 public sealed record OkxWriteOutcome
@@ -35,7 +37,8 @@ public sealed record OkxWriteOutcome
     internal OkxWriteOutcome(OkxWriteDisposition disposition,string originalClientId,string? orderId,string reason,string? code=null,string? sCode=null,string? subCode=null)
     { Disposition=disposition; OriginalClientId=originalClientId; OrderId=orderId; Reason=reason; Code=code; SCode=sCode; SubCode=subCode; }
 }
-/// <summary>Untrusted order-detail observation. Cumulative fields must never post individual fills.</summary>
+/// <summary>Untrusted parent-only order-detail observation. Cumulative fields must never post individual fills.
+/// Attachment success/failure is not surfaced; Observed is never protection coverage or finality.</summary>
 public sealed record OkxOrderObservation
 {
     public OkxExecutionScope Scope { get; }

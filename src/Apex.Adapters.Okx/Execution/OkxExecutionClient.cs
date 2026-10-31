@@ -51,7 +51,11 @@ public sealed class OkxExecutionClient : IAsyncDisposable
     public async Task<OkxOrderObservation> LookupAsync(string instrument,string? ordId,string originalClOrdId,CancellationToken ct)
     {
         // Invalid caller data fails locally and cannot become arbitrary signed paths.
-        var r=OkxPreparedRequest.Lookup(scope,instrument,ordId,originalClOrdId,clock.GetUtcNow().AddSeconds(10));
+        // This deadline is library-owned: floor to milliseconds, never extend the ten-second budget.
+        // Caller-owned mutation/replay deadlines retain their exact strict constructor invariant.
+        var deadline=clock.GetUtcNow().AddSeconds(10);
+        deadline=new DateTimeOffset(deadline.Ticks-deadline.Ticks%TimeSpan.TicksPerMillisecond,TimeSpan.Zero);
+        var r=OkxPreparedRequest.Lookup(scope,instrument,ordId,originalClOrdId,deadline);
         var result=await Send(r,ct).ConfigureAwait(false);
         if(result.Bytes is null) return UnknownObservation(r);
         try { return ParseLookup(r,result.Bytes); }
@@ -160,10 +164,9 @@ public sealed class OkxExecutionClient : IAsyncDisposable
         bool match=(r.OrderId is null || id==r.OrderId) && (client==r.OriginalClientId || r.Operation==OkxExecutionOperation.CancelProtection && r.OrderId is not null && client=="");
         if(!match) return Outcome(r,OkxWriteDisposition.Unknown,"IdentityMismatch",code:code,scode:scode,sub:sub);
         if(code=="0" && scode=="0" && id!="" && string.IsNullOrEmpty(sub)) return Outcome(r,OkxWriteDisposition.Acknowledged,"RequestAcknowledged",id,code,scode,sub);
-        // Retained EEA reference R:27187: 51000 = parameter error. Narrow matching per-item shape only.
-        // Duplicate IDs, 50004, 50011, unknown 59113 and every other error remain uncertain.
-        if(code is "0" or "1" && scode=="51000" && id=="" && string.IsNullOrEmpty(sub) && r.Operation is OkxExecutionOperation.Submit or OkxExecutionOperation.PlaceProtection)
-            return Outcome(r,OkxWriteDisposition.Rejected,"ParameterRejected",code:code,scode:scode,sub:sub);
+        // 51000's parameter-error description does not establish an endpoint-specific safe rejection shape.
+        // Until that contract is independently validated, even a matching empty-ID error stays Unknown.
+        // This transport emits no release-capable Rejected outcome; retain the enum for contract compatibility.
         return Outcome(r,OkxWriteDisposition.Unknown,"ProtocolUncertain",code:code,scode:scode,sub:sub);
     }
     private static OkxOrderObservation UnknownObservation(OkxPreparedRequest r)=>new(r.Scope,r.Instrument,r.OrderId,r.OriginalClientId,null,null,null,null,null,"Unknown");
@@ -173,11 +176,13 @@ public sealed class OkxExecutionClient : IAsyncDisposable
         if(Grammar.String(root,"code")!="0" || root.GetProperty("data").GetArrayLength()!=1) return UnknownObservation(r);
         var row=root.GetProperty("data")[0];
         if(row.ValueKind!=JsonValueKind.Object) throw new JsonException();
-        // Selected required schema plus documented optional fields. Nested attachment/link metadata is not economic authority.
+        // Selected required schema plus documented optional fields (EEA R:7645-7679).
+        // Attachment fields are string-typed/duplicate-checked, then discarded, including private failReason.
+        // Parent-only observation does not report attachment success/failure or protection coverage.
         const string fields="instType instId tdMode ordId clOrdId side state sz accFillSz avgPx tradeQuoteCcy algoClOrdId algoId attachAlgoClOrdId cTime cancelSource cancelSourceReason category ccy fee feeCcy fillPx fillSz fillTime isTpLimit lever ordType pnl posSide px pxType pxUsd pxVol quickMgnType rebate rebateCcy reduceOnly slOrdPx slTriggerPx slTriggerPxType source stpId stpMode tag tgtCcy tpOrdPx tpTriggerPx tpTriggerPxType tradeId uTime";
         foreach(var p in row.EnumerateObject())
         {
-            if(p.Name=="attachAlgoOrds") { if(p.Value.ValueKind!=JsonValueKind.Array || p.Value.GetArrayLength()>1) throw new JsonException(); foreach(var a in p.Value.EnumerateArray()) Fields(a,"attachAlgoId attachAlgoClOrdId tpTriggerPx tpOrdPx tpTriggerPxType slTriggerPx slOrdPx slTriggerPxType"); }
+            if(p.Name=="attachAlgoOrds") { if(p.Value.ValueKind!=JsonValueKind.Array || p.Value.GetArrayLength()>1) throw new JsonException(); foreach(var a in p.Value.EnumerateArray()) Fields(a,"attachAlgoId attachAlgoClOrdId tpOrdKind tpTriggerPx tpOrdPx tpTriggerPxType slTriggerPx slOrdPx slTriggerPxType failCode failReason"); }
             else if(p.Name=="linkedAlgoOrd") Fields(p.Value,"algoId");
             else if(!fields.Split(' ').Contains(p.Name,StringComparer.Ordinal) || p.Value.ValueKind!=JsonValueKind.String) throw new JsonException();
         }

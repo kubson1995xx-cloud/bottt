@@ -101,8 +101,8 @@ public sealed class OkxExecutionTests
     [Theory][InlineData("wrong")][InlineData("ab9")]
     public async Task MismatchedIdentityCannotAcknowledge(string id)
     { using var f=new OkxExecutionHttpFixture(); f.SubmitReply(OkxExecutionHttpFixture.Ack(id)); await using var c=f.Client(); Assert.Equal(OkxWriteDisposition.Unknown,(await c.SubmitAsync(f.Request(),default)).Disposition); f.Done(); }
-    [Fact] public async Task MatchingDocumentedParameterRejectionIsNarrow()
-    { using var f=new OkxExecutionHttpFixture(); f.SubmitReply(OkxExecutionHttpFixture.Ack(code:"51000",top:"1",order:"")); await using var c=f.Client(); var o=await c.SubmitAsync(f.Request(),default); Assert.Equal(OkxWriteDisposition.Rejected,o.Disposition); Assert.Equal("51000",o.SCode); f.Done(); }
+    [Fact] public async Task SyntheticMatchingParameterErrorRemainsUnknownPendingRejectionContract()
+    { using var f=new OkxExecutionHttpFixture(); f.SubmitReply(OkxExecutionHttpFixture.Ack(code:"51000",top:"1",order:"")); await using var c=f.Client(); var o=await c.SubmitAsync(f.Request(),default); Assert.Equal(OkxWriteDisposition.Unknown,o.Disposition); Assert.Equal("51000",o.SCode); Assert.Single(f.Sent); f.Done(); }
     [Theory][InlineData("socket")][InlineData("cancel")][InlineData("timeout")]
     public async Task AfterHandlerInvocationIsUnknown(string failure)
     {
