@@ -31,7 +31,7 @@ try {
  $ids=@($baseline|ForEach-Object {[int]$_.ProcessId})
  $baselineBrowsers=@($baseline|Where-Object {$_.Name -match $browser}|ForEach-Object {[int]$_.ProcessId})
  $baselineUrl=@($baseline|Where-Object {$_.Name -match $browser -and (IsExact $_)}|ForEach-Object {[int]$_.ProcessId})
- $seen=@{};$uncertain=@{};$startEvents=0;$polls=0
+ $seen=@{};$uncertain=@{};$startEvents=0;$polls=0;$phase='observe'
  $began=[DateTime]::UtcNow;$end=$began.AddSeconds(8)
  Write-Output 'OBSERVER_READY'
  while([DateTime]::UtcNow -lt $end) {
@@ -51,7 +51,7 @@ try {
   }
   Start-Sleep -Milliseconds 50
  }
- $cleanup=@()
+ $phase='cleanup';$cleanup=@()
  foreach($id in @($seen.Keys)) {
   $original=$seen[$id]
   $current=Get-CimInstance Win32_Process -Filter ('ProcessId='+$id) -ErrorAction SilentlyContinue
@@ -60,6 +60,9 @@ try {
   $cleanup+=@{pid=[int]$id;alreadyExited=(-not $current);identityMatched=[bool]$same;exited=(-not [bool](Get-Process -Id $id -ErrorAction SilentlyContinue))}
  }
  @{url=$url;handler=$handler;associationOverridden=$false;boundedSeconds=8;beganUtc=$began.ToString('o');endedUtc=[DateTime]::UtcNow.ToString('o');polls=$polls;processStartNotifications=$true;browserStartEvents=$startEvents;baselineBrowserPids=$baselineBrowsers;baselineExactUrlPids=$baselineUrl;newExactUrlPids=@($seen.Keys|ForEach-Object {[int]$_});unresolvedNewBrowserPids=@($uncertain.Keys|ForEach-Object {[int]$_});cleanup=$cleanup;rawCommandLinesRetained=$false}|ConvertTo-Json -Depth 5 -Compress
+} catch {
+ @{observerFailure=$true;phase=$phase;errorType=$_.Exception.GetType().FullName;errorId=$_.FullyQualifiedErrorId;line=$_.InvocationInfo.ScriptLineNumber}|ConvertTo-Json -Compress
+ exit 1
 } finally {
  Unregister-Event -SourceIdentifier $source -ErrorAction SilentlyContinue
  Get-Event -SourceIdentifier $source -ErrorAction SilentlyContinue|Remove-Event
@@ -83,9 +86,9 @@ try {
     {
         await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(25));
         _=await error;
-        Assert.Equal(0,child.ExitCode);
         using var document=JsonDocument.Parse(await output);var proof=document.RootElement;
         WindowsTestHost.Evidence((expected?"shell-control-":"no-shell-")+stage,proof);
+        Assert.Equal(0,child.ExitCode);
         Assert.True(proof.GetProperty("polls").GetInt32()>1);
         if(expected) Assert.NotEmpty(proof.GetProperty("newExactUrlPids").EnumerateArray());
         else Assert.Empty(proof.GetProperty("newExactUrlPids").EnumerateArray());
