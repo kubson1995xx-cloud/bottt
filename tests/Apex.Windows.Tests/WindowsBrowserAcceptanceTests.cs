@@ -88,7 +88,8 @@ public sealed class WindowsBrowserAcceptanceTests
         await b.Navigate(reader,new Uri(h.Origin,"/naval/").AbsoluteUri);
         string css=parity.Select(x=>JsonSerializer.SerializeToElement(x).GetProperty("path").GetString()!).First(p=>p.EndsWith(".css"));
         string module=parity.Select(x=>JsonSerializer.SerializeToElement(x).GetProperty("path").GetString()!).First(p=>p.EndsWith(".js"));
-        string[] paths={"/api/naval/snapshot","/api/naval/events","/","/naval/","/naval/"+module,"/naval/"+css};
+        string eventsPath="/api/naval/events?hostEpoch="+Uri.EscapeDataString(snapshot.GetProperty("hostEpoch").GetString()!)+"&cursor="+Uri.EscapeDataString(snapshot.GetProperty("cursor").GetString()!);
+        string[] paths={"/api/naval/snapshot",eventsPath,"/","/naval/","/naval/"+module,"/naval/"+css};
         var statuses=await b.Evaluate(reader,"Promise.all("+JsonSerializer.Serialize(paths)+".map(async p=>({path:p,status:(await fetch(p)).status})))",true);
         Assert.Equal(new[]{200,200,403,403,403,403},statuses.EnumerateArray().Select(s=>s.GetProperty("status").GetInt32()).ToArray());
         await b.CommandAsync("Network.setExtraHTTPHeaders",new{headers=new{}},reader);

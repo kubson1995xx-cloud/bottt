@@ -146,7 +146,8 @@ internal sealed class WindowsTestHost : IAsyncDisposable
             bool main=path.Equals(Path.GetFullPath(Exe),StringComparison.OrdinalIgnoreCase);
             if(!os && !main)
             {
-                Assert.True(path.StartsWith(Extract+"\\",StringComparison.OrdinalIgnoreCase),"Module borrowed from machine runtime");
+                if(!path.StartsWith(Extract+"\\",StringComparison.OrdinalIgnoreCase)) Evidence("module-refused-"+Pid,new{pid=Pid,name,path,reason="outside System32/main/private authenticated bundle; requires explicit OS provenance classification"});
+                Assert.True(path.StartsWith(Extract+"\\",StringComparison.OrdinalIgnoreCase),"Module borrowed from machine runtime: "+name);
                 var proof=publish.RootElement.GetProperty("nativeLibraries").EnumerateArray().Single(n=>n.GetProperty("name").GetString()!.Equals(name,StringComparison.OrdinalIgnoreCase));
                 Assert.Equal(proof.GetProperty("sha256").GetString(),Hash(path));
             }
