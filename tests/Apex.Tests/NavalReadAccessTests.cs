@@ -30,6 +30,9 @@ public sealed class NavalReadAccessTests
     [InlineData("invalidPathType")]
     [InlineData("missingEnabled")]
     [InlineData("duplicateConfig")]
+    [InlineData("requiredArray")]
+    [InlineData("requiredString")]
+    [InlineData("requiredNull")]
     public async Task NavalReadAccess_InvalidRawOptionsFailWithSafeCode(string fault)
     {
         await using var h = new NavalProductionHost();
@@ -37,6 +40,9 @@ public sealed class NavalReadAccessTests
         if (fault == "invalidPathType") h.Configuration["NavalRead"]!["CredentialFilePath"] = 123;
         if (fault == "missingEnabled") h.Configuration["NavalRead"]!.AsObject().Remove("Enabled");
         if (fault == "duplicateConfig") h.Configuration["navalread"] = h.Configuration["NavalRead"]!.DeepClone();
+        if (fault == "requiredArray") h.Configuration["NavalRead"]!["RequireAuthentication"] = JsonNode.Parse("[true]");
+        if (fault == "requiredString") h.Configuration["NavalRead"]!["RequireAuthentication"] = "true";
+        if (fault == "requiredNull") h.Configuration["NavalRead"]!["RequireAuthentication"] = null;
         await h.Start(expectExit: true); Assert.Equal(2, h.Process!.ExitCode); Assert.True(await h.SafeOutput());
     }
     [Fact]

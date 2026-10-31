@@ -72,10 +72,17 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         Directory.CreateDirectory(dir);
         WindowsPrivacyGuard.Publish(record,buffer=>File.WriteAllText(Path.Combine(dir,name+".json"),buffer));
     }
-    internal async Task StartAsync(string[] arguments)
+    internal async Task StartAsync(string[] arguments, bool legacyGenerator = false)
     {
         if (Child != null) throw new InvalidOperationException("Stop owned child before restart");
-        var p = new ProcessStartInfo(Exe) { UseShellExecute=false, RedirectStandardOutput=true, RedirectStandardError=true, WorkingDirectory=Path.GetDirectoryName(Exe)! };
+        string executable=Exe;
+        if(legacyGenerator)
+        {
+            executable=Environment.GetEnvironmentVariable("APEX_LEGACY_EXE")??throw new InvalidOperationException("Explicit validated legacy EXE required");
+            string expected=Environment.GetEnvironmentVariable("APEX_LEGACY_EXE_SHA256")??throw new InvalidOperationException("Legacy EXE hash required");
+            Assert.True(Path.IsPathFullyQualified(executable));Assert.Equal(expected,Hash(executable));
+        }
+        var p = new ProcessStartInfo(executable) { UseShellExecute=false, RedirectStandardOutput=true, RedirectStandardError=true, WorkingDirectory=Path.GetDirectoryName(Exe)! };
         foreach (var a in arguments) p.ArgumentList.Add(a);
         foreach (string variable in new[]{"APEX_DATA_DIR","DOTNET_STARTUP_HOOKS","DOTNET_ADDITIONAL_DEPS"}) p.Environment.Remove(variable);
         foreach (string variable in new[]{"DOTNET_ROOT","DOTNET_ROOT_X64","DOTNET_ROOT(x86)","DOTNET_SHARED_STORE"}) p.Environment[variable]=Path.Combine(FixtureRoot,"empty-runtime");
@@ -84,7 +91,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         p.Environment["PATH"]=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32")+";"+Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         Assert.All(p.Environment["PATH"]!.Split(';'),path=>Assert.False(File.Exists(Path.Combine(path,"dotnet.exe"))));
         Child = Process.Start(p)!; output=Child.StandardOutput.ReadToEndAsync(); error=Child.StandardError.ReadToEndAsync();
-        Evidence("owned-"+Pid,new{pid=Pid,exe=Exe,exeSha256=PayloadHash,argumentCount=arguments.Length,data=Path.GetFileName(DataRoot),isolatedRuntime=true});
+        Evidence("owned-"+Pid,new{pid=Pid,exe=executable,exeSha256=Hash(executable),legacyGenerator,argumentCount=arguments.Length,data=Path.GetFileName(DataRoot),isolatedRuntime=true});
         await Task.CompletedTask;
     }
     internal async Task InitializeAsync()

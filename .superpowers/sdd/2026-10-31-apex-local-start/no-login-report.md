@@ -41,3 +41,13 @@
 - Tests: strengthened source assertions unchanged from native RED; obsolete first-run-prompt/cancel assertions narrowly replaced by no-prompt mode and explicit display-only cancellation. Existing protected privacy test explicitly opts in. Browser tests now first exercise local mode with no Fetch/auth commands, no Authorization requests/Basic challenges, five views, old panel, 3D and Emergency/restart; separately opt into protected mode for original native Basic cache/reader controls. Real untrusted-origin form/preflight probe added.
 - Local compile SDK8.0.427 PASS with0 warnings/errors; pre-run map `scratch/apex-no-login-implementation/compile-before.json`. Existing protected source/process tests41/41 PASS; Windows no-login execution still pending. Polish instructions updated; no private user files touched.
 - Next gate: commit implementation, native task3-source GREEN, then fresh full native delivery including actual legacy-generated profile upgrade and downloaded ZIP verification.
+
+## Recovery checkpoint — implementation committed, native GREEN running
+- Product commit d60ccaf936e64c3967075aa135df48fde6f9553c pushed; exact remote SHA verified. Native GREEN run41203699442 (task3-source) in progress: https://github.com/kubson1995xx-cloud/bottt/actions/runs/41203699442.
+- Additional test-only work: real legacy EXE profile generation from the existing validated historical causal artifact, then corrected extracted EXE + fresh uncredentialed browser five views and restart, with unchanged config/map/DPAPI/marker/publication. Full-delivery driver runs this separate Gate=Upgrade; existing Package6/Browser2 remain mandatory. Prior artifact and failed RED runs preserved.
+- Post-implementation Linux compilation0 warnings/errors and root panel22/22 PASS (pre-input map tests-final-before.json); mandatory fresh Windows suites/full build remain next.
+
+## Recovery checkpoint — native source GREEN read back
+- Run41203699442 SUCCESS on d60ccaf; downloaded to `naval-windows-no-login/green-41203699442`. Native setup35/35 and protected auth/frontend41/41, no failures/skips. The original first/legacy Ready startup assertions are now GREEN; request boundary/explicit opt-out assertions also reached and passed.
+- Final test-only additions compiled0 warnings/errors locally: separate genuine-old-EXE Upgrade gate, strict RequireAuthentication shape negatives (array/string/null), panel custom-header assertion. Historical generator EXE is bound to the pinned archive extraction hash; no private fixture data is published.
+- Next: commit explicit test/driver/report paths and dispatch one fresh full-delivery on that exact SHA. Parent owns HANDOFF; its concurrent changes remain untouched.

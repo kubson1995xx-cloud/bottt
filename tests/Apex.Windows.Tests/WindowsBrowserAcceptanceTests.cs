@@ -173,6 +173,33 @@ public sealed class WindowsBrowserAcceptanceTests
         AssertNoAuthentication(b,h,"emergency-restart");
         WindowsTestHost.Evidence("emergency-browser",new{syntheticLocalPeerOnly=true,h503=true,staticOldPanelLink=true,originalPanelConfirmation=true,closedPosition=77,fullClose=true,foreign78Untouched=true,noOpenTestModify=true,decisions200=true,csv200=true,durableLatch=true,restartNewHostEpoch=true,checkpointUnchanged=true,brokerTested=false});
     }
+    [Fact,Trait("Gate","Upgrade")]
+    public async Task GenuinePreviousExeProfileUpgradesWithoutResetOrManualLogin()
+    {
+        await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());h.Port=WindowsTestHost.FreePort();h.ProtectedMode=true;
+        // Only this historical generator receives its old native modal acknowledgement.
+        // No auth is supplied to the corrected EXE or browser during upgrade/restart.
+        await h.StartAsync(new[]{"--data",h.DataRoot,"--port",h.Port.ToString(),"--no-browser"},legacyGenerator:true);
+        await h.NativeDialogAsync();await h.ReadyAsync();
+        JsonElement prior;
+        using(var response=await h.Send("/api/naval/snapshot","operator")){Assert.Equal(HttpStatusCode.OK,response.StatusCode);using var doc=JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync());prior=doc.RootElement.Clone();}
+        await h.StopAsync();
+        string config=Path.Combine(h.DataRoot,"apex.config.json");
+        using(var doc=JsonDocument.Parse(File.ReadAllBytes(config)))Assert.False(doc.RootElement.GetProperty("NavalRead").TryGetProperty("RequireAuthentication",out _));
+        var before=WindowsTestHost.Inventory(h.DataRoot).Where(p=>!p.Key.StartsWith("logi/",StringComparison.Ordinal)).ToDictionary(p=>p.Key,p=>p.Value);
+        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"upgrade-edge"));h.ProtectedMode=false;
+        for(int n=0;n<2;n++)
+        {
+            await h.StartAsync(new[]{"--data",h.DataRoot,"--port",h.Port.ToString(),"--no-browser"});await h.ReadyAsync();h.AssertNoCredentialModal();
+            string sid=await OpenDesktopLocal(b,h);
+            foreach(var(route,title)in new[]{("command","Command Center"),("radar","Tactical Radar"),("fleets","Fleet Operations"),("animations","Trade Animations"),("analytics","Analytics Center")})
+            {await b.Evaluate(sid,"location.hash="+J("#/"+route));await b.Wait(sid,"document.querySelector('main h1')?.textContent==="+J(title),"Upgraded profile view missing");await CheckDom(b,h,sid,"upgrade-"+n+"-"+route);}
+            var current=await h.Json("/api/naval/snapshot");Assert.Equal(prior.GetProperty("checkpoint").GetRawText(),current.GetProperty("checkpoint").GetRawText());
+            foreach(var pair in before)Assert.Equal(pair.Value,WindowsTestHost.Inventory(h.DataRoot)[pair.Key]);
+            AssertNoAuthentication(b,h,"upgrade-"+n);await h.StopAsync();
+        }
+        WindowsTestHost.Evidence("legacy-upgrade",new{genuinePreviousExe=true,legacyExeSha256=Environment.GetEnvironmentVariable("APEX_LEGACY_EXE_SHA256"),correctedExeSha256=h.PayloadHash,configMapDpapiMarkerPublicationPreserved=true,privatePreservedFiles=before.Count,noCredentialInputToCorrectedExeOrBrowser=true,fiveViewsBothStarts=true,checkpointUnchanged=true,restart=true});
+    }
     private static async Task AssertUntrustedBrowserBlocked(WindowsCdpBrowser b,WindowsTestHost h,string local)
     {
         // Same-origin scripts still need the nonsecret anti-CSRF header.

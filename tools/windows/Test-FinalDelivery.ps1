@@ -34,6 +34,19 @@ try {
     # Gate=Browser (6+2), no task6 pinned extractor and no prior TRX reuse.
     & (Join-Path $PSScriptRoot 'Zbuduj-APEX.ps1') -Target win-x64 -Wyjscie $output
     & (Join-Path $PSScriptRoot 'Smoke-Windows.ps1') -Pakiet $package -Evidence ($output+'-smoke-evidence')
+    # Historical causal fixture is also the genuine old profile generator. The
+    # original extraction was SHA/CRC/manifest validated before scalar tooling probes;
+    # runtime EXE bytes were never modified by that verifier-only replay.
+    $env:APEX_LEGACY_EXE=Join-Path $e 'scalar-replay/original-copy/APEX-Desktop/ApexDesktop.exe'
+    $env:APEX_LEGACY_EXE_SHA256=Hash $env:APEX_LEGACY_EXE
+    $legacyProof=Get-Content (Join-Path $e 'scalar-replay/original-archive.json') -Raw|ConvertFrom-Json
+    if($env:APEX_LEGACY_EXE_SHA256 -cne $legacyProof.extractedSha256.'APEX-Desktop/ApexDesktop.exe'){throw 'Legacy runtime differs from pinned original archive'}
+    $env:APEX_PACKAGE_ROOT=$package;$env:APEX_WINDOWS_EVIDENCE=$output+'-package-evidence'
+    $old=$ErrorActionPreference
+    try { $ErrorActionPreference='Continue'; & $dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter 'Gate=Upgrade' --logger 'trx;LogFileName=windows-upgrade.trx' --results-directory ($output+'-package-evidence');$upgradeExit=$LASTEXITCODE } finally {$ErrorActionPreference=$old}
+    if($upgradeExit -ne 0){throw 'Genuine previous EXE profile upgrade failed'}
+    $upgradeCounts=Read-ApexTestCounts (Join-Path ($output+'-package-evidence') 'windows-upgrade.trx')
+    if($upgradeCounts.total -ne 1){throw 'Upgrade gate incomplete'}
     $p=Get-Content (Join-Path ($output+'-package-evidence') 'summary.json') -Raw|ConvertFrom-Json
     $s=Get-Content (Join-Path ($output+'-smoke-evidence') 'summary.json') -Raw|ConvertFrom-Json
     $m=Get-Content (Join-Path $package 'apex-build.json') -Raw|ConvertFrom-Json
@@ -41,6 +54,7 @@ try {
     if ($p.status -cne 'PASS' -or $s.status -cne 'PASS' -or -not $p.packageUnchanged -or $p.zipSha256 -cne $zipHash -or $m.sourceCommit -cne $commit -or $m.sourceDirty -or $m.tools.dotnet -cne $actualSdk -or $m.target -cne 'win-x64' -or $m.deploymentMode -cne 'self-contained') { throw 'Fresh candidate identity/summary invalid' }
     $counts=[ordered]@{}
     foreach ($suite in @('bot','platform','backtester','windows')) { $counts[$suite]=Read-ApexTestCounts (Join-Path $package ('Weryfikacja/'+$suite+'.trx')) }
+    $counts.upgrade=$upgradeCounts
     $counts.packaged=Read-ApexTestCounts (Join-Path ($output+'-package-evidence') 'packaged.trx')
     foreach ($gate in @('Package','Browser')) {
         $c=Read-ApexTestCounts (Join-Path ($output+'-package-evidence') ('windows-'+$gate.ToLowerInvariant()+'.trx'))

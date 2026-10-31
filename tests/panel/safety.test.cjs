@@ -54,6 +54,7 @@ test('empty enabled-mode meta keeps legacy JSON requests without injecting a cre
     assert.notEqual(call.opts.credentials, 'omit');
   }
   assert.equal(post.opts.headers['Content-Type'], 'application/json');
+  assert.equal(post.opts.headers['X-Apex-Local'], '1'); // nonsecret anti-CSRF/preflight proof
   // Native Basic challenge/cache/network/CSP are intentionally not claimed by this VM test.
 });
 
