@@ -12,6 +12,11 @@ on:
         type: choice
         options: [red, green]
         default: green
+      okx_gate:
+        description: 'OKX Task1 source subset; windows-setup replays only a missing native setup/startup gate'
+        type: choice
+        options: [all, windows-setup]
+        default: all
   push:
     branches: ["claude/beautiful-mccarthy-9cibo1"]
     paths:
@@ -210,7 +215,8 @@ jobs:
         shell: powershell
         env:
           OKX_TASK1_PHASE: ${{ inputs.phase }}
-        run: ./tools/windows/Test-OkxCompositionSource.ps1 -Phase $env:OKX_TASK1_PHASE
+          OKX_TASK1_GATE: ${{ inputs.okx_gate }}
+        run: ./tools/windows/Test-OkxCompositionSource.ps1 -Phase $env:OKX_TASK1_PHASE -Gate $env:OKX_TASK1_GATE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
