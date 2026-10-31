@@ -51,3 +51,14 @@
 - Run41203699442 SUCCESS on d60ccaf; downloaded to `naval-windows-no-login/green-41203699442`. Native setup35/35 and protected auth/frontend41/41, no failures/skips. The original first/legacy Ready startup assertions are now GREEN; request boundary/explicit opt-out assertions also reached and passed.
 - Final test-only additions compiled0 warnings/errors locally: separate genuine-old-EXE Upgrade gate, strict RequireAuthentication shape negatives (array/string/null), panel custom-header assertion. Historical generator EXE is bound to the pinned archive extraction hash; no private fixture data is published.
 - Next: commit explicit test/driver/report paths and dispatch one fresh full-delivery on that exact SHA. Parent owns HANDOFF; its concurrent changes remain untouched.
+
+## Recovery checkpoint — fresh full delivery dispatched
+- Test/driver commit d16764945eba53726a7ca1bedc258ad680b91ec0 pushed and remote SHA read back equal. Product behavior remains d60ccaf; fresh build binds the whole d167649 input set.
+- Full-delivery run41204070137 in progress: https://github.com/kubson1995xx-cloud/bottt/actions/runs/41204070137. Native source GREEN41203699442 and both REDs retained separately; no suite skips or old-runtime evidence substitution.
+- Local PowerShell parser accepted changed full-delivery driver. Next missing gate: full native product/browser/old-profile Upgrade result, actual ZIP download/readback and parent independent scoped review. No user delivery yet.
+
+## Recovery checkpoint — full delivery blocked by obsolete panel-byte assertion
+- Run41204070137 FAILED before .NET suites/publish: frontend58/58 passed, frontend build parity3/4; the historical original-panel app.js pinned hash rejects the authorized one-line anti-CSRF header change (actual856eb898… vs historicalca765833…). No ZIP was produced; native browser/upgrade not reached. Full failed log/public evidence retained in `naval-windows-no-login/failed-full-41204070137`.
+- Narrow test repair only: keep all four original pins; require exactly one approved `X-Apex-Local` insertion, remove only those exact bytes for comparison with the historical app.js pin. Other resource bytes and all surrounding app.js bytes remain pinned. Root panel behavior separately requires the header on JSON POST and no credentials. No product/guard change.
+- Local corrected frontend build4/4 and root22/22 PASS with before-map `scratch/apex-no-login-parity-fix/before.json`. Historical eed2fdf generator's Program/WindowsLocalSetup/WindowsLocalAccess/NavalAccessPolicy sources are identical to a03c288 (git diff empty); old delivered ZIP SHA remainsfe07c008…bec5 unchanged.
+- Next: commit scoped test/report repair and fresh full-delivery rerun; preserve failed run and native source GREEN.
