@@ -6,7 +6,7 @@ $Source=(Resolve-Path -LiteralPath $Source).Path;$Pakiet=[IO.Path]::GetFullPath(
 if (Test-Path -LiteralPath $Evidence) { throw 'Evidence directory must be new' }
 if ($Evidence.StartsWith($Pakiet.TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) { throw 'Evidence must be outside sealed package' }
 New-Item -ItemType Directory -Path $Evidence|Out-Null
-$oldRoot=$env:APEX_PACKAGE_ROOT;$oldDotnet=$env:DOTNET_HOST_PATH;$oldEvidence=$env:NAVAL_HOST_EVIDENCE_DIR
+$oldRoot=$env:APEX_PACKAGE_ROOT;$oldDotnet=$env:DOTNET_HOST_PATH;$oldEvidence=$env:NAVAL_HOST_EVIDENCE_DIR;$oldWindowsEvidence=$env:APEX_WINDOWS_EVIDENCE
 . (Join-Path $Source 'tools/windows/TestEvidence.ps1')
 function Inventory {
     $prefix=$Pakiet.TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar
@@ -80,13 +80,27 @@ with zipfile.ZipFile(archive) as z:
     $exit=$LASTEXITCODE
     if ($exit -ne 0) { throw "Real packaged host tests failed ($exit)" }
     $counts=Read-ApexTestCounts (Join-Path $Evidence 'packaged.trx')
+    $native=[ordered]@{};$nativeFailed=$false
+    if ($expected -eq 'win-x64') {
+        $env:APEX_WINDOWS_EVIDENCE=$Evidence
+        foreach ($gate in @('Package','Browser')) {
+            $trx='windows-'+$gate.ToLowerInvariant()+'.trx'
+            & $dotnet test (Join-Path $Source 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$trx) --results-directory $Evidence
+            $native[$gate]=@{trx=$trx;exitCode=$LASTEXITCODE}
+            if ($LASTEXITCODE -ne 0) { $nativeFailed=$true } else { $native[$gate].counts=Read-ApexTestCounts (Join-Path $Evidence $trx) }
+        }
+        $owned=@(Get-ChildItem -LiteralPath $Evidence -Filter 'owned-*.json'|ForEach-Object {Get-Content $_.FullName -Raw|ConvertFrom-Json})
+        $exits=@(Get-ChildItem -LiteralPath $Evidence -Filter 'exit-*.json'|ForEach-Object {Get-Content $_.FullName -Raw|ConvertFrom-Json})
+        [IO.File]::WriteAllText((Join-Path $Evidence 'windows-process.json'),(@{owned=$owned;exits=$exits}|ConvertTo-Json -Depth 10))
+    }
     $after=Inventory;[IO.File]::WriteAllLines((Join-Path $Evidence 'package-after.sha256'),$after)
     if (($before -join "`n") -cne ($after -join "`n")) { throw 'Package mutated during tests' }
     & (Join-Path $Pakiet 'Sprawdz-Pakiet.ps1') -Pakiet $Pakiet
     $proof=@(Get-ChildItem -LiteralPath (Join-Path $Evidence 'host') -Filter 'process-*.json'|ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw|ConvertFrom-Json})
     if ($proof.Count -eq 0 -or @($proof|Where-Object {-not $_.packaged -or $_.desktop -cne (Join-Path $Pakiet 'APEX-Desktop')}).Count -gt 0) { throw 'Missing actual package process proof' }
     foreach ($p in $proof) { if (Get-Process -Id $p.pid -ErrorAction SilentlyContinue) { throw 'Owned host still running after tests' } }
-    [IO.File]::WriteAllText((Join-Path $Evidence 'summary.json'),(@{status='PASS';testCounts=$counts;packageUnchanged=$true;processCount=$proof.Count;target=$expected;zipSha256= $(if ($Zip) {(Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash.ToLowerInvariant()} else {$null});windowsNativeAclTested=($expected -eq 'win-x64');brokerTested=$false}|ConvertTo-Json -Depth 5))
+    [IO.File]::WriteAllText((Join-Path $Evidence 'summary.json'),(@{status=$(if($nativeFailed){'FAIL'}else{'PASS'});nativeGates=$native;evidenceFiles=@('windows-package.trx','windows-browser.trx','packaged.trx','archive-readback.json','package-before.sha256','package-after.sha256','windows-browser.json','windows-process.json');testCounts=$counts;packageUnchanged=$true;processCount=$proof.Count;target=$expected;zipSha256= $(if ($Zip) {(Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash.ToLowerInvariant()} else {$null});windowsNativeAclTested=($expected -eq 'win-x64');brokerTested=$false}|ConvertTo-Json -Depth 5))
+    if ($nativeFailed) { throw 'Native Package/Browser gate failed; see individual TRX' }
     Write-Host "EXTRACTED PACKAGE TESTS PASS: $($counts.total) actual tests; $($proof.Count) packaged processes exited; package unchanged."
 } finally {
     # Test harness owns/kills each production child in DisposeAsync. On interrupted tests kill only recorded owned PIDs whose payload path still matches.
@@ -97,5 +111,5 @@ with zipfile.ZipFile(archive) as z:
             elseif (Test-Path -LiteralPath ('/proc/'+$p.pid+'/cmdline')) { $cmd=[IO.File]::ReadAllText(('/proc/'+$p.pid+'/cmdline'));if ($cmd.Contains((Join-Path $Pakiet 'APEX-Desktop/ApexDesktop.dll'))) { Stop-Process -Id $p.pid -Force } }
         }
     }
-    $env:APEX_PACKAGE_ROOT=$oldRoot;$env:DOTNET_HOST_PATH=$oldDotnet;$env:NAVAL_HOST_EVIDENCE_DIR=$oldEvidence
+    $env:APEX_PACKAGE_ROOT=$oldRoot;$env:DOTNET_HOST_PATH=$oldDotnet;$env:NAVAL_HOST_EVIDENCE_DIR=$oldEvidence;$env:APEX_WINDOWS_EVIDENCE=$oldWindowsEvidence
 }

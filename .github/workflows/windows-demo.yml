@@ -5,7 +5,7 @@ on:
       mode:
         description: 'full-delivery packages; task1-source/task2-source/task3-source/task4-source validate only the named source prerequisite'
         type: choice
-        options: [full-delivery, task1-source, task2-source, task3-source, task4-source, task5-package]
+        options: [full-delivery, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
         default: full-delivery
       phase:
         description: 'Source evidence label only; RED failures still fail the run'
@@ -87,6 +87,43 @@ jobs:
             ${{ runner.temp }}/APEX Windows DEMO-package-evidence/archive-readback.json
             ${{ runner.temp }}/APEX Windows DEMO-package-evidence/packaged.trx
           if-no-files-found: warn
+          retention-days: 30
+  nativeTask6:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'task6-acceptance' && github.ref == 'refs/heads/feature/apex-naval-command'
+    runs-on: windows-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: APEX-NAVAL-COMMAND-Windows-x64
+          run-id: 41167079728
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/task6-input
+      - uses: actions/download-artifact@v4
+        with:
+          name: Task5-Windows-Evidence-41167079728-1
+          run-id: 41167079728
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/task6-prior-evidence
+      - name: New Task6 acceptance on exact source-bound Task5 ZIP (PowerShell 5.1)
+        shell: powershell
+        run: ./tools/windows/Test-Task6Acceptance.ps1 -Download "$env:RUNNER_TEMP/task6-input" -PriorEvidence "$env:RUNNER_TEMP/task6-prior-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Task6-Windows-Evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/apex-task6-${{ github.run_id }}-${{ github.run_attempt }}/*.json
+            ${{ runner.temp }}/apex-task6-${{ github.run_id }}-${{ github.run_attempt }}/*.trx
+            ${{ runner.temp }}/apex-task6-${{ github.run_id }}-${{ github.run_attempt }}/*.sha256
+          if-no-files-found: error
           retention-days: 30
   nativePackage:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'task5-package' && github.ref == 'refs/heads/feature/apex-naval-command'
