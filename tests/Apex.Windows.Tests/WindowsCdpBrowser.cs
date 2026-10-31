@@ -38,10 +38,24 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
             b.child=Process.Start(p)!;
             _=b.child.StandardOutput.ReadToEndAsync();_=b.child.StandardError.ReadToEndAsync();
             string portFile=Path.Combine(privateProfileDirectory,"DevToolsActivePort");
-            await WindowsTestHost.Until(()=>Task.FromResult(File.Exists(portFile)),"Edge DevToolsActivePort not produced");
-            string[] lines=File.ReadAllLines(portFile);await b.ws.ConnectAsync(new Uri("ws://127.0.0.1:"+lines[0]+lines[1]),b.stop.Token);
+            string[]? lines=null;int readinessPolls=0;
+            await WindowsTestHost.Until(()=>
+            {
+                readinessPolls++;
+                if(b.child.HasExited)throw new Exception("Owned Edge exited before CDP readiness; private output withheld");
+                // File creation precedes completion/unlocking of Edge's write.
+                // Retry only transient I/O within the existing overall deadline.
+                try
+                {
+                    var candidate=File.ReadAllLines(portFile);
+                    if(candidate.Length==2 && int.TryParse(candidate[0],out int port) && port is >0 and <=65535 && candidate[1].StartsWith("/devtools/browser/",StringComparison.Ordinal)){lines=candidate;return Task.FromResult(true);}
+                }
+                catch(IOException) { }
+                return Task.FromResult(false);
+            },"Edge DevToolsActivePort not readable/complete");
+            await b.ws.ConnectAsync(new Uri("ws://127.0.0.1:"+lines![0]+lines[1]),b.stop.Token);
             b.receiving=b.Receive();
-            WindowsTestHost.Evidence("edge-start-"+b.child.Id,new{pid=b.child.Id,installedExecutable=exe,privateProfile=true,debugPortEphemeral=true,headless=false});
+            WindowsTestHost.Evidence("edge-start-"+b.child.Id,new{pid=b.child.Id,installedExecutable=exe,privateProfile=true,debugPortEphemeral=true,devToolsFileReadinessPolls=readinessPolls,headless=false});
             return b;
         }
         catch{await b.DisposeAsync();throw;}
