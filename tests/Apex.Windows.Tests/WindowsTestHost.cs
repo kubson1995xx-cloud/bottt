@@ -27,7 +27,14 @@ internal sealed class WindowsTestHost : IAsyncDisposable
     internal int Port = 0;
     internal Uri Origin => new($"http://127.0.0.1:{Port}");
     internal HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
-    internal WindowsLocalAccess.Credentials? Credentials;
+    private WindowsLocalAccess.Credentials? credentials;
+    private WindowsPrivacyGuard? privacy;
+    internal WindowsLocalAccess.Credentials? Credentials
+    {
+        get => credentials;
+        set { privacy?.Dispose(); credentials=value; privacy=value==null?null:new WindowsPrivacyGuard(new[]{value.OperatorSecret,value.ReaderSecret}); }
+    }
+    internal void CheckPrivateBuffer(string buffer) => (privacy ?? throw new InvalidOperationException("Credentials required for privacy assertion")).Check(buffer);
     private Task<string>? output, error;
     private readonly bool deleteData;
     internal readonly List<object> Processes = new();
@@ -62,7 +69,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
     {
         string dir = Environment.GetEnvironmentVariable("APEX_WINDOWS_EVIDENCE") ?? throw new InvalidOperationException("External evidence root required");
         Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir,name+".json"),JsonSerializer.Serialize(record,new JsonSerializerOptions{WriteIndented=true}));
+        WindowsPrivacyGuard.Publish(record,buffer=>File.WriteAllText(Path.Combine(dir,name+".json"),buffer));
     }
     internal async Task StartAsync(string[] arguments)
     {
@@ -114,6 +121,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         IntPtr modal=IntPtr.Zero;
         await Until(()=> { if(Child!.HasExited) throw new Exception("Native credential UI unavailable: process exited (no --no-browser substitution)"); EnumWindows((h,_)=>{GetWindowThreadProcessId(h,out uint pid); var cls=new StringBuilder(100); GetClassName(h,cls,100); if(pid==Pid && cls.ToString()=="#32770") modal=h; return true;},IntPtr.Zero); return Task.FromResult(modal!=IntPtr.Zero); },"Native credential modal not observed");
         var credentials=WindowsLocalAccess.Load(DataRoot,"presentation");
+        Credentials=credentials;
         // EnumWindows can see a newly created #32770 before its static children
         // carry text. Wait for native content readiness, never a fixed sleep.
         int contentPolls=0;
@@ -176,7 +184,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         if(Child==null)return;
         int pid=Pid; if(!Child.HasExited){Child.Kill(true);await Child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));}
         string text=await output!+await error!;
-        if(Credentials!=null) foreach(string secret in new[]{Credentials.OperatorSecret,Credentials.ReaderSecret}) Assert.True(!text.Contains(secret)&&!text.Contains(Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(secret))).ToLowerInvariant()),"Secret leaked to process output");
+        if(Credentials!=null) CheckPrivateBuffer(text);
         Assert.False(text.Contains("Authorization:",StringComparison.OrdinalIgnoreCase),"Authorization leaked");
         bool exited=Child.HasExited; Child.Dispose();Child=null;
         await Until(()=>Task.FromResult(OwnedListeners(pid).Length==0),"Owned PID listener survived process exit",10);
@@ -194,7 +202,8 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         {
             Client.Dispose(); if(deleteData&&Directory.Exists(DataRoot))Directory.Delete(DataRoot,true);
             if(Directory.Exists(FixtureRoot))Directory.Delete(FixtureRoot,true);
-            Evidence("cleanup-"+Guid.NewGuid().ToString("N"),new{processes=Processes,dataRemoved=deleteData?!Directory.Exists(DataRoot):(bool?)null,fixtureRemoved=!Directory.Exists(FixtureRoot),packageUnchanged=Before.OrderBy(x=>x.Key).SequenceEqual(Inventory(PackageRoot).OrderBy(x=>x.Key))});
+            try { Evidence("cleanup-"+Guid.NewGuid().ToString("N"),new{processes=Processes,dataRemoved=deleteData?!Directory.Exists(DataRoot):(bool?)null,fixtureRemoved=!Directory.Exists(FixtureRoot),packageUnchanged=Before.OrderBy(x=>x.Key).SequenceEqual(Inventory(PackageRoot).OrderBy(x=>x.Key)),publicJsonKnownValuesCheckedBeforeWrite=Credentials!=null}); }
+            finally { Credentials=null; }
         }
     }
     internal static bool IsCommonControlsPath(string name,string path)

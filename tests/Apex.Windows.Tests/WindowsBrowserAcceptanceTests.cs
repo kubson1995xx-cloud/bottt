@@ -12,6 +12,15 @@ namespace Apex.Windows.Tests;
 public sealed class WindowsBrowserAcceptanceTests
 {
     private static string J(string value)=>JsonSerializer.Serialize(value);
+    private static async Task CheckDom(WindowsCdpBrowser browser,WindowsTestHost host,string session,string stage)
+    {
+        // DOM bytes cross only the private CDP response in memory. Never log,
+        // write, hash or attach them, or inject credentials into the page.
+        string buffer=(await browser.Evaluate(session,"document.documentElement.outerHTML+'\\n'+Array.from(document.querySelectorAll('input,textarea,select')).map(e=>e.value).join('\\n')")).GetString()!;
+        host.CheckPrivateBuffer(buffer);
+        Assert.False(buffer.Contains("Authorization",StringComparison.OrdinalIgnoreCase),"Authorization in DOM; content withheld");
+        WindowsTestHost.Evidence("privacy-dom-"+stage,new{stage,currentDomChecked=true,operatorAndReaderExcluded=true,bothDigestsExcluded=true,noDomRetained=true});
+    }
     private static async Task<string> Authenticate(WindowsCdpBrowser b,WindowsTestHost h)
     {
         string sid=await b.NewPage();int challenges=0;
@@ -39,6 +48,7 @@ public sealed class WindowsBrowserAcceptanceTests
     public async Task ProductionBrowserNativeCacheRolesFiveViewsAndOptional3D()
     {
         await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();
+        WindowsTestHost.Evidence("privacy-negative-controls",WindowsPrivacyTests.Controls());
         await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"edge"));string sid=await Authenticate(b,h);
         var snapshot=await h.Json("/api/naval/snapshot");
         using var export=JsonDocument.Parse(File.ReadAllBytes(Path.Combine(h.PackageRoot,"APEX-Desktop","presentation","naval-publication.json")));
@@ -50,6 +60,7 @@ public sealed class WindowsBrowserAcceptanceTests
             await b.Evaluate(sid,"location.hash="+J("#/"+route));
             await b.Wait(sid,"document.querySelector('main h1')?.textContent==="+J(title)+" && document.querySelector('[data-testid=revision]')?.textContent==="+J(snapshot.GetProperty("financialRevision").GetString()!),"View missing real historical checkpoint: "+route);
             Assert.True((await b.Evaluate(sid,"document.body.innerText.includes('NOT_CONFIGURED') && document.body.innerText.includes('SYNTHETIC')")).GetBoolean());
+            await CheckDom(b,h,sid,route);
             views.Add(new{route,title,revision=snapshot.GetProperty("financialRevision").GetString(),historicalState=true});
         }
         // Exact HTTP asset map, then actual browser lazy Script response and its bytes.
@@ -82,6 +93,7 @@ public sealed class WindowsBrowserAcceptanceTests
         if(gpu.GetProperty("available").GetBoolean())await b.Wait(sid,"document.querySelector('.scene-status')?.textContent.includes('3D historical')===true","Capability restored but same-lane Retry failed");
         else await b.Wait(sid,"document.querySelector('.scene-fallback svg')!==null","Unavailable WebGL must retain SVG");
         await b.CommandAsync("Page.removeScriptToEvaluateOnNewDocument",new{identifier=injected.GetProperty("identifier").GetString()},sid);
+        await CheckDom(b,h,sid,"restored-retry");
         // A new isolated context has no inherited Basic cache. Only reader Bearer;
         // exactly the two documented GET APIs, never documents/modules/styles.
         string reader=await b.NewPage();await b.CommandAsync("Network.setExtraHTTPHeaders",new{headers=new{Authorization="Bearer "+h.Credentials!.ReaderSecret}},reader);
@@ -95,7 +107,8 @@ public sealed class WindowsBrowserAcceptanceTests
         await b.CommandAsync("Network.setExtraHTTPHeaders",new{headers=new{}},reader);
         var cleared=await b.Evaluate(reader,"fetch('/api/naval/snapshot',{credentials:'omit'}).then(r=>r.status)",true);Assert.Equal(401,cleared.GetInt32());
         await b.Navigate(sid,new Uri(h.Origin,"/").AbsoluteUri);await b.Wait(sid,"document.querySelector('meta[name=apex-token]')!==null","Cached Basic original panel failed");
-        Assert.True((await b.Evaluate(sid,"document.querySelector('meta[name=apex-token]').content==='' && !document.documentElement.innerHTML.includes('Authorization')")).GetBoolean());
+        Assert.True((await b.Evaluate(sid,"document.querySelector('meta[name=apex-token]').content===''")).GetBoolean());
+        await CheckDom(b,h,sid,"original-panel");
         WindowsTestHost.Evidence("windows-browser",new{views,checkpointMatchesProducer=true,assets=parity,lazyScript=true,lazyScriptHashMatched=true,webgl=gpu,physicalGpuProof=false,minimalFallback=true,reducedMotion=true,noWebglFallback=true,sameLaneRestoredRetry=gpu.GetProperty("available").GetBoolean(),reader=statuses,clearedAuthStatus=401,oldPanelEmptyToken=true,noPageInjectedAuth=true});
     }
     [Fact,Trait("Gate","Browser")]
@@ -109,12 +122,14 @@ public sealed class WindowsBrowserAcceptanceTests
             await peer.Connect();string key=await peer.Ready();
             File.WriteAllText(publication,"{");using var bad=await h.Send("/api/naval/snapshot");Assert.Equal(HttpStatusCode.ServiceUnavailable,bad.StatusCode);
             await b.CommandAsync("Page.reload",new{},sid);await b.Wait(sid,"document.querySelector('.unavailable')!==null","H503 unavailable UI not shown");
+            await CheckDom(b,h,sid,"h503");
             await b.Evaluate(sid,"Array.from(document.querySelectorAll('a')).find(a=>a.getAttribute('href')==='/').click()");
             await b.Wait(sid,"Array.from(document.querySelectorAll('button')).some(b=>b.textContent.includes('AWARYJNY STOP'))","Text Emergency missing after static old-panel link");
             var decisions=await h.Send("/api/accounts/"+Uri.EscapeDataString(key)+"/decisions");Assert.Equal(HttpStatusCode.OK,decisions.StatusCode);decisions.Dispose();
             using var csv=await h.Send("/api/accounts/"+Uri.EscapeDataString(key)+"/journal.csv");Assert.Equal(HttpStatusCode.OK,csv.StatusCode);
             await b.Evaluate(sid,"Array.from(document.querySelectorAll('button')).find(b=>b.textContent.includes('AWARYJNY STOP')).click()");
             await b.Wait(sid,"document.querySelector('[role=dialog]')?.textContent.includes('AWARYJNE ZATRZYMANIE')===true","Original panel confirmation not shown");
+            await CheckDom(b,h,sid,"emergency-confirmation");
             Assert.Equal(0,peer.Closed);
             await b.Evaluate(sid,"Array.from(document.querySelectorAll('[role=dialog] button')).find(b=>b.textContent==='ZATRZYMAJ AWARYJNIE').click()");
             await WindowsTestHost.Until(async()=>{var status=await h.Json("/api/status");return status.GetProperty("data").GetProperty("accounts")[0].GetProperty("engine").GetProperty("mode").GetString()=="EmergencyStopped";},"Emergency latch not published");

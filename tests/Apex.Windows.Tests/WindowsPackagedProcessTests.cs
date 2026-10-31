@@ -26,23 +26,46 @@ public sealed class WindowsPackagedProcessTests
     public async Task ExistingConfigRestartSecondLaunchAndPortCollision()
     {
         await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();
-        string config=Path.Combine(h.DataRoot,"apex.config.json");byte[] before=File.ReadAllBytes(config);
+        string config=Path.Combine(h.DataRoot,"apex.config.json");
+        var enabled=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(config))!;enabled["OpenBrowserOnStart"]=true;
+        File.WriteAllText(config,enabled.ToJsonString());byte[] before=File.ReadAllBytes(config);
+        // Calibrate the exact same native observer against a genuine successful
+        // production shell request for this very URL, without association overrides.
+        await h.StopAsync();
+        await using(var observer=await WindowsShellObserver.Start(h.Origin))
+        {
+            await h.StartAsync(new[]{"--data",h.DataRoot});await h.ReadyAsync();
+            await observer.AssertLaunch("same-url-positive");
+        }
         string publication=WindowsTestHost.Hash(Path.Combine(h.DataRoot,"publication","naval-publication.json"));
         var first=await h.Json("/api/naval/snapshot");
         await using(var second=new WindowsTestHost(WindowsTestHost.Package,h.DataRoot,false))
-        {await second.StartAsync(new[]{"--data",h.DataRoot});string text=await second.ExitAsync();Assert.Contains("HOST_ALREADY_RUNNING",text);}
+        await using(var observer=await WindowsShellObserver.Start(h.Origin))
+        {
+            second.Credentials=h.Credentials;
+            await second.StartAsync(new[]{"--data",h.DataRoot});string text=await second.ExitAsync();Assert.True(text.Contains("HOST_ALREADY_RUNNING"),"Duplicate refusal diagnostic absent; output withheld");
+            await observer.AssertNoLaunch("duplicate",second.Child!);
+        }
         await using(var collision=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot()))
         {
             await collision.InitializeAsync();await collision.StopAsync();
+            string collisionConfig=Path.Combine(collision.DataRoot,"apex.config.json");
+            var c=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(collisionConfig))!;c["OpenBrowserOnStart"]=true;c["HttpPort"]=h.Port;
+            File.WriteAllText(collisionConfig,c.ToJsonString());byte[] collisionBefore=File.ReadAllBytes(collisionConfig);
+            string checkpoint=WindowsTestHost.Hash(Path.Combine(collision.DataRoot,"publication","naval-publication.json"));
+            await using var observer=await WindowsShellObserver.Start(h.Origin);
             await collision.StartAsync(new[]{"--data",collision.DataRoot,"--port",h.Port.ToString()});
-            Assert.Contains("HOST_HTTP_BIND_FAILED",await collision.ExitAsync());
+            string text=await collision.ExitAsync();Assert.True(text.Contains("HOST_HTTP_BIND_FAILED"),"Bind refusal diagnostic absent; output withheld");
+            await observer.AssertNoLaunch("collision",collision.Child!);
+            Assert.True(collisionBefore.SequenceEqual(File.ReadAllBytes(collisionConfig)),"Collision config bytes changed; contents withheld");
+            Assert.Equal(checkpoint,WindowsTestHost.Hash(Path.Combine(collision.DataRoot,"publication","naval-publication.json")));
         }
-        Assert.Equal(before,File.ReadAllBytes(config)); await h.StopAsync();
+        Assert.True(before.SequenceEqual(File.ReadAllBytes(config)),"Config bytes changed; contents withheld"); await h.StopAsync();
         await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();
         var later=await h.Json("/api/naval/snapshot");Assert.NotEqual(first.GetProperty("hostEpoch").GetString(),later.GetProperty("hostEpoch").GetString());
         Assert.Equal(first.GetProperty("checkpoint").GetRawText(),later.GetProperty("checkpoint").GetRawText());
-        Assert.Equal(publication,WindowsTestHost.Hash(Path.Combine(h.DataRoot,"publication","naval-publication.json")));Assert.Equal(before,File.ReadAllBytes(config));
-        WindowsTestHost.Evidence("restart",new{secondLaunchRefused=true,collisionRefused=true,configPreserved=true,checkpointPreserved=true,newHostEpoch=true});
+        Assert.Equal(publication,WindowsTestHost.Hash(Path.Combine(h.DataRoot,"publication","naval-publication.json")));Assert.True(before.SequenceEqual(File.ReadAllBytes(config)),"Restart config bytes changed; contents withheld");
+        WindowsTestHost.Evidence("restart",new{secondLaunchRefused=true,collisionRefused=true,browserEnabledForBothRefusals=true,noBrowserSuppressionOnRefusedLaunches=true,boundedExactUrlObserversPassed=true,configPreserved=true,collisionConfigAndCheckpointPreserved=true,checkpointPreserved=true,newHostEpoch=true});
     }
     [Fact,Trait("Gate","Package")]
     public async Task OnlyIpv4LoopbackListeners()
