@@ -115,6 +115,7 @@ public sealed class WindowsFirstRunUiTests
         {
             if(!observer.HasExited){observer.Kill(true);await observer.WaitForExitAsync();}
             _=await observerError;
+            WindowsTestHost.Evidence("shell-observer-exit-"+observer.Id,new{pid=observer.Id,exited=observer.HasExited,kind="default-association-observer"});
             // Only newly observed processes with our exact nonsecret startup URL.
             foreach(int pid in ownedShell)
             {try{using var p=Process.GetProcessById(pid);p.Kill(true);await p.WaitForExitAsync();WindowsTestHost.Evidence("shell-exit-"+pid,new{pid,exited=p.HasExited,ownership="new exact-loopback-URL process"});}catch(ArgumentException){WindowsTestHost.Evidence("shell-exit-"+pid,new{pid,exited=true,alreadyExited=true});}}

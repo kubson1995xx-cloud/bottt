@@ -210,7 +210,12 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         string script="$s=Get-AuthenticodeSignature -LiteralPath '"+path.Replace("'","''")+"';@{status=$s.Status.ToString();subject=$s.SignerCertificate.Subject;thumbprint=$s.SignerCertificate.Thumbprint}|ConvertTo-Json -Compress";
         var start=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell","v1.0","powershell.exe")){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
         start.ArgumentList.Add("-NoProfile");start.ArgumentList.Add("-EncodedCommand");start.ArgumentList.Add(Convert.ToBase64String(Encoding.Unicode.GetBytes(script)));
-        using var p=Process.Start(start)!;string result=p.StandardOutput.ReadToEnd();_=p.StandardError.ReadToEnd();if(!p.WaitForExit(15000)){p.Kill(true);throw new TimeoutException("OS signature check");}Assert.Equal(0,p.ExitCode);using var doc=JsonDocument.Parse(result);return doc.RootElement.Clone();
+        using var p=Process.Start(start)!;
+        var stdout=p.StandardOutput.ReadToEndAsync();var stderr=p.StandardError.ReadToEndAsync();
+        if(!p.WaitForExit(15000)){p.Kill(true);p.WaitForExit();throw new TimeoutException("OS signature check");}
+        Assert.Equal(0,p.ExitCode);_=stderr.GetAwaiter().GetResult();
+        Evidence("signature-helper-exit-"+p.Id,new{pid=p.Id,exited=p.HasExited,kind="OS Authenticode verification"});
+        using var doc=JsonDocument.Parse(stdout.GetAwaiter().GetResult());return doc.RootElement.Clone();
     }
     internal sealed record Listener(int Pid,string Address,int Port,string Family);
     internal static Listener[] OwnedListeners(int pid)

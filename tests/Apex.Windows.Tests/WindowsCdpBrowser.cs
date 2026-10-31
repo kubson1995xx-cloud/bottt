@@ -41,7 +41,7 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
             await WindowsTestHost.Until(()=>Task.FromResult(File.Exists(portFile)),"Edge DevToolsActivePort not produced");
             string[] lines=File.ReadAllLines(portFile);await b.ws.ConnectAsync(new Uri("ws://127.0.0.1:"+lines[0]+lines[1]),b.stop.Token);
             b.receiving=b.Receive();
-            WindowsTestHost.Evidence("edge-start",new{pid=b.child.Id,installedExecutable=exe,privateProfile=true,debugPortEphemeral=true,headless=false});
+            WindowsTestHost.Evidence("edge-start-"+b.child.Id,new{pid=b.child.Id,installedExecutable=exe,privateProfile=true,debugPortEphemeral=true,headless=false});
             return b;
         }
         catch{await b.DisposeAsync();throw;}
@@ -99,9 +99,9 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
     {
         try{if(ws.State==WebSocketState.Open){OnEvent=null;foreach(var context in contexts)await CommandAsync("Target.disposeBrowserContext",new{browserContextId=context});await CommandAsync("Browser.close",new{});}}catch{}
         stop.Cancel();ws.Dispose();if(receiving!=null)await receiving;
-        bool exited=true;if(child!=null){if(!child.HasExited){child.Kill(true);await child.WaitForExitAsync();}exited=child.HasExited;child.Dispose();}
+        bool exited=true;int? pid=child?.Id;if(child!=null){if(!child.HasExited){child.Kill(true);await child.WaitForExitAsync();}exited=child.HasExited;child.Dispose();}
         if(profile!=null) {for(int i=0;i<30&&Directory.Exists(profile);i++){try{Directory.Delete(profile,true);}catch(IOException){await Task.Delay(100);}catch(UnauthorizedAccessException){await Task.Delay(100);}}Assert.False(Directory.Exists(profile),"Owned Edge profile not deleted");}
-        WindowsTestHost.Evidence("edge-cleanup-"+Guid.NewGuid().ToString("N"),new{ownedProcessExited=exited,profileDeleted=profile==null||!Directory.Exists(profile),contextsDisposed=contexts.Count});
+        WindowsTestHost.Evidence("edge-cleanup-"+Guid.NewGuid().ToString("N"),new{pid,ownedProcessExited=exited,profileDeleted=profile==null||!Directory.Exists(profile),contextsDisposed=contexts.Count});
         stop.Dispose();send.Dispose();
     }
 }
