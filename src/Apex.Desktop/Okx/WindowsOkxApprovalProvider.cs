@@ -15,6 +15,8 @@ namespace Apex.Desktop.Okx;
 // Protected permission only. This provider cannot mint a broker protection/finality profile.
 internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvider,IOkxProtectedBaselineProvider
 {
+    private readonly Func<NavalBrokerObservationBatch?>? baselineSnapshot;
+    internal WindowsOkxApprovalProvider(Func<NavalBrokerObservationBatch?>? baselineSnapshot=null){this.baselineSnapshot=baselineSnapshot;}
     public ValueTask<bool> ConfirmAsync(OkxActivationRequest r,CancellationToken ct)=>new(ConfirmAsync(
         $"{r.Purpose} | {Scope(r.Binding)}\nKonfiguracja {r.Binding.ConfigDigest}\nSesja {r.Session} / generacja {r.Generation}\nWażne do {r.ExpiresUtc:O}. To nie jest START ani dowód ochrony brokera.",ct));
     internal static string Scope(OkxScopeBinding b)=>$"OKX EEA {b.Account.Environment} | UID {b.Account.AccountId} | {b.Account.QuoteCurrency} | zakres {b.ScopeId}";
@@ -74,8 +76,13 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
         }
         finally{foreach(var bytes in fields)CryptographicOperations.ZeroMemory(bytes);}
     }
-    public ValueTask<bool> ApproveAsync(NavalBaselineApprovalRequest r,CancellationToken ct)=>new(ConfirmAsync(
-        $"Baza z uwierzytelnionego odczytu: {r.Account.Environment} / UID {r.Account.AccountId}\nKapitał {r.Cash.ToString(CultureInfo.InvariantCulture)} {r.Quote}\nKatalog {r.CatalogDigest}\nOpłaty {r.FeeDigest}\nDokładny skrót bazy {r.Digest}\nNie tworzy ochrony ani zgody START. Zatwierdź wyłącznie zgodne rzeczywiste obserwacje.",ct));
+    public ValueTask<bool> ApproveAsync(NavalBaselineApprovalRequest r,CancellationToken ct)
+    {
+        var actual=baselineSnapshot?.Invoke();
+        if(actual==null||actual.Connection!=r.Session||actual.Account.Uid!=r.Account.AccountId||actual.CatalogDigest!=r.CatalogDigest||actual.FeeDigest!=r.FeeDigest||actual.Balances.Count!=1||actual.Balances[0].Cash!=r.Cash)return ValueTask.FromResult(false);
+        string text=$"Baza z uwierzytelnionego odczytu: {r.Account.Environment} / UID {r.Account.AccountId}\nKapitał {r.Cash.ToString(CultureInfo.InvariantCulture)} {r.Quote}\nRachunek cash / poziom {actual.Account.Level}; IP {actual.Account.Ip}\nInstrumenty: {string.Join(", ",System.Linq.Enumerable.Select(actual.Catalog,i=>i.Instrument))}\nOpłata wejścia {actual.Fees.EntryRate.ToString(CultureInfo.InvariantCulture)} ({(actual.Fees.EntryInBase?"base":"quote")}), wyjścia {actual.Fees.ExitRate.ToString(CultureInfo.InvariantCulture)} ({(actual.Fees.ExitInBase?"base":"quote")}).\nKatalog {r.CatalogDigest}\nOpłaty {r.FeeDigest}\nDokładny skrót bazy {r.Digest}\nNie tworzy ochrony ani zgody START. Zatwierdź wyłącznie zgodne rzeczywiste obserwacje.";
+        return text.Length>16000?ValueTask.FromResult(false):new(ConfirmAsync(text,ct));
+    }
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]private struct CredUi{internal int Size;internal IntPtr Parent;internal string Message;internal string Caption;internal IntPtr Banner;}
     [DllImport("credui.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern uint CredUIPromptForWindowsCredentialsW(ref CredUi info,uint error,ref uint package,IntPtr input,uint inputSize,out IntPtr output,out uint outputSize,ref bool save,uint flags);
     [DllImport("credui.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern bool CredUnPackAuthenticationBufferW(uint flags,IntPtr buffer,uint size,[Out]char[] user,ref uint userSize,[Out]char[] domain,ref uint domainSize,[Out]char[] password,ref uint passwordSize);

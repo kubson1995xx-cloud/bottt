@@ -131,6 +131,13 @@ internal sealed class WindowsTestHost : IAsyncDisposable
         EnumWindows((h,_)=>{GetWindowThreadProcessId(h,out uint pid);var cls=new StringBuilder(100);GetClassName(h,cls,100);if(pid==Pid&&cls.ToString()=="#32770")modal=true;return true;},IntPtr.Zero);
         Assert.False(modal,"Desktop-local startup displayed a credential modal");
     }
+    internal async Task CancelOkxConfigurationAsync()
+    {
+        IntPtr modal=IntPtr.Zero;
+        await Until(()=>{EnumWindows((w,_)=>{GetWindowThreadProcessId(w,out uint pid);var title=new StringBuilder(256);GetWindowText(w,title,256);if(pid==Pid&&title.ToString()=="APEX — konfiguracja OKX")modal=w;return true;},IntPtr.Zero);return Task.FromResult(modal!=IntPtr.Zero);},"Extracted OKX native configuration form was not observed");
+        SendMessage(modal,0x111,new IntPtr(2),IntPtr.Zero);
+        Evidence("okx-native-cancel",new{nativeFormObserved=true,cancelSent=true,noSecretsEntered=true,noScreenshot=true});
+    }
     internal async Task NativeDialogAsync()
     {
         IntPtr modal=IntPtr.Zero;

@@ -71,12 +71,43 @@ public sealed class WindowsBrowserAcceptanceTests
         WindowsTestHost.Evidence("native-basic-cache",new{challenges,callbackRemovedBeforeReload=true,fetchDisabled=true,fixedRedirect=true,pageInjectedAuthentication=false,cachedReloadRendered=true});
         return sid;
     }
+    private static async Task CheckOkxControls(WindowsCdpBrowser b,WindowsTestHost h,string sid)
+    {
+        await b.Wait(sid,"document.querySelector('#okx-status')?.textContent.includes('Brak konta')===true","Passive OKX controls missing from shipped Naval view");
+        Assert.True((await b.Evaluate(sid,"document.querySelector('#okx-operator').dataset.profile==='false' && document.querySelector('#okx-operator').getBoundingClientRect().height>0")).GetBoolean());
+        byte[] before=File.ReadAllBytes(Path.Combine(h.DataRoot,"apex.config.json"));
+        await b.Evaluate(sid,"document.querySelector('#okx-operator button[data-action=configure]').click()");
+        await h.CancelOkxConfigurationAsync();
+        await b.Wait(sid,"document.querySelector('#okx-result')?.textContent.includes('NATIVE_CANCELLED')===true","Native cancellation did not reach real panel");
+        Assert.Equal(before,File.ReadAllBytes(Path.Combine(h.DataRoot,"apex.config.json")));
+        await CheckDom(b,h,sid,"okx-native-cancel");
+        // Owned nonsecret binding only; no credential envelope and no network authorization.
+        await h.StopAsync();string path=Path.Combine(h.DataRoot,"apex.config.json");var c=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(path))!;
+        c["OkxNaval"]=System.Text.Json.Nodes.JsonNode.Parse("{\"Schema\":\"okx-naval-config-v1\",\"Scopes\":[{\"ScopeId\":\"ui-demo\",\"Environment\":\"OkxDemo\",\"Region\":\"EEA\",\"ExpectedUid\":\"123456\",\"ExpectedMainUid\":\"123456\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential\",\"SafetyVersion\":\"okx-cash-v1\"}]}");
+        File.WriteAllText(path,c.ToJsonString());await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();await b.Reload(sid);
+        await b.Wait(sid,"document.querySelector('#okx-scope')?.value==='ui-demo' && !document.querySelector('#okx-operator button[data-action=start]').disabled","Configured scope not rendered passively");
+        var results=new List<object>();
+        foreach(var(action,expected)in new[]{("connect","LOCAL_ACTION_REFUSED_PRESERVED"),("baseline","CONNECT_REQUIRED"),("arm","CONNECT_REQUIRED"),("start","CONNECT_REQUIRED"),("stop","OPERATOR_STOP"),("emergency","EMERGENCY_STOP_NO_OPEN_OWNER"),("disconnect","DISCONNECTED_STOP")})
+        {
+            await b.Evaluate(sid,"document.querySelector('#okx-result').textContent='';document.querySelector('#okx-operator button[data-action="+action+"]').click()");
+            await b.Wait(sid,"document.querySelector('#okx-result')?.textContent.includes("+J(expected)+")===true","Real OKX control result missing: "+action);
+            results.Add(new{action,code=expected});
+        }
+        var state=await h.Json("/api/naval/okx/status");Assert.False(state.GetProperty("productionProfileApproved").GetBoolean());
+        var account=state.GetProperty("accounts")[0];Assert.False(account.GetProperty("ready").GetBoolean());Assert.Equal("STOP",account.GetProperty("mode").GetString());Assert.Equal(JsonValueKind.Null,account.GetProperty("cash").ValueKind);
+        Assert.False(Directory.Exists(Path.Combine(h.DataRoot,"okx")));await CheckDom(b,h,sid,"okx-controls");
+        await b.Navigate(sid,new Uri(h.Origin,"/").AbsoluteUri);await b.Wait(sid,"document.querySelector('#okx-scope')?.value==='ui-demo'","Controls missing from existing Polish panel");
+        await CheckDom(b,h,sid,"okx-old-panel");await b.Navigate(sid,new Uri(h.Origin,"/naval/").AbsoluteUri);
+        await b.Wait(sid,"document.querySelector('.connection.connected')!==null","Naval view did not resume after old panel");
+        WindowsTestHost.Evidence("okx-panel-controls",new{results,extractedPayload=true,nativeConfigurationCancel=true,configPreservedOnCancel=true,scopeDisplayed=true,passiveStartup=true,noCredentialEnvelope=true,noPrivateConnection=true,productionCreateStillBlocked=true,noSecretsInDom=true,noLogin=true});
+    }
     [Fact,Trait("Gate","Browser")]
     public async Task ProductionBrowserNativeCacheRolesFiveViewsAndOptional3D()
     {
         await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();
         WindowsTestHost.Evidence("privacy-negative-controls",WindowsPrivacyTests.Controls());
         await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"edge"));string sid=await OpenDesktopLocal(b,h);
+        await CheckOkxControls(b,h,sid);
         var snapshot=await h.Json("/api/naval/snapshot");
         using var export=JsonDocument.Parse(File.ReadAllBytes(Path.Combine(h.PackageRoot,"APEX-Desktop","presentation","naval-publication.json")));
         Assert.True(System.Text.Json.Nodes.JsonNode.DeepEquals(System.Text.Json.Nodes.JsonNode.Parse(export.RootElement.GetProperty("publication").GetProperty("journal").GetProperty("checkpoint").GetRawText()),System.Text.Json.Nodes.JsonNode.Parse(snapshot.GetProperty("checkpoint").GetRawText())),"Served checkpoint differs from shipped genuine producer export");

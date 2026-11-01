@@ -49,7 +49,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     internal long ActivityVersion=>Interlocked.Read(ref activityVersion);
     internal OkxStreamObservation[] ReadActivity()=>activity.ToArray();
     internal void AcknowledgeActivity(long sequence){while(activity.TryPeek(out var p)&&p.Sequence<=sequence)activity.TryDequeue(out _);}
-    private bool openingExisting;
+    private bool openingExisting,baselineCreationAttempted;
     private volatile bool connected,disposed;
     private string status="NOT_CONNECTED";
     internal string Status=>status;
@@ -76,8 +76,13 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxObservationReadFence,OkxExecutionObservationClient> reads,
         Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxObservationStreamFence,OkxObservationStream> streams,Func<OkxNavalStore> storeFactory)
     {this.runtime=runtime;this.root=root;this.binding=binding;this.approval=approval;this.clock=clock;readFactory=reads;streamFactory=streams;this.storeFactory=storeFactory;runtime.RegisterAccountService(this,root,binding);}
-    internal static OkxAccountConnectionService Create(OkxNavalRuntime runtime,string root,OkxScopeBinding binding)=>new(runtime,root,binding,new WindowsOkxApprovalProvider(),TimeProvider.System,
-        OkxExecutionObservationClient.Create,OkxObservationStream.Create,()=>OkxNavalStore.OpenNative(root,binding));
+    internal static OkxAccountConnectionService Create(OkxNavalRuntime runtime,string root,OkxScopeBinding binding)
+    {
+        OkxAccountConnectionService? service=null;
+        var provider=new WindowsOkxApprovalProvider(()=>service?.original);
+        service=new(runtime,root,binding,provider,TimeProvider.System,OkxExecutionObservationClient.Create,OkxObservationStream.Create,()=>OkxNavalStore.OpenNative(root,binding));
+        return service;
+    }
     internal static OkxAccountConnectionService ForTests(OkxNavalRuntime runtime,string root,OkxScopeBinding binding,IOkxProtectedBaselineProvider approval,TimeProvider clock,
         Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxObservationReadFence,OkxExecutionObservationClient> reads,
         Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxObservationStreamFence,OkxObservationStream> streams,Func<OkxNavalStore>? storeFactory=null)
@@ -127,7 +132,11 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
             if(File.Exists(Path.Combine(store.DirectoryPath,NavalBrokerValidation.Marker)))
             {session=NavalBrokerSession.OpenExisting(store,brokerBinding,this);status="CONNECTED_STOP";return true;}
             keyScopeDigest=NavalJson.Hash(inspection);
-            candidate=bootstrap.ConsiderBaseline(observations,keyScopeDigest);
+            try{candidate=bootstrap.ConsiderBaseline(observations,keyScopeDigest);}
+            catch(InvalidOperationException e) when(e.Message=="BASELINE_EXPIRED"&&observations.ServerUtc<=UtcNow&&observations.Balances.All(b=>b.SourceUtc<=UtcNow)&&
+                UtcNow>=observations.CaptureUtc&&Timestamp>=observations.CaptureTimestamp&&
+                (UtcNow-observations.CaptureUtc>=TimeSpan.FromSeconds(30)||(decimal)(Timestamp-observations.CaptureTimestamp)/TimestampFrequency>=30))
+            {candidate=null;} // Only old valid captures may wait for the separate fresh-baseline action.
             status="BASELINE_APPROVAL_REQUIRED";return true;
         }
         catch(Exception ex) when(SafeFailure(ex))
@@ -157,18 +166,26 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         connected=false;status="OBSERVATION_GAP";bootstrap?.Revoke();runtime.Activation.Revoke();session?.Disconnect();connection?.Cancel();
     }
     public ValueTask<bool> ApproveAsync(NavalBaselineApprovalRequest request,CancellationToken ct)=>approval.ApproveAsync(request,ct);
-    internal async Task<bool> ApproveAndCreateAsync(CancellationToken cancellation)
+    internal async Task<bool> ApproveAndCreateAsync(CancellationToken cancellation,bool refresh=false)
     {
         await serial.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
-            if(!connected||disposed||bootstrap==null||candidate==null||store==null||session!=null)return false;
+            if(!connected||disposed||bootstrap==null||(!refresh&&candidate==null)||store==null||session!=null||baselineCreationAttempted)return false;
             using var linked=CancellationTokenSource.CreateLinkedTokenSource(cancellation,connection!.Token);
-            var before=stream!.ReadState();var consent=await bootstrap.RequestApprovalAsync(candidate,linked.Token).ConfigureAwait(false);
+            if(refresh)
+            {
+                // New capture/digest, never rewritten old clocks. Existing allocation is never reseeded.
+                bootstrap.Revoke();candidate=null;
+                original=await OkxBrokerObservationMapper.CollectAsync(reads!,context!,binding,clock,stream!.ReadState,linked.Token).ConfigureAwait(false);
+                bootstrap=new(brokerBinding!,this,this);candidate=bootstrap.ConsiderBaseline(original,keyScopeDigest);
+            }
+            var before=stream!.ReadState();var consent=await bootstrap.RequestApprovalAsync(candidate!,linked.Token).ConfigureAwait(false);
             if(consent!=null)await OkxBrokerObservationMapper.VerifyUnchangedAsync(reads!,context!,original!,linked.Token).ConfigureAwait(false);
             var after=stream.ReadState();
             if(consent==null||!connected||before.Epoch!=after.Epoch||before.Sequence!=after.Sequence||after.HasGap)return false;
-            session=bootstrap.InitializeBaseline(candidate,consent,store);
+            baselineCreationAttempted=true;
+            session=bootstrap.InitializeBaseline(candidate!,consent,store);
             if(!connected){session.Dispose();session=null;return false;}
             status="CONNECTED_STOP";candidate=null;return true;
         }

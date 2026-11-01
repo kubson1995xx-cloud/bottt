@@ -52,12 +52,12 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     }
     internal async Task<string> ExecuteAsync(string scope,string action,string commandId,CancellationToken ct)
     {
-        if(!Register(scope,commandId))return "COMMAND_ALREADY_SEEN_OR_LIMIT";
         // STOP/revocation is never queued behind a native dialog, connection or scheduler.
         if(action is "stop" or "emergency" or "disconnect")
         {
             lock(sync){generation++;pending?.Cancel();runtime.Activation.Revoke();}
-            if(entries.TryGetValue(scope,out var existing))
+            bool ownerOpen=entries.TryGetValue(scope,out var existing)&&existing.Account.BrokerSession!=null;
+            if(existing!=null)
             {
                 existing.Account.RevokePermissions();
                 if(action=="emergency")existing.Trading?.EmergencyStop();
@@ -67,8 +67,9 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                     try{await CloseEntry(scope).ConfigureAwait(false);}finally{actionLane.Release();}
                 }
             }
-            return last=action=="emergency"?"EMERGENCY_STOP_LATCHED_CHECK_OBLIGATIONS":action=="disconnect"?"DISCONNECTED_STOP":"OPERATOR_STOP";
+            return last=action=="emergency"?(ownerOpen?"EMERGENCY_STOP_LATCHED_CHECK_OBLIGATIONS":"EMERGENCY_STOP_NO_OPEN_OWNER"):action=="disconnect"?"DISCONNECTED_STOP":"OPERATOR_STOP";
         }
+        if(!Register(scope,commandId))return "COMMAND_ALREADY_SEEN_OR_LIMIT";
         if(!await actionLane.WaitAsync(0,ct).ConfigureAwait(false))return "LOCAL_ACTION_PENDING";
         try
         {
@@ -98,12 +99,13 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
             if(!entries.TryGetValue(scope,out var current))return last="CONNECT_REQUIRED";
             if(action=="baseline")
             {
-                if(!await current.Account.ApproveAndCreateAsync(linked.Token).ConfigureAwait(false))return last="BASELINE_REFUSED_PRESERVED";
+                if(!await current.Account.ApproveAndCreateAsync(linked.Token,refresh:true).ConfigureAwait(false))return last="BASELINE_REFUSED_PRESERVED";
                 StartScheduler(current);return last=current.Account.Status;
             }
             if(current.Trading==null)return last="BASELINE_REQUIRED";
             if(action=="arm")
             {
+                current.Trading.Stop();runtime.Activation.Revoke(); // Replacing/canceling permission never retains an older arm.
                 var request=new OkxActivationRequest(binding,runtime.CredentialFingerprint(binding),current.Account.TradingSessionId,epoch,OkxActivationPurpose.Execute,DateTimeOffset.UtcNow.AddSeconds(120));
                 var permission=await runtime.Activation.RequestAsync(request,linked.Token).ConfigureAwait(false);
                 if(permission==null)return last="EXECUTE_CANCELLED_OR_EXPIRED";
