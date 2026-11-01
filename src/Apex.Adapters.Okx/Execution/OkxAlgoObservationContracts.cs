@@ -297,8 +297,8 @@ public sealed record OkxAlgoObservationCollection
     public DateTimeOffset ReceiveUtc { get; }
     public long RequestMonotonic { get; }
     public long ReceiveMonotonic { get; }
-    public ImmutableArray<OkxExecutionAlgoDto> Rows { get; }
-    public ImmutableArray<OkxAlgoObservationPageTrace> Trace { get; }
+    public IReadOnlyList<OkxExecutionAlgoDto> Rows { get; }
+    public IReadOnlyList<OkxAlgoObservationPageTrace> Trace { get; }
     public ImmutableArray<string> Limitations { get; }
     public string? ErrorCode { get; }
     internal OkxAlgoObservationCollection(OkxObservationCollectionStatus status,OkxExecutionScope requestedScope,OkxObservationAlgoPageQuery query,OkxObservationContext context,DateTimeOffset requestUtc,DateTimeOffset receiveUtc,long requestMonotonic,long receiveMonotonic,ImmutableArray<OkxExecutionAlgoDto> rows,ImmutableArray<OkxAlgoObservationPageTrace> trace,ImmutableArray<string> limitations,string? errorCode)

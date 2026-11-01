@@ -55,6 +55,43 @@ public sealed class OkxSigningMaterial : IDisposable
             request.Headers.Add("OK-ACCESS-SIGN",OkxRequestSigner.Sign(Secret,timestamp,"GET",exactPathAndQuery,ReadOnlySpan<byte>.Empty));
         }
     }
+    // Closed WS login only. Destination is caller-owned and must survive SendAsync completion.
+    // No private immutable JSON strings, growing writer, pool or escaping scratch is used.
+    internal int WriteObservationLogin(Span<byte> destination,string seconds)
+    {
+        Span<byte> preimage=stackalloc byte[64];Span<byte> hash=stackalloc byte[32];Span<byte> signature=stackalloc byte[44];
+        try
+        {
+            if(!Grammar.Match(seconds,"[0-9]{1,12}"))throw new ArgumentException("InvalidLoginTimestamp");
+            lock(sync)
+            {
+                ObjectDisposedException.ThrowIf(disposed,this);
+                int n=Encoding.ASCII.GetBytes(seconds,preimage);"GET/users/self/verify"u8.CopyTo(preimage[n..]);n+="GET/users/self/verify"u8.Length;
+                HMACSHA256.HashData(Secret,preimage[..n],hash);
+                if(System.Buffers.Text.Base64.EncodeToUtf8(hash,signature,out _,out var written)!=System.Buffers.OperationStatus.Done||written!=44)throw new ArgumentException("LoginEncoding");
+                var writer=new LoginWriter(destination);
+                writer.Raw("{\"op\":\"login\",\"args\":[{\"apiKey\":"u8);writer.String(Key);
+                writer.Raw(",\"passphrase\":"u8);writer.String(Passphrase);
+                writer.Raw(",\"timestamp\":\""u8);writer.Raw(preimage[..seconds.Length]);
+                writer.Raw("\",\"sign\":\""u8);writer.Raw(signature);writer.Raw("\"}]}"u8);
+                return writer.Position;
+            }
+        }
+        catch {CryptographicOperations.ZeroMemory(destination);throw;}
+        finally {CryptographicOperations.ZeroMemory(preimage);CryptographicOperations.ZeroMemory(hash);CryptographicOperations.ZeroMemory(signature);}
+    }
+    private ref struct LoginWriter
+    {
+        private readonly Span<byte> buffer;
+        internal LoginWriter(Span<byte> buffer){this.buffer=buffer;Position=0;}
+        internal int Position;
+        internal void Raw(scoped ReadOnlySpan<byte> value)
+        {if(value.Length>buffer.Length-Position)throw new ArgumentException("LoginCapacity");value.CopyTo(buffer[Position..]);Position+=value.Length;}
+        internal void String(ReadOnlySpan<byte> value)
+        {
+            Raw("\""u8);foreach(byte b in value){if(b is (byte)'"' or (byte)'\\')Raw("\\"u8);if(Position==buffer.Length)throw new ArgumentException("LoginCapacity");buffer[Position++]=b;}Raw("\""u8);
+        }
+    }
     public void Dispose() { lock(sync) { if(disposed)return; disposed=true; CryptographicOperations.ZeroMemory(Key); CryptographicOperations.ZeroMemory(Secret); CryptographicOperations.ZeroMemory(Passphrase); } }
     public override string ToString()=>"OKX signing material [REDACTED]";
 }
