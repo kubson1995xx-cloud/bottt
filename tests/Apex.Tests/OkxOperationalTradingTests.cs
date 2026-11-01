@@ -177,6 +177,9 @@ public sealed class OkxOperationalTradingTests
     public async Task Fresh_reconnect_opens_original_nonempty_account_allocation_then_reconciles_without_reseed_or_resend()
     {
         await using var f=new OperationalPeer();using var peer=new TradingPeer(f);
+        // This fixture's consumer is System UTC. A separate origin+Stopwatch UTC can
+        // run ahead of coarse Windows UTC; future server/book timestamps correctly refuse.
+        f.Clock.UseSystemUtc=true;
         // Both generations use real clocks: process-lifetime per-account quotas cannot be
         // reset by switching from the older peer's artificially advanced clock to System.
         var waits=new System.Collections.Concurrent.ConcurrentQueue<object>();
@@ -217,7 +220,7 @@ public sealed class OkxOperationalTradingTests
         {
             var quoteMap=(System.Collections.Generic.Dictionary<string,NavalBrokerQuote>)typeof(OkxOperationalTradingService).GetField("quotes",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(loop)!;
             var now=DateTimeOffset.UtcNow;var state=initial.BrokerSession!.ReadState();
-            return System.Text.Json.JsonSerializer.Serialize(new{phase,result.Code,result.Status,utc=now,peerUtc=f.Clock.GetUtcNow(),snapshot=initial.Coordinator!.Snapshot().Reason,
+            return System.Text.Json.JsonSerializer.Serialize(new{phase,result.Code,result.Status,utc=now,peerUtc=f.Clock.GetUtcNow(),snapshot=initial.Coordinator!.Snapshot().Reason,lastBookSource=peer.LastBookSourceUtc,lastBookFuture=peer.LastBookSourceUtc>now,
                 obligations=state.NavalBroker!.Operational?.Obligations,caught,waits=waits.TakeLast(12).ToArray(),quotes=quoteMap.Values.Select(q=>new{q.SourceUtc,q.ReceivedUtc,sourceAfterReceipt=q.SourceUtc>q.ReceivedUtc,ageMilliseconds=(now-q.SourceUtc).TotalMilliseconds}),reads=f.Paths.Count,posts=peer.Posts});
         }
         var initialReconcile=await loop.ReconcileAsync(default);Assert.True(initialReconcile.Status==NavalMutationStatus.Applied,Predicate("initial-reconcile",initialReconcile));

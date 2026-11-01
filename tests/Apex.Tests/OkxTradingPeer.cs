@@ -15,6 +15,7 @@ namespace Apex.Tests;
 // Independent synthetic public feed and strict signed mutation peer, never venue data.
 internal sealed class TradingPeer(OperationalPeer owner) : HttpMessageHandler
 {
+    internal DateTimeOffset? LastBookSourceUtc;
     internal int Posts;
     internal bool SawDispatching;
     internal decimal Size;
@@ -66,7 +67,8 @@ internal sealed class TradingPeer(OperationalPeer owner) : HttpMessageHandler
             return Reply(JsonSerializer.Serialize(new{code="0",msg="",data=rows}));
         }
         Assert.Equal("/api/v5/market/books",path);
-        return Reply("{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"asks\":[[\"110\",\"100\",\"0\",\"1\"]],\"bids\":[[\"109.99\",\"100\",\"0\",\"1\"]],\"ts\":\""+owner.Clock.GetUtcNow().ToUnixTimeMilliseconds()+"\",\"seqId\":1}]}");
+        LastBookSourceUtc=DateTimeOffset.FromUnixTimeMilliseconds(owner.Clock.GetUtcNow().ToUnixTimeMilliseconds());
+        return Reply("{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"asks\":[[\"110\",\"100\",\"0\",\"1\"]],\"bids\":[[\"109.99\",\"100\",\"0\",\"1\"]],\"ts\":\""+LastBookSourceUtc.Value.ToUnixTimeMilliseconds()+"\",\"seqId\":1}]}");
     }
     private static HttpResponseMessage Reply(string body)=>new(HttpStatusCode.OK){Content=new StringContent(body,Encoding.UTF8,"application/json")};
 }

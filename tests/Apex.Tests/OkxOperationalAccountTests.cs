@@ -282,7 +282,8 @@ internal sealed class OperationalClock : TimeProvider
     private readonly DateTimeOffset origin=DateTimeOffset.UtcNow;
     private readonly global::System.Diagnostics.Stopwatch elapsed=global::System.Diagnostics.Stopwatch.StartNew();
     private long wallOffset,monoOffset;
-    public override DateTimeOffset GetUtcNow()=>origin+elapsed.Elapsed+TimeSpan.FromTicks(Interlocked.Read(ref wallOffset));
+    internal bool UseSystemUtc;
+    public override DateTimeOffset GetUtcNow()=>UseSystemUtc?DateTimeOffset.UtcNow:origin+elapsed.Elapsed+TimeSpan.FromTicks(Interlocked.Read(ref wallOffset));
     public override long GetTimestamp()=>elapsed.Elapsed.Ticks+Interlocked.Read(ref monoOffset);
     public override long TimestampFrequency=>TimeSpan.TicksPerSecond;
     internal void Advance(TimeSpan t,bool wall=true,bool monotonic=true){if(wall)Interlocked.Add(ref wallOffset,t.Ticks);if(monotonic)Interlocked.Add(ref monoOffset,t.Ticks);}
