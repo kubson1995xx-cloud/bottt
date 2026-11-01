@@ -24,3 +24,4 @@
 
 ## Checkpoints
 - ENTRY: repository/base verified; no product edits or tests yet. Next unmet gate: source/authentication diagnosis and endpoint oracle.
+- Commit `735ff1c`: native behavioral RED fixture and source/binary retention lane. Push readback pending after next lane correction. Dispatch of new workflow returned GitHub HTTP404 (not registered on default branch); no CI executed. Corrected by adding isolated modes to existing authorized Windows workflow. Next gate remains genuine native RED; no product change yet.
