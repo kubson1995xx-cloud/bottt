@@ -73,6 +73,7 @@ public sealed class WindowsUiRepairTests
                 var layout=await b.Evaluate(sid,"(()=>{let p=document.querySelector('#okx-operator').getBoundingClientRect(),r=document.querySelector('.rail').getBoundingClientRect();return {horizontalOverflow:document.documentElement.scrollWidth>innerWidth,overlap:Math.min(p.right,r.right)>Math.max(p.left,r.left)&&Math.min(p.bottom,r.bottom)>Math.max(p.top,r.top),slot:document.querySelector('#okx-operator').parentElement.id,globalReadOnly:document.body.textContent.includes('READ-ONLY APPLICATION')};})()");
                 records.Add(new{viewport,layout});Assert.False(layout.GetProperty("overlap").GetBoolean());Assert.False(layout.GetProperty("horizontalOverflow").GetBoolean());Assert.False(layout.GetProperty("globalReadOnly").GetBoolean());
                 await Screenshot(b,sid,viewport+"-operator");
+                await Click(b,sid,"[data-action=configure]");var form=await WindowsNativeUi.Metadata(h.Pid);records.Add(new{viewport,action="configure",native=WindowsNativeUi.Observe(form,h.Pid)});WindowsNativeUi.ScreenshotMetadata(form,viewport+"-native-configure");WindowsNativeUi.Cancel(form);await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('NATIVE_CANCELLED')","Constrained native Cancel did not return");await b.CommandAsync("Page.bringToFront",new{},sid);
                 await Click(b,sid,"#okx-scope");await Key(b,sid,"ArrowDown",40);await Key(b,sid,"Enter",13);
                 await b.Wait(sid,"document.querySelector('#okx-scope').value==='ui-demo-two'","Pointer/keyboard scope selection failed");records.Add(new{viewport,control="okx-scope",result="ui-demo-two; selection only, no connect"});
                 await Click(b,sid,"#okx-scope");await Key(b,sid,"ArrowUp",38);await Key(b,sid,"Enter",13);
@@ -94,9 +95,9 @@ public sealed class WindowsUiRepairTests
                     // Enumerate every currently present view control. Pure test locator attributes,
                     // no event handlers/state/globals injected; every action uses CDP input.
                     var controls=await b.Evaluate(sid,"Array.from(document.querySelectorAll('main button,main summary,main [role=button]')).map((e,i)=>{e.setAttribute('data-ui-probe',String(i));return {id:i,label:(e.getAttribute('aria-label')||e.textContent).trim(),disabled:!!e.disabled};})");
-                    foreach(var item in controls.EnumerateArray()){
+                    foreach(var item in controls.EnumerateArray().Reverse()){
                         string selector="[data-ui-probe='"+item.GetProperty("id").GetInt32()+"']";
-                        if(!(await b.Evaluate(sid,"document.querySelector("+J(selector)+")!==null")).GetBoolean()){records.Add(new{viewport,route,item,result="removed by prior legitimate selection"});continue;}
+                        Assert.True((await b.Evaluate(sid,"document.querySelector("+J(selector)+")!==null")).GetBoolean(),"Inventory control lost before its pointer action: "+route+" "+item.GetProperty("label").GetString());
                         var hit=await Hit(b,sid,selector);if(hit.GetProperty("width").GetDouble()==0||hit.GetProperty("height").GetDouble()==0){records.Add(new{viewport,route,item,result="not rendered (optional capability / closed details)"});continue;}
                         Assert.True(hit.GetProperty("hit").GetBoolean(),"View control occluded: "+route+" "+item.GetProperty("label").GetString());await Pointer(b,sid,hit);await Task.Delay(40);
                         var after=await b.Evaluate(sid,"(()=>{let e=document.querySelector("+J(selector)+");return {pressed:e?.getAttribute('aria-pressed'),disabled:!!e?.disabled,detailsOpen:e?.parentElement?.open??null};})()");records.Add(new{viewport,route,item,hit,after});
@@ -110,6 +111,10 @@ public sealed class WindowsUiRepairTests
                     }
                     await b.Wait(sid,"document.querySelector('.connection.connected')!==null","Resync did not recover");
                 }
+                await Click(b,sid,".source-foot summary");records.Add(new{viewport,navigation="source provenance disclosure",result="pointer toggled"});
+                var operatorNav=await Hit(b,sid,".rail-bottom button");records.Add(new{viewport,navigation="Naval to OKX",hit=operatorNav});await Screenshot(b,sid,viewport+"-operator-navigation-hit");Assert.True(operatorNav.GetProperty("hit").GetBoolean(),"OKX return navigation must remain pointer reachable at constrained width/height");await Pointer(b,sid,operatorNav);
+                await b.Wait(sid,"document.activeElement?.id==='okx-operator'","OKX navigation did not focus panel");await Click(b,sid,"#okx-operator nav button");await b.Wait(sid,"document.activeElement?.id==='main'","OKX back to current Naval view failed");
+                await Click(b,sid,"#okx-operator details>summary");await Click(b,sid,"#okx-operator details>summary");records.Add(new{viewport,navigation="OKX collapse/expand and return Naval",result="pointer PASS"});
                 await b.Reload(sid);await b.Wait(sid,"document.querySelector('#okx-operator-slot #okx-operator')!==null && document.querySelector('.connection.connected')!==null","Reload broke integration");
                 await Click(b,sid,"#okx-operator nav a[href='/']");await b.Wait(sid,"document.querySelector('.app')!==null && document.querySelector('#okx-operator')!==null","Old panel link failed");await Screenshot(b,sid,viewport+"-old-panel");
                 await Click(b,sid,"#okx-operator nav a[href='/naval/']");await b.Wait(sid,"document.querySelector('.naval-app')!==null","Return Naval failed");records.Add(new{viewport,navigation="old-panel-and-back; reload",result="PASS"});
