@@ -15,8 +15,7 @@ internal sealed partial class OkxOperationalTradingService
         foreach(var item in activity)
         {
             if(item.MessageDigest!=null)evidence.Add(new("WS:"+item.Channel,"",item.MessageDigest,item.Orders.Length+item.Algos.Length,item.ReceiveUtc,item.ReceiveUtc,item.ReceiveMonotonic,item.ReceiveMonotonic));
-            if(item.Orders.Any(o=>!x.Intents.Any(i=>i.Instrument==o.InstId&&i.ClientId==o.ClOrdId&&(i.Outcome?.OrderId==null||i.Outcome.OrderId==o.OrdId))))problems.Add("FOREIGN_STREAM_ORDER:"+item.MessageDigest);
-            if(item.Algos.Any(a=>!x.IdAllocations.SelectMany(v=>v.Ids).Any(id=>id.ClientId==a.Algo.AlgoClOrdId)))problems.Add("FOREIGN_STREAM_ALGO:"+item.MessageDigest);
+
         }
         var fills=new List<OkxExecutionFillDto>();var bills=new List<OkxExecutionBillDto>();var orders=new List<OkxExecutionOrderDto>();var algos=new List<NavalBrokerProtection>();
         var pager=new OkxObservationPager(reads);var begin=DateTimeOffset.FromUnixTimeMilliseconds(b.Baseline.Observations.CaptureUtc.ToUnixTimeMilliseconds());
@@ -67,9 +66,16 @@ internal sealed partial class OkxOperationalTradingService
             if(child.ResponseDigest!=null)evidence.Add(Surface(child));
         }
         uniqueOrders=orders.GroupBy(o=>(o.InstId,o.OrdId)).Select(g=>g.Last()).ToArray();
+        bool OwnedOrder(string instrument,string clientId,string orderId)=>x.Intents.Any(i=>i.Operation==NavalExecutionOperation.Submit&&i.Instrument==instrument&&i.ClientId==clientId&&i.DispatchRevision!=null&&(i.Outcome?.OrderId==null||i.Outcome.OrderId==orderId))||
+            algos.Concat(x.Protection).Any(p=>p.Instrument==instrument&&p.ChildOrderIds.Contains(orderId));
         foreach(var o in uniqueOrders)
-            if(!x.Intents.Any(i=>i.Operation==NavalExecutionOperation.Submit&&i.Instrument==o.InstId&&i.ClientId==o.ClOrdId&&i.DispatchRevision!=null&&(i.Outcome?.OrderId==null||i.Outcome.OrderId==o.OrdId))&&
-                !algos.Concat(x.Protection).Any(p=>p.Instrument==o.InstId&&p.ChildOrderIds.Contains(o.OrdId)))problems.Add("FOREIGN_ORDER:"+o.PayloadDigest);
+            if(!OwnedOrder(o.InstId,o.ClOrdId,o.OrdId))problems.Add("FOREIGN_ORDER:"+o.PayloadDigest);
+        // Stream and REST orders share the same exact ancestry, resolved above before classification.
+        foreach(var item in activity)
+        {
+            if(item.Orders.Any(o=>!OwnedOrder(o.InstId,o.ClOrdId,o.OrdId)))problems.Add("FOREIGN_STREAM_ORDER:"+item.MessageDigest);
+            if(item.Algos.Any(a=>!algos.Concat(x.Protection).Any(p=>p.Instrument==a.Algo.InstId&&p.AlgoId==a.Algo.AlgoId&&p.AttachmentClientId==a.Algo.AlgoClOrdId)))problems.Add("FOREIGN_STREAM_ALGO:"+item.MessageDigest);
+        }
         // Account-wide pending algo surfaces retain foreign commitments; no truncation of normal catalog.
         foreach(var filter in new[]{OkxAlgoOrderFilter.ConditionalAndOco,OkxAlgoOrderFilter.Trigger,OkxAlgoOrderFilter.TrailingStop})
         {

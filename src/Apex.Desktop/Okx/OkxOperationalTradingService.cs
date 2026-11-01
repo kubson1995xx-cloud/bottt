@@ -76,9 +76,15 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
         {
             if(!CanExecute||protection==null)return Refuse(protection==null?"PRODUCTION_PROTECTION_PROFILE_UNAPPROVED":"EXECUTE_ARMING_REQUIRED");
             var state=session.ReadState();var baseline=state.NavalBroker!.Baseline;var definition=NavalBrokerValidation.Definition(baseline);
-            var spec=definition.Catalog.Single(i=>i.Instrument==instrument);var btcSpec=definition.Catalog.Single(i=>i.BaseCurrency=="BTC");
-            var series=await feed.ReadSeriesAsync(spec,ct).ConfigureAwait(false);var btc=spec==btcSpec?series:await feed.ReadSeriesAsync(btcSpec,ct).ConfigureAwait(false);
+            var spec=definition.Catalog.Single(i=>i.Instrument==instrument);
+            var series=await feed.ReadSeriesAsync(spec,ct).ConfigureAwait(false);
             var cutoff=new DateTimeOffset(clock.GetUtcNow().UtcDateTime.Date,TimeSpan.Zero);var hasLong=state.Naval!.Reservations.Any(r=>r.Fleet==fleet&&r.Intent.Instrument==instrument&&r.Inventory>0);
+            NavalSeries? btc=null;
+            if(!hasLong)
+            {
+                var btcSpec=definition.Catalog.Single(i=>i.BaseCurrency=="BTC");
+                btc=spec==btcSpec?series:await feed.ReadSeriesAsync(btcSpec,ct).ConfigureAwait(false);
+            }
             var request=new NavalEvaluationRequest(fleet,series,btc,cutoff,hasLong);var decision=new NavalD1Evaluator().Evaluate(request);
             if(decision.Action==NavalAction.ExitSignal)
             {

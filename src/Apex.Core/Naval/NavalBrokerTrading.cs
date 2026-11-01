@@ -131,7 +131,7 @@ public sealed partial class NavalPortfolioCoordinator
             if(!ReferenceEquals(session,_brokerSession))return Result(s,NavalMutationStatus.Refused,"BROKER_SESSION_MISMATCH");
             if(i.Outcome!=null)return Result(s,NavalMutationStatus.Duplicate,"BROKER_OUTCOME_DUPLICATE");
             bool ack=outcome.Disposition==NavalDispatchDisposition.Acknowledged&&outcome.OriginalClientId==i.ClientId&&outcome.OrderId!=null&&outcome.Code=="0"&&outcome.SCode=="0";
-            var stage=ack?NavalExecutionStage.Accepted:outcome.Disposition==NavalDispatchDisposition.NotSent&&i.Stage==NavalExecutionStage.Prepared?NavalExecutionStage.NotSent:NavalExecutionStage.SubmitUnknown;
+            var stage=ack?NavalExecutionStage.Accepted:outcome.Disposition==NavalDispatchDisposition.NotSent&&i.Stage is NavalExecutionStage.Prepared or NavalExecutionStage.Dispatching?NavalExecutionStage.NotSent:NavalExecutionStage.SubmitUnknown;
             e.NavalBroker=b with{Operational=x with{Intents=x.Intents.Select(p=>p.Id==id?i with{Stage=stage,Outcome=outcome}:p).ToArray()}};
             if(stage==NavalExecutionStage.SubmitUnknown){e.Naval=s with{Reservations=s.Reservations.Select(r=>r.Id==i.ReservationId?r with{Stage=NavalReservationStage.Uncertain}:r).ToArray()};return StopCandidate(e,"BROKER_SUBMIT_UNKNOWN");}
             return Commit(e,s,NavalMutationStatus.Applied,"BROKER_OUTCOME",Maintenance(),i.ReservationId);

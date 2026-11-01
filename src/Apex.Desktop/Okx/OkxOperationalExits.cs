@@ -52,7 +52,7 @@ internal sealed partial class OkxOperationalTradingService
         var x=state.NavalBroker!.Operational!;
         if(x.Intents.Any(i=>i.ReservationId==r.Id&&i.Reduction))return Refuse("ORIGINAL_EXIT_ALREADY_PREPARED_NO_RETRY");
         var requested=session.RequestExit(reservationId);if(requested.Status==NavalMutationStatus.Refused)return requested;
-        foreach(var p in x.Protection.Where(p=>p.Instrument==r.Intent.Instrument).GroupBy(p=>p.AlgoId).Select(g=>g.Last()).Where(p=>p.State=="live"))
+        foreach(var p in NavalBrokerProtectionOwnership.Competing(state,r).Where(p=>p.State=="live"&&NavalBrokerProtectionOwnership.Reservation(x,p)==r.Id))
         {
             var cancel=OkxPreparedRequest.CancelProtection(account.ExecutionScope!,p.Instrument,p.AlgoId,p.AttachmentClientId,Deadline());
             var result=await DispatchMutation("cancel-protection-"+p.AlgoId,r.Id,cancel,false,ct).ConfigureAwait(false);
@@ -60,7 +60,7 @@ internal sealed partial class OkxOperationalTradingService
         }
         // Cancellation ACK is never used as cancellation, inventory or fee proof.
         await CollectEconomicsAsync(ct).ConfigureAwait(false);state=session.ReadState();x=state.NavalBroker!.Operational!;r=state.Naval!.Reservations.Single(r=>r.Id==reservationId);
-        if(x.Obligations.Any(o=>!o.StartsWith("PROTECTION_GAP:",StringComparison.Ordinal))||x.Protection.Where(p=>p.Instrument==r.Intent.Instrument).GroupBy(p=>p.AlgoId).Any(g=>g.Last().State!="canceled"))return Refuse("EXIT_COMPETING_OR_UNKNOWN_OBLIGATIONS");
+        if(x.Obligations.Any(o=>!o.StartsWith("PROTECTION_GAP:",StringComparison.Ordinal))||NavalBrokerProtectionOwnership.Competing(state,r).Any(p=>p.State!="canceled"))return Refuse("EXIT_COMPETING_OR_UNKNOWN_OBLIGATIONS");
         var definition=NavalBrokerValidation.Definition(state.NavalBroker.Baseline);var spec=definition.Catalog.Single(i=>i.Instrument==r.Intent.Instrument);var quote=await feed.ReadQuoteAsync(spec,ct).ConfigureAwait(false);
         decimal quantity=decimal.Floor(r.Inventory/(definition.Fees.ExitInBase?1+definition.Fees.ExitRate:1)/spec.Quantum)*spec.Quantum;
         if(quantity<spec.MinimumQuantity)return Refuse("OWNED_DUST_RETAINED");
