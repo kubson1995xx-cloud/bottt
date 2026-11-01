@@ -6,9 +6,12 @@ namespace Apex.Windows.Tests;
 internal static class WindowsNativeUi
 {
     internal static async Task<IntPtr> Metadata(int pid)
+        =>await Window(pid,"APEX — konfiguracja OKX");
+    internal static bool Masked(IntPtr w,int id)=>(GetWindowLongPtrW(GetDlgItem(w,id),-16).ToInt64()&0x20)!=0;
+    internal static async Task<IntPtr> Window(int pid,string title)
     {
         IntPtr found=IntPtr.Zero;
-        await WindowsTestHost.Until(()=>{EnumWindows((w,_)=>{GetWindowThreadProcessId(w,out uint p);var t=new StringBuilder(256);GetWindowText(w,t,t.Capacity);if(p==pid&&t.ToString()=="APEX — konfiguracja OKX"&&IsWindowVisible(w))found=w;return true;},IntPtr.Zero);return Task.FromResult(found!=IntPtr.Zero);},"Visible native metadata form not found");
+        await WindowsTestHost.Until(()=>{EnumWindows((w,_)=>{GetWindowThreadProcessId(w,out uint p);var t=new StringBuilder(256);GetWindowText(w,t,t.Capacity);if(p==pid&&t.ToString()==title&&IsWindowVisible(w))found=w;return true;},IntPtr.Zero);return Task.FromResult(found!=IntPtr.Zero);},"Visible expected native form not found");
         return found;
     }
     internal static void Click(IntPtr w,int id)
@@ -45,6 +48,7 @@ internal static class WindowsNativeUi
     [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr w);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr w);
     [DllImport("user32.dll")] private static extern IntPtr GetDlgItem(IntPtr w,int id);
+    [DllImport("user32.dll",ExactSpelling=true)] private static extern IntPtr GetWindowLongPtrW(IntPtr w,int index);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr w,out Rect r);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr w);

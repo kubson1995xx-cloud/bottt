@@ -11,7 +11,7 @@ $prior=Join-Path $env:RUNNER_TEMP 'ui-reuse-prior'
 if ($LASTEXITCODE -ne 0) {throw 'Pinned prior extraction failed'}
 & (Join-Path $prior 'Sprawdz-Pakiet.ps1') -Pakiet $prior
 $os=Get-CimInstance Win32_OperatingSystem
-@{sourceCommit=(& git -C $repo rev-parse HEAD);sourceDirty=[bool](& git -C $repo status --porcelain);os=$os.Caption;osVersion=$os.Version;mode='ui-only-fresh-runtime-unchanged-engine-reuse'}|ConvertTo-Json|Set-Content (Join-Path $e 'identity.json') -Encoding UTF8
+@{sourceCommit=(& git -C $repo rev-parse HEAD);sourceDirty=[bool](& git -C $repo status --porcelain);os=$os.Caption;osVersion=$os.Version;mode='okx-enrollment-read-test-fresh-runtime-unchanged-engine-reuse'}|ConvertTo-Json|Set-Content (Join-Path $e 'identity.json') -Encoding UTF8
 $output=Join-Path $env:RUNNER_TEMP 'APEX-NAVAL-COMMAND-Windows-x64'
 & (Join-Path $PSScriptRoot 'Zbuduj-APEX.ps1') -Target win-x64 -Wyjscie $output -UiOnlyReuseRoot $prior
 $dotnet=(Get-Command dotnet).Source
@@ -24,12 +24,15 @@ Copy-Item (Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0/*') $run
 $failed=$false
 Push-Location $sdk
 try {
- foreach ($gate in @('UiRepair','UiInventory','UiUpgrade','UiNavigation')) {
+ Copy-Item (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') (Join-Path $e 'unit-runtime') -Recurse
+ & $dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --no-restore --filter 'FullyQualifiedName~OkxEnrollmentBoundaryTests|FullyQualifiedName~OkxDemoBalanceTests|FullyQualifiedName~OkxNativeWaitTests|FullyQualifiedName~OkxNativeCredentialTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxControlTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests' --logger 'trx;LogFileName=enrollment-read.trx' --results-directory $e
+ if ($LASTEXITCODE -ne 0) {$failed=$true}
+ foreach ($gate in @('EnrollmentSource','UiRepair','UiInventory','UiUpgrade','UiNavigation','EnrollmentOriginal')) {
   & $dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$gate+'.trx') --results-directory $e
   if ($LASTEXITCODE -ne 0) {$failed=$true}
  }
 }finally {Pop-Location}
 & (Join-Path $PSScriptRoot 'Smoke-Windows.ps1') -Pakiet ($output+'-extracted') -Evidence ($output+'-smoke-evidence')
 & (Join-Path ($output+'-extracted') 'Sprawdz-Pakiet.ps1') -Pakiet ($output+'-extracted')
-@{status=$(if($failed){'FAIL'}else{'PASS'});sourceCommit=(& git -C $repo rev-parse HEAD);zipSha256=(Get-FileHash ($output+'.zip') -Algorithm SHA256).Hash.ToLowerInvariant();exeSha256=(Get-FileHash (Join-Path ($output+'-extracted') 'APEX-Desktop/ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant();uiRepair=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'UiRepair.trx')}else{$null});uiInventory=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'UiInventory.trx')}else{$null});securePositiveVerified=$false;privateBrokerTested=$false;engineSuites='REUSED: identical source inputs, original TRX retained, not rerun'}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $e 'summary.json') -Encoding UTF8
+@{status=$(if($failed){'FAIL'}else{'PASS'});sourceCommit=(& git -C $repo rev-parse HEAD);zipSha256=(Get-FileHash ($output+'.zip') -Algorithm SHA256).Hash.ToLowerInvariant();exeSha256=(Get-FileHash (Join-Path ($output+'-extracted') 'APEX-Desktop/ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant();uiRepair=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'UiRepair.trx')}else{$null});uiInventory=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'UiInventory.trx')}else{$null});enrollmentRead=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'enrollment-read.trx')}else{$null});nativeSecretStore=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'EnrollmentSource.trx')}else{$null});protectedBoundary=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'EnrollmentOriginal.trx')}else{$null});securePositiveVerified=$false;privateBrokerTested=$false;engineSuites='REUSED: identical source inputs, original TRX retained, not rerun'}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $e 'summary.json') -Encoding UTF8
 if ($failed) {throw 'Actual extracted pointer/native UI gate failed; retain candidate and exact evidence'}

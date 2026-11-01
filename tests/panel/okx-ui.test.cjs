@@ -13,6 +13,7 @@ function setup(handler,naval=true){
  return {document,calls,timers,poll:()=>interval?.(),click:action=>document.querySelector('[data-action='+action+']').dispatchEvent(new window.Event('click'))};
 }
 const tick=()=>new Promise(setImmediate);
+test('explicit read-only DEMO test and saved-state diagnosis are separate from connect and START',async()=>{const p=setup(()=>ok());await tick();assert.ok(p.document.querySelector('[data-action=test-demo]'));assert.ok(p.document.querySelector('[data-action=diagnose]'));assert.ok(p.document.querySelector('#okx-enrollment-stage'));});
 const ok=(accounts=[])=>({ok:true,status:200,json:async()=>({accounts,productionProfileApproved:false,nativeAvailable:true})});
 test('legacy grid/sidebar remains intact; controls mount inside original main',async()=>{const p=setup(()=>ok(),false);await tick();assert.equal(p.document.querySelector('#okx-operator').parentElement.className,'main');assert.equal(p.document.querySelector('.app').firstElementChild.className,'sidebar');});
 test('operator mounts only into deliberate Naval slot, not over body/rail',async()=>{const p=setup(()=>ok());await tick();assert.equal(p.document.querySelector('#okx-operator').parentElement.id,'okx-operator-slot');assert.notEqual(p.document.querySelector('#okx-operator').className,'card');});

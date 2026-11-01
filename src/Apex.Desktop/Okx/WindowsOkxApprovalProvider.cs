@@ -12,6 +12,10 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Apex.Desktop.Okx;
 
+internal sealed record OkxWindowsApproval(bool Accepted,string Code,uint? NativeCode=null)
+{
+    internal string SafeCode=>Code+(NativeCode.HasValue?"_WIN32_"+NativeCode.Value.ToString(CultureInfo.InvariantCulture):"");
+}
 // Protected permission only. This provider cannot mint a broker protection/finality profile.
 internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvider,IOkxProtectedBaselineProvider
 {
@@ -27,59 +31,62 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
             $"{r.Purpose} | {Scope(r.Binding)}\nKonfiguracja {r.Binding.ConfigDigest}\nSesja {r.Session} / generacja {r.Generation}\nWażne do {r.ExpiresUtc:O}. To nie jest START ani dowód ochrony brokera.\nExecute zezwala na wykonanie strategii po osobnym START oraz jawne redukcje. TP/SL po fill może zawieść; po anulowaniu i nieudanej/Unknown sprzedaży może pozostać niechroniona reszta bez limitu czasu. STOP nie likwiduje. LIVE wymaga tej osobnej zgody dla dokładnego rachunku/sesji.",ct));
     }
     internal static string Scope(OkxScopeBinding b)=>$"OKX EEA {b.Account.Environment} | UID {b.Account.AccountId} | {b.Account.QuoteCurrency} | zakres {b.ScopeId}";
-    internal static Task<bool> ConfirmAsync(string message,CancellationToken ct)
+    internal static async Task<bool> ConfirmAsync(string message,CancellationToken ct)=>(await ConfirmDetailedAsync(message,ct).ConfigureAwait(false)).Accepted;
+    internal static Task<OkxWindowsApproval> ConfirmDetailedAsync(string message,CancellationToken ct)
     {
-        if(!OperatingSystem.IsWindows()||!Environment.UserInteractive||ct.IsCancellationRequested)return Task.FromResult(false);
-        return RunConfirmationAsync(()=>Confirm(message,ct),ct);
+        if(ct.IsCancellationRequested)return Task.FromResult(new OkxWindowsApproval(false,"APPROVAL_CANCELLED"));
+        if(!OperatingSystem.IsWindows()||!Environment.UserInteractive)return Task.FromResult(new OkxWindowsApproval(false,"APPROVAL_INTERACTIVE_WINDOWS_REQUIRED"));
+        return RunApprovalAsync(()=>Confirm(message,ct),ct);
     }
-    // Per-call native operation seam; production always supplies the secure Windows provider above.
+    // One process-wide OS modal. Cancellation revokes the waiting action, NOT the
+    // native operation's ownership. Late positive results can never grant permission.
     private static int nativePending;
-    internal static Task<bool> RunConfirmationAsync(Func<bool> native,CancellationToken ct)
+    internal static async Task<bool> RunConfirmationAsync(Func<bool> native,CancellationToken ct)=>
+        (await RunApprovalAsync(()=>new(native(),"APPROVAL_TEST_ADAPTER"),ct).ConfigureAwait(false)).Accepted;
+    internal static async Task<OkxWindowsApproval> RunApprovalAsync(Func<OkxWindowsApproval> native,CancellationToken ct,TimeSpan? timeout=null)
     {
-        if(ct.IsCancellationRequested||Interlocked.CompareExchange(ref nativePending,1,0)!=0)return Task.FromResult(false);
-        var tcs=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if(ct.IsCancellationRequested)return new(false,"APPROVAL_CANCELLED");
+        if(Interlocked.CompareExchange(ref nativePending,1,0)!=0)return new(false,"APPROVAL_NATIVE_PENDING_DISMISS_PREVIOUS");
+        var tcs=new TaskCompletionSource<OkxWindowsApproval>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread=new Thread(()=>
         {
-            bool accepted=false;
-            try{accepted=native();}catch(Exception e) when(e is not OutOfMemoryException){}
-            finally{Interlocked.Exchange(ref nativePending,0);tcs.TrySetResult(accepted&&!ct.IsCancellationRequested);}
+            OkxWindowsApproval result=new(false,"APPROVAL_NATIVE_EXCEPTION");
+            try{result=native();}catch(Exception e) when(e is not OutOfMemoryException){}
+            finally{Interlocked.Exchange(ref nativePending,0);tcs.TrySetResult(ct.IsCancellationRequested?new(false,"APPROVAL_CANCELLED"):result);}
         });
         try{if(OperatingSystem.IsWindows())thread.SetApartmentState(ApartmentState.STA);thread.IsBackground=true;thread.Start();}
-        catch{Interlocked.Exchange(ref nativePending,0);return Task.FromResult(false);}
-        return WaitBounded(tcs.Task,ct);
+        catch(Exception e) when(e is not OutOfMemoryException){Interlocked.Exchange(ref nativePending,0);return new(false,"APPROVAL_THREAD_UNAVAILABLE");}
+        try{var result=await tcs.Task.WaitAsync(timeout??TimeSpan.FromSeconds(120),ct).ConfigureAwait(false);return ct.IsCancellationRequested?new(false,"APPROVAL_CANCELLED"):result;}
+        catch(OperationCanceledException){return new(false,"APPROVAL_CANCELLED");}
+        catch(TimeoutException){return new(false,"APPROVAL_TIMEOUT_DISMISS_WINDOWS_PROMPT");}
     }
-    private static async Task<bool> WaitBounded(Task<bool> result,CancellationToken ct)
+    private static OkxWindowsApproval Confirm(string message,CancellationToken ct)
     {
-        // Cancellation/time expiry revoke the permission immediately; the OS secure modal may
-        // still require dismissal. Keep nativePending until its own thread really completes.
-        try{return await result.WaitAsync(TimeSpan.FromSeconds(120),ct).ConfigureAwait(false)&&!ct.IsCancellationRequested;}
-        catch(Exception e) when(e is OperationCanceledException or TimeoutException){return false;}
-    }
-    private static bool Confirm(string message,CancellationToken ct)
-    {
-        if(!OperatingSystem.IsWindows())return false;
+        if(!OperatingSystem.IsWindows())return new(false,"APPROVAL_INTERACTIVE_WINDOWS_REQUIRED");
         var info=new CredUi{Size=Marshal.SizeOf<CredUi>(),Caption="APEX — chroniona zgoda OKX",Message=message};
         uint package=0;bool save=false;IntPtr packed=IntPtr.Zero;uint packedSize=0;long start=Environment.TickCount64;
         var user=new char[514];var domain=new char[257];var password=new char[257];
         GCHandle u=default,d=default,p=default;
         try
         {
-            // CREDUIWIN_SECURE_PROMPT | ENUMERATE_CURRENT_USER. Never save/copy a Windows password.
-            if(CredUIPromptForWindowsCredentialsW(ref info,0,ref package,IntPtr.Zero,0,out packed,out packedSize,ref save,0x1200)!=0||ct.IsCancellationRequested||Environment.TickCount64-start>=120000)return false;
+            // Preserve SECURE_PROMPT | ENUMERATE_CURRENT_USER and same-SID/session
+            // verification. No generic prompt, cached approval or DEMO bypass.
+            uint code=CredUIPromptForWindowsCredentialsW(ref info,0,ref package,IntPtr.Zero,0,out packed,out packedSize,ref save,0x1200);
+            if(code!=0)return new(false,code==1223?"APPROVAL_USER_CANCELLED":"APPROVAL_PROMPT_OS_ERROR",code);
+            if(ct.IsCancellationRequested)return new(false,"APPROVAL_CANCELLED");
+            if(Environment.TickCount64-start>=120000)return new(false,"APPROVAL_EXPIRED");
             uint us=(uint)user.Length,ds=(uint)domain.Length,ps=(uint)password.Length;
-            if(!CredUnPackAuthenticationBufferW(0,packed,packedSize,user,ref us,domain,ref ds,password,ref ps))return false;
+            if(!CredUnPackAuthenticationBufferW(0,packed,packedSize,user,ref us,domain,ref ds,password,ref ps))return new(false,"APPROVAL_UNPACK_UNSUPPORTED_METHOD",(uint)Marshal.GetLastWin32Error());
             u=GCHandle.Alloc(user,GCHandleType.Pinned);d=GCHandle.Alloc(domain,GCHandleType.Pinned);p=GCHandle.Alloc(password,GCHandleType.Pinned);
-            if(!LogonUserW(u.AddrOfPinnedObject(),d.AddrOfPinnedObject(),p.AddrOfPinnedObject(),2,0,out var token))return false;
+            if(!LogonUserW(u.AddrOfPinnedObject(),d.AddrOfPinnedObject(),p.AddrOfPinnedObject(),2,0,out var token))return new(false,"APPROVAL_AUTHENTICATION_REFUSED",(uint)Marshal.GetLastWin32Error());
             using(token)
             using(var identity=new WindowsIdentity(token.DangerousGetHandle()))
             using(var current=WindowsIdentity.GetCurrent())
             {
-                // Interactive credential logon tokens are assigned session zero until attached.
-                // Compare the host's live interactive session independently, and deny session zero.
                 int hostSession=Process.GetCurrentProcess().SessionId;
-                return identity.User!=null&&identity.User==current.User&&hostSession!=0&&
-                    ProcessIdToSessionId((uint)Environment.ProcessId,out uint actual)&&actual==hostSession&&
-                    !ct.IsCancellationRequested&&Environment.TickCount64-start<120000;
+                if(identity.User==null||identity.User!=current.User)return new(false,"APPROVAL_SAME_USER_REQUIRED");
+                if(hostSession==0||!ProcessIdToSessionId((uint)Environment.ProcessId,out uint actual)||actual!=hostSession)return new(false,"APPROVAL_INTERACTIVE_SESSION_REQUIRED");
+                return ct.IsCancellationRequested?new(false,"APPROVAL_CANCELLED"):Environment.TickCount64-start>=120000?new(false,"APPROVAL_EXPIRED"):new(true,"APPROVAL_VERIFIED");
             }
         }
         finally
@@ -113,7 +120,7 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
     }
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]private struct CredUi{internal int Size;internal IntPtr Parent;internal string Message;internal string Caption;internal IntPtr Banner;}
     [DllImport("credui.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern uint CredUIPromptForWindowsCredentialsW(ref CredUi info,uint error,ref uint package,IntPtr input,uint inputSize,out IntPtr output,out uint outputSize,ref bool save,uint flags);
-    [DllImport("credui.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern bool CredUnPackAuthenticationBufferW(uint flags,IntPtr buffer,uint size,[Out]char[] user,ref uint userSize,[Out]char[] domain,ref uint domainSize,[Out]char[] password,ref uint passwordSize);
+    [DllImport("credui.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)]private static extern bool CredUnPackAuthenticationBufferW(uint flags,IntPtr buffer,uint size,[Out]char[] user,ref uint userSize,[Out]char[] domain,ref uint domainSize,[Out]char[] password,ref uint passwordSize);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)]private static extern bool LogonUserW(IntPtr user,IntPtr domain,IntPtr password,int type,int provider,out SafeAccessTokenHandle token);
     [DllImport("kernel32.dll")]private static extern bool ProcessIdToSessionId(uint pid,out uint session);
 }

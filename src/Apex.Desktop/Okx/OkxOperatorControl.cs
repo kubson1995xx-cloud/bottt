@@ -24,6 +24,8 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     private CancellationTokenSource? pending;
     private long generation;
     private string last="NOT_CONNECTED";
+    private string enrollmentStage="NOT_STARTED";
+    private readonly ConcurrentDictionary<string,OkxDemoBalanceObservation> demoReads=new(StringComparer.Ordinal);
     private bool disposed;
     private sealed class Entry(OkxAccountConnectionService account)
     {
@@ -34,7 +36,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     }
     internal OkxOperatorControl(OkxNavalRuntime runtime,ConfigStore config){this.runtime=runtime;this.config=config;}
     internal object ReadStatus()=>new {mode=entries.Values.Any(e=>e.Trading?.ReadStatus().Mode=="RUNNING")?"RUNNING":"STOP",productionProfileApproved=entries.Values.Any(e=>e.Trading?.ReadStatus().ProductionProfileApproved==true),productionBlocker=entries.Count==0?ProductionBlocker:null,conditionalPolicyAvailable=true,
-        nativeAvailable=OperatingSystem.IsWindows()&&Environment.UserInteractive,lastResult=last,
+        nativeAvailable=OperatingSystem.IsWindows()&&Environment.UserInteractive,lastResult=last,enrollmentStage,unboundStoreState=WindowsOkxProvisioning.PassiveUnboundState(config),
         requirements=new[]{"Dedykowany cash SPOT ≤1x, bez pożyczek, feeType=1 (opłaty wyłącznie w quote)","FOK z żądanym TP i SL; ochrona warunkowa po fill, możliwy brak ochrony i niechroniona reszta po anulowaniu", "Osobne uzbrojenie i START; STOP nie oznacza sprzedaży", "Katalog prywatny, świeże referencje USD/USDT do limitów; prywatny test DEMO pozostaje lokalnym działaniem użytkownika"},
         accounts=runtime.Bindings.Select(b=>
         {
@@ -43,8 +45,9 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 connected=entry?.Account.IsConnected??false,mode=trading?.Mode??"STOP",code=trading?.Code??entry?.Account.Status??"NOT_CONNECTED",
                 armed=trading?.Armed??false,ready=trading?.Ready??false,revision=trading?.Revision,
                 cash=trading?.Cash.ToString(CultureInfo.InvariantCulture),held=trading?.Held.ToString(CultureInfo.InvariantCulture),
-                obligations=trading?.Obligations,inventory=trading?.Inventory,conditionalPolicy=trading?.ProductionProfileApproved??false,obligationsKnown=trading!=null,observations=entry?.Account.ReadAccountStatus()};
+                obligations=trading?.Obligations,inventory=trading?.Inventory,conditionalPolicy=trading?.ProductionProfileApproved??false,obligationsKnown=trading!=null,observations=entry?.Account.ReadAccountStatus(),keyState=WindowsOkxProvisioning.PassiveKeyState(config.DataDir,b),demoRead=demoReads.TryGetValue(b.ScopeId,out var read)?read:null};
         }).ToArray()};
+    internal bool IsDemo(string scope)=>runtime.Bindings.Any(b=>b.ScopeId==scope&&b.Account.Environment==Apex.Core.Naval.NavalEnvironment.OkxDemo);
     internal bool Known(string scope)=>runtime.Bindings.Any(b=>b.ScopeId==scope);
     private bool Register(string scope,string id)
     {
@@ -78,11 +81,30 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
             if(action=="configure")
             {
                 if(entries.Values.Any(e=>e.Account.IsConnected))return last="DISCONNECT_BEFORE_CONFIGURATION";
-                var added=await WindowsOkxProvisioning.CreateAsync(config,linked.Token).ConfigureAwait(false);
-                if(added==null)return last="NATIVE_CANCELLED";
-                runtime.AddProvisionedBinding(added);return last="CONFIGURED_STOP_NOT_CONNECTED";
+                var added=await WindowsOkxProvisioning.CreateAsync(config,linked.Token,s=>enrollmentStage=s).ConfigureAwait(false);
+                enrollmentStage=added.Code;
+                if(added.Binding==null)return last=added.Code;
+                runtime.AddProvisionedBinding(added.Binding);
+                if(!runtime.VerifySavedCredential(added.Binding))return last=enrollmentStage="RUNTIME_KEY_READBACK_REFUSED_PRESERVED";
+                return last=enrollmentStage="SAVED_KEY_CONFIG_RUNTIME_VERIFIED_STOP_NOT_CONNECTED";
             }
             var binding=runtime.Bindings.Single(b=>b.ScopeId==scope);
+            if(action=="diagnose")
+            {
+                string state=WindowsOkxProvisioning.PassiveKeyState(config.DataDir,binding);
+                if(state!="CIPHERTEXT_PRESENT_NOT_VERIFIED")return last=state;
+                return last=WindowsOkxProvisioning.SavedBindingMatches(config,binding)&&runtime.VerifySavedCredential(binding)?"SAVED_KEY_CONFIG_RUNTIME_VERIFIED":"SAVED_BINDING_REFUSED_PRESERVED";
+            }
+            if(action=="test-demo")
+            {
+                if(binding.Account.Environment!=Apex.Core.Naval.NavalEnvironment.OkxDemo)return last="DEMO_TEST_LIVE_DENIED";
+                if(entries.Values.Any(e=>e.Account.IsConnected||e.Trading!=null))return last="DEMO_TEST_DISCONNECT_FIRST";
+                demoReads.TryRemove(scope,out _);
+                if(!WindowsOkxProvisioning.SavedBindingMatches(config,binding))return last="DEMO_TEST_CONFIG_BINDING_MISMATCH";
+                var observation=await OkxDemoBalanceTest.RunAsync(binding,()=>runtime.OpenDemoReadCredential(binding),linked.Token).ConfigureAwait(false);
+                lock(sync){if(generation!=epoch||linked.IsCancellationRequested)return last="DEMO_TEST_CANCELLED";demoReads[scope]=observation;}
+                return last=observation.Code;
+            }
             if(action=="connect")
             {
                 if(entries.Values.Any(e=>e.Account.IsConnected))return last="DISCONNECT_BEFORE_ACCOUNT_CHANGE";

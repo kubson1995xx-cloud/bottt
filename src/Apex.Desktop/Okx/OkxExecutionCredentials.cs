@@ -26,6 +26,12 @@ internal sealed class OkxExecutionCredentialLease : IDisposable
     internal ReadOnlySpan<byte> Passphrase { get { ThrowDisposed(); return passphrase; } }
     internal Apex.Adapters.Okx.Execution.OkxSigningMaterial OpenSigningMaterial(Apex.Adapters.Okx.Execution.OkxExecutionScope scope)
     {ThrowDisposed();return new(scope,Provenance,key,secret,passphrase);}
+    internal Apex.Adapters.Okx.OkxDemoCredentialLease OpenDemoReadMaterial()
+    {
+        ThrowDisposed();
+        if(Binding.Account.Environment!=NavalEnvironment.OkxDemo||Provenance!="DemoTradingApi")throw new InvalidOperationException("DEMO_CREDENTIAL_REQUIRED");
+        return Apex.Adapters.Okx.OkxDemoCredentialLease.FromSecretStore(Binding.CredentialBindingId,Encoding.UTF8.GetString(key),secret,Encoding.UTF8.GetString(passphrase));
+    }
     internal OkxExecutionCredentialLease(OkxScopeBinding binding, string provenance, byte[] key, byte[] secret, byte[] passphrase)
     {
         this.key = key; this.secret = secret; this.passphrase = passphrase;

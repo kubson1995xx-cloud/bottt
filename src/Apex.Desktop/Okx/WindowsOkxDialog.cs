@@ -10,19 +10,25 @@ using System.Threading.Tasks;
 namespace Apex.Desktop.Okx;
 
 internal sealed record OkxNativeField(string Label, bool Secret=false, string Initial="");
+internal sealed record OkxNativeForm(byte[][]? Values,string Code);
 // Native local-only inputs. No clipboard, browser, child-process arguments or plaintext files.
 internal static class WindowsOkxDialog
 {
-    internal static Task<byte[][]?> ShowAsync(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct,Func<byte[][],string?>? validate=null)
+    internal static async Task<byte[][]?> ShowAsync(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct,Func<byte[][],string?>? validate=null)=>
+        (await ShowDetailedAsync(title,explanation,fields,ct,validate).ConfigureAwait(false)).Values;
+    internal static Task<OkxNativeForm> ShowDetailedAsync(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct,Func<byte[][],string?>? validate=null)
     {
-        if(!OperatingSystem.IsWindows()||!Environment.UserInteractive||ct.IsCancellationRequested)return Task.FromResult<byte[][]?>(null);
-        var completion=new TaskCompletionSource<byte[][]?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread=new Thread(()=>{try{completion.SetResult(Show(title,explanation,fields,ct,validate));}catch(Exception e) when(e is not OutOfMemoryException){completion.SetResult(null);}});
-        thread.SetApartmentState(ApartmentState.STA);thread.IsBackground=true;thread.Start();return completion.Task;
+        if(ct.IsCancellationRequested)return Task.FromResult(new OkxNativeForm(null,"CANCELLED"));
+        if(!OperatingSystem.IsWindows()||!Environment.UserInteractive)return Task.FromResult(new OkxNativeForm(null,"INTERACTIVE_WINDOWS_REQUIRED"));
+        var completion=new TaskCompletionSource<OkxNativeForm>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread=new Thread(()=>{try{completion.SetResult(Show(title,explanation,fields,ct,validate));}catch(Exception e) when(e is not OutOfMemoryException){completion.SetResult(new(null,"NATIVE_EXCEPTION"));}});
+        try{thread.SetApartmentState(ApartmentState.STA);thread.IsBackground=true;thread.Start();}
+        catch(Exception e) when(e is not OutOfMemoryException){completion.TrySetResult(new(null,"THREAD_UNAVAILABLE"));}
+        return completion.Task;
     }
-    private static byte[][]? Show(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct,Func<byte[][],string?>? validate)
+    private static OkxNativeForm Show(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct,Func<byte[][],string?>? validate)
     {
-        if(!OperatingSystem.IsWindows())return null;
+        if(!OperatingSystem.IsWindows())return new(null,"INTERACTIVE_WINDOWS_REQUIRED");
         if(fields.Count>12)throw new ArgumentException("NATIVE_FIELD_LIMIT");
         using var memory=new MemoryStream();using var w=new BinaryWriter(memory,Encoding.Unicode,true);
         int height=100+fields.Count*28;
@@ -67,7 +73,7 @@ internal static class WindowsOkxDialog
             }
             return IntPtr.Zero;
         };
-        try{var code=DialogBoxIndirectParamW(GetModuleHandleW(null),pin.AddrOfPinnedObject(),IntPtr.Zero,callback,IntPtr.Zero);if(code!=new IntPtr(1)){if(result!=null)foreach(var bytes in result)CryptographicOperations.ZeroMemory(bytes);return null;}return result;}
+        try{var code=DialogBoxIndirectParamW(GetModuleHandleW(null),pin.AddrOfPinnedObject(),IntPtr.Zero,callback,IntPtr.Zero);int native=code==new IntPtr(-1)?Marshal.GetLastWin32Error():0;if(code!=new IntPtr(1)||ct.IsCancellationRequested){if(result!=null)foreach(var bytes in result)CryptographicOperations.ZeroMemory(bytes);return new(null,code==new IntPtr(-1)?"OS_ERROR_WIN32_"+native.ToString(System.Globalization.CultureInfo.InvariantCulture):ct.IsCancellationRequested?"CANCELLED":Environment.TickCount64>=until?"TIMEOUT":"USER_CANCELLED");}return new(result,"ACCEPTED");}
         finally{pin.Free();GC.KeepAlive(callback);}
     }
     private static void Text(BinaryWriter w,string value){foreach(char c in value)w.Write((ushort)c);w.Write((ushort)0);}
@@ -76,7 +82,7 @@ internal static class WindowsOkxDialog
         while(w.BaseStream.Position%4!=0)w.Write((byte)0);w.Write(style);w.Write(0u);w.Write((short)x);w.Write((short)y);w.Write((short)width);w.Write((short)height);w.Write((ushort)id);w.Write((ushort)0xffff);w.Write(cls);Text(w,title);w.Write((ushort)0);
     }
     private delegate IntPtr DialogProc(IntPtr w,uint msg,IntPtr a,IntPtr b);
-    [DllImport("user32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern IntPtr DialogBoxIndirectParamW(IntPtr module,IntPtr template,IntPtr parent,DialogProc callback,IntPtr parameter);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)]private static extern IntPtr DialogBoxIndirectParamW(IntPtr module,IntPtr template,IntPtr parent,DialogProc callback,IntPtr parameter);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern IntPtr GetModuleHandleW(string? name);
     [DllImport("user32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern int GetDlgItemTextW(IntPtr w,int id,[Out]char[] text,int count);
     [DllImport("user32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern bool SetDlgItemTextW(IntPtr w,int id,string text);

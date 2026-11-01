@@ -2,6 +2,20 @@
 
 **Windows desktop-local — bez ręcznego logowania. Kandydat oczekuje niezależnego odbioru.** Wymagane są testy dokładnego EXE: pierwszy start, aktualizacja poprzedniego profilu, przeglądarka bez podawania poświadczeń i restart. Sprawdź osobne wyniki dla dokładnego SHA źródeł i ZIP-a. Hosted Windows Server nie jest fizycznym Windows 11 Pro użytkownika.
 
+## Klucze OKX i test salda DEMO — bez START
+
+1. **Dodaj konto**: „APEX — konfiguracja OKX” ma tylko cztery pola metadanych. Ich zatwierdzenie **nie zapisuje konta ani klucza**.
+2. Następne okno to **„APEX — chroniona zgoda OKX” na chronionym pulpicie Windows**. Wpisujesz hasło tego samego użytkownika **Windows**, nie hasło OKX. Nie wpisuj go w przeglądarce. Windows Hello/PIN/karta nie mają potwierdzonej obsługiwanej ścieżki; nie obniżaj polityk ani nie zastępuj zgody kliknięciem „Tak”.
+3. Dopiero po tej zgodzie otwiera się **„APEX — lokalny klucz OKX”**: trzy maskowane pola **API Key**, **Secret Key**, **Passphrase**. Wpisz je ręcznie lokalnie, nie używaj czatu, URL, argumentów, logów, screenshotów ani plików tekstowych. Dane muszą pochodzić z wybranego środowiska.
+4. Sukces pełnego zapisu ma kod `SAVED_KEY_CONFIG_RUNTIME_VERIFIED_STOP_NOT_CONNECTED`: odczytano ponownie CurrentUser DPAPI, dokładną konfigurację i binding runtime. **Sprawdź zapis klucza lokalnie (bez sieci)** ponawia tylko lokalny odczyt i pokazuje `SAVED_KEY_CONFIG_RUNTIME_VERIFIED`. Po restarcie sprawdź ponownie, zanim użyjesz sieci.
+5. `METADATA_ONLY_NO_KEY` = jest konfiguracja, brak katalogu klucza; `CIPHERTEXT_PRESENT_NOT_VERIFIED` = plik istnieje, jeszcze bez weryfikacji DPAPI; `INCOMPLETE_STORE_PRESERVED` / `UNBOUND_OR_PARTIAL_STORE_PRESERVED` / kod `PRESERVED` = niepełny lub niepowiązany stan, bez automatycznej naprawy. **Nie usuwaj danych i nie nadpisuj/reseeduj.** Nie wysyłaj prywatnych plików do diagnozy.
+6. `APPROVAL_TIMEOUT_DISMISS_WINDOWS_PROMPT` to timeout, **nie anulowanie**. Zamknij poprzednie okno Windows. `APPROVAL_USER_CANCELLED` oznacza anulowanie, `AUTHENTICATION_REFUSED` odmowę hasła, `UNPACK_UNSUPPORTED_METHOD` nieobsługiwaną metodę, `PROMPT_OS_ERROR_WIN32_N` błąd natywnego API. Zachowaj tylko etap i kod liczbowy. Panel pokazuje oczekiwane następne okno; brak błędu nie oznacza zapisu.
+7. Wybierz **DEMO**, pozostań rozłączony/STOP i kliknij **Test połączenia DEMO / odczytaj saldo — tylko odczyt**. Test jest jednorazowy, maksymalnie 35 s, nie uruchamia się po zapisie ani starcie programu. **STOP** anuluje oczekiwanie. Nie używaj Observe, bazy, Execute ani START do samego testu.
+8. Czytnik wymaga istniejącej ścisłej polityki `read_only` **bez Trade**, przypisanego IP i bezpiecznego cash SPOT. Klucz z Trade jest bezpiecznie odrzucany (`UnsafeAccountConfig`); test nie zmienia jego uprawnień ani nie nadpisuje go. To nie dopuszczenie klucza do handlu. Dla już zapisanego klucza handlowego nie usuwaj go w celu przejścia tego testu.
+9. `DEMO_TEST_OBSERVED_READ_ONLY_STOP` pokazuje uwierzytelniony UID, `OkxDemo`, walutę, **Cash**, **Available** i czas obserwacji w `demoRead`. Brak waluty/kwoty jest jawnie nieznany, nigdy wymyślone zero. To **obserwacja, nie P&L, baza kapitału ani gotowość do handlu**. Błędy publicznego czasu, prywatnego auth i bindingu UID mają osobne kody. LIVE i niezgodne credentials są blokowane bez prywatnych wysyłek.
+
+**Granica odbioru:** hosted Windows pozwala sprawdzić prawdziwy natywny formularz i DPAPI oraz timeout chronionej zgody. Nie dowodzi pomyślnego wpisania własnych poświadczeń Windows na chronionym pulpicie, pełnego enrollment na Twoim Windows11 ani rzeczywistego prywatnego OKX DEMO. Te trzy dodatnie kryteria pozostają lokalnym odbiorem użytkownika, bez przekazywania sekretów i bez jakiejkolwiek transakcji. Nie traktuj metadanych/Cancel jako ich zaliczenia.
+
 ## START po poprawce interfejsu OKX / Naval
 
 - Zatrzymaj starą instancję świadomie, zachowując prywatne dane. Rozpakuj **cały nowy ZIP do nowego folderu** i uruchom nowe `APEX-Desktop\ApexDesktop.exe`, nie stary skrót. Nie kasuj `%LOCALAPPDATA%\APEX Trading AI`.

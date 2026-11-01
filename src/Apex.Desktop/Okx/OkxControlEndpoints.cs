@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Http;
 namespace Apex.Desktop.Okx;
 internal static class OkxControlEndpoints
 {
-    private static readonly string[] Actions={"connect","disconnect","baseline","arm","start","stop","emergency","recover"};
+    private static readonly string[] Actions={"connect","disconnect","baseline","arm","start","stop","emergency","recover","diagnose","test-demo"};
     internal static bool IsPath(string? path)
     {
         if(path is "/api/naval/okx/status" or "/api/naval/okx/configure")return true;
@@ -42,6 +42,7 @@ internal static class OkxControlEndpoints
             }
             catch(Exception e) when(e is JsonException or InvalidDataException){return Results.BadRequest(new{code="CLOSED_COMMAND_REQUIRED"});}
             if(action!="configure"&&!control.Known(scope))return Results.NotFound(new{code="SCOPE_NOT_CONFIGURED"});
+            if(action=="test-demo"&&!control.IsDemo(scope))return Results.Json(new{code="DEMO_TEST_LIVE_DENIED"});
             string code=await control.ExecuteAsync(scope,action,id,ctx.RequestAborted,reservation).ConfigureAwait(false);
             return Results.Json(new{code,conditionalPolicyAvailable=true});
         }

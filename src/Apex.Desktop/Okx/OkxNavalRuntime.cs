@@ -62,6 +62,25 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
             Bindings=Array.AsReadOnly(Bindings.Append(binding).ToArray());Activation.Revoke();
         }
     }
+    internal OkxExecutionCredentialLease OpenDemoReadCredential(OkxScopeBinding binding)
+    {
+        lock(sync)
+        {
+            if(disposed||binding.Account.Environment!=Apex.Core.Naval.NavalEnvironment.OkxDemo||!Bindings.Contains(binding))throw new InvalidOperationException("DEMO_SCOPE_REQUIRED");
+            var credential=secrets.Value.Open(binding,OkxConfiguration.Paths(dataRoot,binding));
+            if(credential.Binding==binding&&credential.Provenance=="DemoTradingApi"&&credentialUses.TryBind(binding,credential.Fingerprint))return credential;
+            credential.Dispose();throw new InvalidOperationException("DEMO_CREDENTIAL_MISMATCH");
+        }
+    }
+    internal bool VerifySavedCredential(OkxScopeBinding binding)
+    {
+        lock(sync)
+        {
+            if(disposed||!Bindings.Contains(binding))return false;
+            using var credential=secrets.Value.Open(binding,OkxConfiguration.Paths(dataRoot,binding));
+            return credential.Binding==binding&&credential.Provenance==(binding.Account.Environment==Apex.Core.Naval.NavalEnvironment.OkxDemo?"DemoTradingApi":"LiveAccountApi");
+        }
+    }
     internal string CredentialFingerprint(OkxScopeBinding binding)
     {
         lock(sync)
