@@ -26,7 +26,7 @@ public sealed class OkxNativeControlTests
         }
         Assert.True(seen,"Production action must open the native form; an unavailable provider is not delivery.");
         using var response=await send;Assert.Equal(HttpStatusCode.OK,response.StatusCode);
-        Assert.Contains("NATIVE_CANCELLED",await response.Content.ReadAsStringAsync());
+        Assert.Contains("METADATA_USER_CANCELLED",await response.Content.ReadAsStringAsync());
         Assert.Equal(before,System.IO.File.ReadAllText(System.IO.Path.Combine(h.DirectoryPath,"apex.config.json")));
     }
     private delegate bool Callback(IntPtr w,IntPtr p);

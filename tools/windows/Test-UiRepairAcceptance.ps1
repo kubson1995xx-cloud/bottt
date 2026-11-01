@@ -36,11 +36,19 @@ try {
  if ($LASTEXITCODE -ne 0) {throw 'Test-only build failed'}
  $closure=Join-Path $e 'test-runtime';New-Item -ItemType Directory -Path $closure|Out-Null
  Copy-Item (Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0/*') $closure -Recurse
- foreach ($gate in @('UiRepair','UiInventory','UiUpgrade','UiNavigation')) {
+ & $dotnet build (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release -p:NuGetAudit=false
+ if ($LASTEXITCODE -ne 0) {throw 'Enrollment test build failed'}
+ Copy-Item (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') (Join-Path $e 'unit-runtime') -Recurse
+ $files=@(& git -C $repo ls-files|Where-Object{$_ -match '^(src/|tests/|tools/|frontend/|\.github/)'}|ForEach-Object{$f=Join-Path $repo $_;@{path=$_;sha256=(Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant()}})
+ $files|ConvertTo-Json -Depth 5|Set-Content (Join-Path $e 'test-inputs.json') -Encoding UTF8
+ & $dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --no-restore --filter 'FullyQualifiedName~OkxEnrollmentBoundaryTests|FullyQualifiedName~OkxDemoBalanceTests|FullyQualifiedName~OkxNativeWaitTests|FullyQualifiedName~OkxNativeControlTests|FullyQualifiedName~OkxNativeCredentialTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxControlTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests' --logger 'trx;LogFileName=enrollment-read.trx' --results-directory $e
+ if ($LASTEXITCODE -ne 0) {$failed=$true}
+ foreach ($gate in @('EnrollmentSource','Browser','UiRepair','UiInventory','UiUpgrade','UiNavigation','EnrollmentOriginal')) {
   & $dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$gate+'.trx') --results-directory $e
   if ($LASTEXITCODE -ne 0) {$failed=$true}
  }
 }finally {Pop-Location}
 & (Join-Path $package 'Sprawdz-Pakiet.ps1') -Pakiet $package
+& (Join-Path $PSScriptRoot 'Smoke-Windows.ps1') -Pakiet $package -Evidence (Join-Path $e 'smoke')
 @{status=$(if($failed){'FAIL'}else{'PASS'});productCommit=$meta.sourceCommit;testCommit=(& git -C $repo rev-parse HEAD);zipSha256=$ZipSha256;securePositiveVerified=$false;privateBrokerTested=$false;runtimeRebuilt=$false}|ConvertTo-Json|Set-Content (Join-Path $e 'summary.json') -Encoding UTF8
 if ($failed) {throw 'Actual candidate acceptance failed; see individual TRX'}

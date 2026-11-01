@@ -78,7 +78,7 @@ public sealed class WindowsBrowserAcceptanceTests
         byte[] before=File.ReadAllBytes(Path.Combine(h.DataRoot,"apex.config.json"));
         await b.Evaluate(sid,"document.querySelector('#okx-operator button[data-action=configure]').click()");
         await h.CancelOkxConfigurationAsync();
-        await b.Wait(sid,"document.querySelector('#okx-result')?.textContent.includes('NATIVE_CANCELLED')===true","Native cancellation did not reach real panel");
+        await b.Wait(sid,"document.querySelector('#okx-result')?.textContent.includes('METADATA_USER_CANCELLED')===true","Native cancellation did not reach real panel");
         Assert.Equal(before,File.ReadAllBytes(Path.Combine(h.DataRoot,"apex.config.json")));
         await CheckDom(b,h,sid,"okx-native-cancel");
         // Owned nonsecret binding only; no credential envelope and no network authorization.
