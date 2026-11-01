@@ -29,7 +29,7 @@ public sealed class WindowsUiRepairTests
     }
     private static async Task Key(WindowsCdpBrowser b,string sid,string key,int code)
     {
-        await b.CommandAsync("Input.dispatchKeyEvent",new{type="keyDown",key,code=key,windowsVirtualKeyCode=code},sid);await b.CommandAsync("Input.dispatchKeyEvent",new{type="keyUp",key,code=key,windowsVirtualKeyCode=code},sid);
+        await b.CommandAsync("Input.dispatchKeyEvent",new{type="keyDown",key,code=key,windowsVirtualKeyCode=code,nativeVirtualKeyCode=code,text=key=="Enter"?"\r":""},sid);await b.CommandAsync("Input.dispatchKeyEvent",new{type="keyUp",key,code=key,windowsVirtualKeyCode=code,nativeVirtualKeyCode=code},sid);
     }
     private static object Diagnostics(WindowsCdpBrowser b,string sid)=>new{
         exceptions=b.Events.Count(e=>e.Session==sid&&e.Method=="Runtime.exceptionThrown"),
@@ -63,7 +63,7 @@ public sealed class WindowsUiRepairTests
         try{
             // Owned nonsecret metadata fixture ONLY: zero key envelope, private connection or trade.
             await h.StopAsync();string config=Path.Combine(h.DataRoot,"apex.config.json");var c=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(config))!;
-            c["OkxNaval"]=System.Text.Json.Nodes.JsonNode.Parse("{\"Schema\":\"okx-naval-config-v1\",\"Scopes\":[{\"ScopeId\":\"ui-demo\",\"Environment\":\"OkxDemo\",\"Region\":\"EEA\",\"ExpectedUid\":\"123456\",\"ExpectedMainUid\":\"123456\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential\",\"SafetyVersion\":\"okx-cash-v1\"},{\"ScopeId\":\"ui-demo-two\",\"Environment\":\"OkxDemo\",\"Region\":\"EEA\",\"ExpectedUid\":\"234567\",\"ExpectedMainUid\":\"234567\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential-two\",\"SafetyVersion\":\"okx-cash-v1\"}]}");
+            c["OkxNaval"]=System.Text.Json.Nodes.JsonNode.Parse("{\"Schema\":\"okx-naval-config-v1\",\"Scopes\":[{\"ScopeId\":\"ui-demo\",\"Environment\":\"OkxDemo\",\"Region\":\"EEA\",\"ExpectedUid\":\"123456\",\"ExpectedMainUid\":\"123456\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential\",\"SafetyVersion\":\"okx-cash-v1\"},{\"ScopeId\":\"ui-demo-two\",\"Environment\":\"Live\",\"Region\":\"EEA\",\"ExpectedUid\":\"234567\",\"ExpectedMainUid\":\"234567\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential-two\",\"SafetyVersion\":\"okx-cash-v1\"}]}");
             File.WriteAllText(config,c.ToJsonString());await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();
             foreach(var (width,height,scale) in new[]{(1440,900,1d),(900,650,1.25d),(640,800,1.25d)}){
                 string viewport=width+"x"+height;
@@ -76,6 +76,7 @@ public sealed class WindowsUiRepairTests
                 await Click(b,sid,"#okx-scope");await Key(b,sid,"ArrowDown",40);await Key(b,sid,"Enter",13);
                 await b.Wait(sid,"document.querySelector('#okx-scope').value==='ui-demo-two'","Pointer/keyboard scope selection failed");records.Add(new{viewport,control="okx-scope",result="ui-demo-two; selection only, no connect"});
                 await Click(b,sid,"#okx-scope");await Key(b,sid,"ArrowUp",38);await Key(b,sid,"Enter",13);
+                await b.Wait(sid,"document.querySelector('#okx-scope').value==='ui-demo'","DEMO must be selected before any command; inactive synthetic LIVE metadata is never activated");
                 foreach(var(action,expected) in new[]{("connect","LOCAL_ACTION_REFUSED_PRESERVED"),("baseline","BASELINE_REFUSED_PRESERVED"),("arm","BASELINE_REQUIRED"),("start","BASELINE_REQUIRED"),("stop","OPERATOR_STOP"),("emergency","EMERGENCY_STOP_NO_OPEN_OWNER"),("disconnect","DISCONNECTED_STOP")}){
                     await b.Wait(sid,"!document.querySelector('[data-action="+action+"]').disabled","Action remained busy: "+action);
                     var hit=await Click(b,sid,"#okx-operator button[data-action="+action+"]");await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes("+J(expected)+")","Missing control result: "+action);records.Add(new{viewport,action,hit,result=expected});
@@ -161,8 +162,10 @@ public sealed class WindowsUiRepairTests
         Assert.True(hit.GetProperty("hit").GetBoolean(),"Configure center occluded: actual pointer is not delivered to the button");
         var pointerNative=await WindowsNativeUi.Metadata(h.Pid);WindowsTestHost.Evidence("native-pointer-configure",WindowsNativeUi.Observe(pointerNative,h.Pid));WindowsNativeUi.ScreenshotMetadata(pointerNative,"native-pointer-configure");WindowsNativeUi.Cancel(pointerNative);
         await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('NATIVE_CANCELLED')","Native cancellation not shown");
+        await b.Wait(sid,"!document.querySelector('[data-action=configure]').disabled","Configure must leave busy state before keyboard action");
         await b.CommandAsync("Page.bringToFront",new{},sid);
         await b.Evaluate(sid,"document.querySelector('[data-action=configure]').focus()");await Key(b,sid,"Enter",13);
+        WindowsTestHost.Evidence("native-keyboard-admission",new{state=await b.Evaluate(sid,"({focused:document.hasFocus(),action:document.activeElement?.dataset?.action,disabled:document.querySelector('[data-action=configure]').disabled,result:document.querySelector('#okx-result').textContent})"),diagnostics=Diagnostics(b,sid)});
         var native=await WindowsNativeUi.Metadata(h.Pid);WindowsTestHost.Evidence("native-keyboard-configure",WindowsNativeUi.Observe(native,h.Pid));WindowsNativeUi.ScreenshotMetadata(native,"native-keyboard-configure");WindowsNativeUi.Cancel(native);
         await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('NATIVE_CANCELLED')","Keyboard native cancellation not shown");
         WindowsTestHost.Evidence("configure-diagnostics",Diagnostics(b,sid));
