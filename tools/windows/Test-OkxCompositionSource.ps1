@@ -1,5 +1,5 @@
 # OKX Task1 native source prerequisite only. No package, secure UI or broker proof.
-param([ValidateSet('red','green')][string]$Phase='green', [ValidateSet('all','windows-setup','credentials','broker-store')][string]$Gate='all')
+param([ValidateSet('red','green')][string]$Phase='green', [ValidateSet('all','windows-setup','credentials','broker-store','native-controls')][string]$Gate='all')
 $ErrorActionPreference='Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows required' }
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -36,7 +36,7 @@ try {
     } finally { Pop-Location } }
     $project=Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj'
     if ($Gate -ne 'windows-setup' -and (Invoke-ApexSourceDotnet 'build' @('build',$project,'-c','Release','-p:NuGetAudit=false')) -ne 0) { throw 'Source setup/compile failure, not behavioral RED' }
-    if ($Phase -eq 'green' -and $Gate -notin @('credentials','broker-store')) {
+    if ($Phase -eq 'green' -and $Gate -notin @('credentials','broker-store','native-controls')) {
         foreach ($pair in @(@('producer','tools/Apex.Backtester/Apex.Backtester.csproj'),@('windows','tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj'))) {
             if ((Invoke-ApexSourceDotnet ('build-'+$pair[0]) @('build',(Join-Path $repo $pair[1]),'-c','Release','-p:NuGetAudit=false')) -ne 0) { throw ('Affected source prerequisite failed: '+$pair[0]) }
         }
@@ -50,21 +50,22 @@ try {
     $filter='FullyQualifiedName~OkxConfigTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxNativeCredentialTests'
     if ($Gate -eq 'credentials') { $filter='FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxNativeCredentialTests' }
     if ($Gate -eq 'broker-store') { $filter='FullyQualifiedName~OkxNativeBrokerStoreTests' }
+    if ($Gate -eq 'native-controls') { $filter='FullyQualifiedName~OkxNativeControlTests' }
     $code=0
     if ($Gate -ne 'windows-setup') {
         Save-Map 'test-inputs.json' 'Before tests: compiled test bytes' @('tests/Apex.Tests/bin/Release/net8.0/Apex.Tests.dll','tests/Apex.Tests/bin/Release/net8.0/ApexDesktop.dll')
         $code=Invoke-ApexSourceDotnet 'okx' @('test',$project,'-c','Release','--no-build','--no-restore','--filter',$filter,'--logger',('trx;LogFileName=okx-'+$Phase+'.trx'),'--results-directory',$evidence)
     }
     $windowsExit=0; $affectedExit=0
-    if ($Phase -eq 'green' -and $Gate -notin @('credentials','broker-store')) {
+    if ($Phase -eq 'green' -and $Gate -notin @('credentials','broker-store','native-controls')) {
         Save-Map 'affected-inputs.json' 'Before affected native setup/startup and portable access/config/durability regressions' @('tests/Apex.Windows.Tests/bin/Release/net8.0/Apex.Windows.Tests.dll','tests/Apex.Windows.Tests/bin/Release/net8.0/ApexDesktop.dll','tools/Apex.Backtester/bin/Release/net8.0/Apex.Backtester.dll')
         $windowsExit=Invoke-ApexSourceDotnet 'windows-affected' @('test',(Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj'),'-c','Release','--no-build','--no-restore','--filter','FullyQualifiedName~WindowsLocalSetupTests|FullyQualifiedName~WindowsStartupTests','--logger','trx;LogFileName=windows-affected.trx','--results-directory',$evidence)
         if ($Gate -eq 'all') { $affectedExit=Invoke-ApexSourceDotnet 'portable-affected' @('test',$project,'-c','Release','--no-build','--no-restore','--filter','FullyQualifiedName~NavalReadAccessTests|FullyQualifiedName~NavalCashDurabilityTests|FullyQualifiedName~DesktopSafetyTests|FullyQualifiedName~FreshInstallationCanRestartBeforeReadOnlySetupWithoutManualFileEdits','--logger','trx;LogFileName=portable-affected.trx','--results-directory',$evidence) }
     }
-    [ordered]@{sourceCommit=(& git -C $repo rev-parse HEAD);phase=$Phase;gate=$Gate;okxExecuted=($Gate -ne 'windows-setup');credentialsOnly=($Gate -eq 'credentials');affectedExecuted=($Gate -eq 'all' -and $Phase -eq 'green');windowsExecuted=($Phase -eq 'green' -and $Gate -notin @('credentials','broker-store'));exit=$code;windowsExit=$windowsExit;affectedExit=$affectedExit;filter=$filter;sourceOnly=$true;packageTested=$false;secureUiTested=$false;brokerTested=$false}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $evidence 'summary.json') -Encoding UTF8
+    [ordered]@{sourceCommit=(& git -C $repo rev-parse HEAD);phase=$Phase;gate=$Gate;okxExecuted=($Gate -ne 'windows-setup');credentialsOnly=($Gate -eq 'credentials');affectedExecuted=($Gate -eq 'all' -and $Phase -eq 'green');windowsExecuted=($Phase -eq 'green' -and $Gate -notin @('credentials','broker-store','native-controls'));exit=$code;windowsExit=$windowsExit;affectedExit=$affectedExit;filter=$filter;sourceOnly=$true;packageTested=$false;secureUiTested=$false;brokerTested=$false}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $evidence 'summary.json') -Encoding UTF8
     if ($code -ne 0) { throw 'Native source tests failed; RED is retained as failure' }
     if ($Gate -ne 'windows-setup') { $null=Read-ApexTestCounts (Join-Path $evidence ('okx-'+$Phase+'.trx')) }
-    if ($Phase -eq 'green' -and $Gate -notin @('credentials','broker-store')) {
+    if ($Phase -eq 'green' -and $Gate -notin @('credentials','broker-store','native-controls')) {
         if ($windowsExit -ne 0 -or $affectedExit -ne 0) { throw 'Affected source regressions failed' }
         $null=Read-ApexTestCounts (Join-Path $evidence 'windows-affected.trx')
         if ($Gate -eq 'all') { $null=Read-ApexTestCounts (Join-Path $evidence 'portable-affected.trx') }
