@@ -14,7 +14,7 @@ internal static class OkxBrokerObservationMapper
     internal static async Task VerifyUnchangedAsync(OkxExecutionObservationClient client,OkxObservationContext context,NavalBrokerObservationBatch original,CancellationToken ct)
     {
         static IReadOnlyList<T> Rows<T>(OkxObservationRead<T> r)
-        {if(r.Status!=OkxObservationStatus.Observed)throw new InvalidOperationException("BASELINE_RECHECK_FAILED");return r.Rows;}
+        {if(r.Status!=OkxObservationStatus.Observed)throw new InvalidOperationException("BASELINE_RECHECK_FAILED:"+r.ErrorCode);return r.Rows;}
         var a=Rows(await client.ReadAccountAsync(context,ct)).Single();
         var account=new NavalBrokerAccountObservation(a.Uid,a.MainUid,a.AccountLevel,a.Permissions,a.Ip,a.FeeType,a.AutoLoan,a.EnableSpotBorrow,a.SpotBorrowAutoRepay,a.AccountType,a.SpotRoleType);
         var balances=Rows(await client.ReadBalancesAsync(context,ct)).Single().Details.Select(d=>new NavalBrokerBalance(d.Currency,d.Cash.Value,d.Available.Value,d.Equity.Value,d.Frozen.Value,d.OrderFrozen.Value,d.Liability.Value,d.Interest.Value,d.CrossLiability.Value,d.IsolatedLiability.Value,d.StrategyEquity.Value,d.FixedBalance.Value,d.UTime.Utc)).ToArray();

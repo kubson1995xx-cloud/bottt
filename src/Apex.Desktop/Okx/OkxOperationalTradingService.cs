@@ -55,7 +55,7 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
     private void RevokeArming(){Interlocked.Increment(ref armingEpoch);armed=false;}
     private NavalRiskResult Refuse(string code)=>new(NavalMutationStatus.Refused,code,null,session.Coordinator.Snapshot().DurableRevision);
     private static IReadOnlyList<T> Observed<T>(OkxObservationRead<T> read)
-    {if(read.Status!=OkxObservationStatus.Observed)throw new InvalidDataException("BROKER_OBSERVATION_FAILED");return read.Rows;}
+    {if(read.Status!=OkxObservationStatus.Observed)throw new InvalidDataException("BROKER_OBSERVATION_FAILED:"+read.ErrorCode);return read.Rows;}
     internal async Task<NavalRiskResult> ReconcileAsync(CancellationToken ct)
     {
         await lane.WaitAsync(ct).ConfigureAwait(false);

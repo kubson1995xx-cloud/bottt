@@ -183,8 +183,26 @@ public sealed class OkxOperationalTradingTests
             (s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxExecutionObservationClient.ForTests(f,TimeProvider.System,s,p,h,x),
             (s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxObservationStream.ForTests((uri,ct)=>{var socket=new OperationalSocket(uri);f.Sockets.Add(socket);return Task.FromResult<System.Net.WebSockets.WebSocket>(socket);},TimeProvider.System,s,p,h,x));
         await using var initial=Service();var observe=await f.Runtime.Activation.RequestAsync(f.Request,default);
+        string caught="";
+        EventHandler<System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs> trace=(_,ev)=>
+        {
+            if(!ev.Exception.Message.StartsWith("BASELINE_",StringComparison.Ordinal)&&!ev.Exception.Message.StartsWith("BROKER_OBSERVATION_FAILED:",StringComparison.Ordinal))return;
+            try
+            {
+                var flags=System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+                var observation=(NavalBrokerObservationBatch?)typeof(OkxAccountConnectionService).GetField("original",flags)!.GetValue(initial);
+                var bootstrap=typeof(OkxAccountConnectionService).GetField("bootstrap",flags)!.GetValue(initial);
+                var now=DateTimeOffset.UtcNow;
+                caught=System.Text.Json.JsonSerializer.Serialize(new{code=ev.Exception.Message,utc=now,peerUtc=f.Clock.GetUtcNow(),observation?.CaptureUtc,observation?.ServerUtc,
+                    balanceUtc=observation?.Balances[0].SourceUtc,lastUtc=bootstrap?.GetType().GetField("lastUtc",flags)?.GetValue(bootstrap),closed=bootstrap?.GetType().GetField("closed",flags)?.GetValue(bootstrap)});
+            }
+            catch{/* Diagnostic cannot alter the production decision. */}
+        };
+        AppDomain.CurrentDomain.FirstChanceException+=trace;
+        try
+        {
         bool connected=await initial.ConnectAsync(f.Request,observe!,default);
-        Assert.True(connected,initial.Status+" paths="+string.Join(",",f.Paths));Assert.True(await initial.ApproveAndCreateAsync(default),initial.Status);
+        Assert.True(connected,initial.Status+" "+caught+" paths="+string.Join(",",f.Paths));Assert.True(await initial.ApproveAndCreateAsync(default),initial.Status+" "+caught);
         await using var loop=OkxOperationalTradingService.ForTests(initial,(s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxExecutionClient.ForTests(peer,TimeProvider.System,s,p,h,x),peer,TimeProvider.System);
         var execute=f.Request with{Purpose=OkxActivationPurpose.Execute,Session=initial.TradingSessionId,ExpiresUtc=DateTimeOffset.UtcNow.AddSeconds(120)};var armed=await f.Runtime.Activation.RequestAsync(execute,default);Assert.True(loop.Arm(execute,armed!));
         string Predicate(string phase,NavalRiskResult result)
@@ -192,7 +210,7 @@ public sealed class OkxOperationalTradingTests
             var quoteMap=(System.Collections.Generic.Dictionary<string,NavalBrokerQuote>)typeof(OkxOperationalTradingService).GetField("quotes",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(loop)!;
             var now=DateTimeOffset.UtcNow;var state=initial.BrokerSession!.ReadState();
             return System.Text.Json.JsonSerializer.Serialize(new{phase,result.Code,result.Status,utc=now,peerUtc=f.Clock.GetUtcNow(),snapshot=initial.Coordinator!.Snapshot().Reason,
-                obligations=state.NavalBroker!.Operational?.Obligations,quotes=quoteMap.Values.Select(q=>new{q.SourceUtc,q.ReceivedUtc,sourceAfterReceipt=q.SourceUtc>q.ReceivedUtc,ageMilliseconds=(now-q.SourceUtc).TotalMilliseconds}),reads=f.Paths.Count,posts=peer.Posts});
+                obligations=state.NavalBroker!.Operational?.Obligations,caught,quotes=quoteMap.Values.Select(q=>new{q.SourceUtc,q.ReceivedUtc,sourceAfterReceipt=q.SourceUtc>q.ReceivedUtc,ageMilliseconds=(now-q.SourceUtc).TotalMilliseconds}),reads=f.Paths.Count,posts=peer.Posts});
         }
         var initialReconcile=await loop.ReconcileAsync(default);Assert.True(initialReconcile.Status==NavalMutationStatus.Applied,Predicate("initial-reconcile",initialReconcile));
         var initialStart=loop.Start();Assert.True(initialStart.Status==NavalMutationStatus.Applied,Predicate("initial-start",initialStart));
@@ -201,6 +219,8 @@ public sealed class OkxOperationalTradingTests
         await loop.DisposeAsync();await initial.DisconnectAsync();await using var service=Service();
         var request=f.Request with{Session=Guid.NewGuid(),ExpiresUtc=DateTimeOffset.UtcNow.AddSeconds(120)};var lease=await f.Runtime.Activation.RequestAsync(request,default);
         Assert.True(await service.ConnectAsync(request,lease!,default),service.Status);Assert.Equal(cash,service.Coordinator!.Snapshot().Cash);Assert.Equal("STOP",service.Coordinator.Snapshot().Mode);Assert.Equal(1,f.Approvals);Assert.Equal(1,peer.Posts);
+        }
+        finally{AppDomain.CurrentDomain.FirstChanceException-=trace;}
     }
     [Fact]
     public async Task Unknown_original_can_settle_from_exact_fills_without_retry_then_requires_explicit_rearmed_START()
