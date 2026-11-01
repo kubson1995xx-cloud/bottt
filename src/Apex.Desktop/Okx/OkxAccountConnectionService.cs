@@ -171,7 +171,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         if(pumping!=null)await pumping.ConfigureAwait(false);
         reads=null;stream=null;pumping=null;
     }
-    private static bool SafeFailure(Exception ex)=>ex is InvalidOperationException or InvalidDataException or IOException or UnauthorizedAccessException or OperationCanceledException or TimeoutException or System.Text.Json.JsonException;
+    private static bool SafeFailure(Exception ex)=>ex is InvalidOperationException or InvalidDataException or IOException or UnauthorizedAccessException or OperationCanceledException or TimeoutException or System.Text.Json.JsonException or Apex.Desktop.Services.WindowsDataException;
     private sealed class SigningProvider(OkxAccountConnectionService owner,string fingerprint) : IOkxSigningMaterialProvider
     {
         public ValueTask<OkxSigningMaterial> OpenAsync(CancellationToken ct)
