@@ -5,7 +5,7 @@ on:
       mode:
         description: 'full-delivery packages; task1-source/task2-source/task3-source/task4-source validate only the named source prerequisite'
         type: choice
-        options: [full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
+        options: [ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
         default: full-delivery
       phase:
         description: 'Source evidence label only; RED failures still fail the run'
@@ -31,6 +31,34 @@ on:
 permissions:
   contents: read
 jobs:
+  uiRepairOriginal:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'ui-repair-original' && github.ref == 'refs/heads/feature/apex-naval-command'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.427'
+      - uses: actions/download-artifact@v4
+        with:
+          name: APEX-NAVAL-COMMAND-Windows-x64
+          run-id: 41338154933
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/ui-original-input
+      - name: Original extracted EXE real pointer reproduction (no engine rerun)
+        shell: powershell
+        run: ./tools/windows/Test-UiRepairOriginal.ps1 -Download "$env:RUNNER_TEMP/ui-original-input"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: UI-Original-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ui-repair-evidence/**
+          if-no-files-found: error
+          retention-days: 30
   windows:
     if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full-delivery'
     runs-on: windows-latest
