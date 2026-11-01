@@ -20,6 +20,13 @@ internal static class OkxObservationJson
         if(code!="0" && !Grammar.Match(code,"[1-9][0-9]{4,7}"))throw new JsonException();
         var data=root.GetProperty("data");if(data.ValueKind!=JsonValueKind.Array)throw new JsonException();
         if(code!="0")throw new VenueException(code);
+        if(AlgoSchemas.TryGetValue(endpoint,out var algoStrings))
+        {
+            if(typeof(T)!=typeof(OkxExecutionAlgoDto))throw new JsonException();
+            if(endpoint=="/api/v5/trade/order-algo") { if(data.GetArrayLength()!=1)throw new CardinalityException(); }
+            else if(pageLimit is null or <1 or >100||data.GetArrayLength()>pageLimit)throw new CardinalityException();
+            return data.EnumerateArray().Select(r=>(T)(object)ParseAlgo(r,algoStrings,endpoint!="/api/v5/trade/order-algo")).ToImmutableArray();
+        }
         var recovery=RecoverySchemas.GetValueOrDefault(endpoint);
         Type expected=recovery?.Type??(endpoint switch
         {
@@ -253,7 +260,7 @@ internal static class OkxObservationJson
             return size;
         }
     }
-    private static string PayloadDigest(JsonElement row)
+    internal static string PayloadDigest(JsonElement row)
     {
         // One bounded allocation BEFORE private writes. Neither a stream writer nor its
         // pooled escaping helpers may own growing/abandoned plaintext arrays here.
@@ -325,12 +332,12 @@ internal static class OkxObservationJson
             else if(e.ValueKind==JsonValueKind.String)String(e.GetString()!);else throw new JsonException();
         }
     }
-    private static string S(JsonElement e,string n)=>Grammar.String(e,n);
-    private static string? Optional(JsonElement e,string n)=>e.TryGetProperty(n,out var p)?p.GetString():null;
+    internal static string S(JsonElement e,string n)=>Grammar.String(e,n);
+    internal static string? Optional(JsonElement e,string n)=>e.TryGetProperty(n,out var p)?p.GetString():null;
     private static bool B(JsonElement e,string n)=>e.GetProperty(n).GetBoolean();
-    private static ImmutableArray<string> StringArray(JsonElement a)
+    internal static ImmutableArray<string> StringArray(JsonElement a)
     { if(a.ValueKind!=JsonValueKind.Array)throw new JsonException();return a.EnumerateArray().Select(v=>v.ValueKind==JsonValueKind.String?v.GetString()!:throw new JsonException()).ToImmutableArray(); }
-    private static void Shape(JsonElement e,string strings,string bools="",string arrays="",string nullableInts="")
+    internal static void Shape(JsonElement e,string strings,string bools="",string arrays="",string nullableInts="")
     {
         if(e.ValueKind!=JsonValueKind.Object)throw new JsonException();
         var ss=strings.Split(' ',StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
@@ -346,7 +353,7 @@ internal static class OkxObservationJson
             if(!valid)throw new JsonException();
         }
     }
-    private static OkxDecimal Number(JsonElement e,string n)
+    internal static OkxDecimal Number(JsonElement e,string n)
     {
         var raw=Optional(e,n);if(string.IsNullOrEmpty(raw))return new(raw,null);
         if(!Grammar.Match(raw,"-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?") || raw.Length>128 || !decimal.TryParse(raw,NumberStyles.AllowLeadingSign|NumberStyles.AllowDecimalPoint,CultureInfo.InvariantCulture,out var value))throw new JsonException();
@@ -358,10 +365,114 @@ internal static class OkxObservationJson
         if(coeff*BigInteger.Pow(10,scale)!=actual*BigInteger.Pow(10,fraction))throw new JsonException();
         return new(raw,value);
     }
-    private static OkxTimestamp Timestamp(JsonElement e,string n,bool required=false)
+    internal static OkxTimestamp Timestamp(JsonElement e,string n,bool required=false)
     {
         var raw=required?S(e,n):Optional(e,n);if(string.IsNullOrEmpty(raw))return new(raw,null);
         if(!Grammar.Match(raw,"[0-9]{1,17}") || !long.TryParse(raw,NumberStyles.None,CultureInfo.InvariantCulture,out var ms))throw new JsonException();
         try{return new(raw,DateTimeOffset.FromUnixTimeMilliseconds(ms));}catch(ArgumentOutOfRangeException){throw new JsonException();}
     }
+
+    // R:11989–12125 / 12264–12423 / 12570–12731: distinct endpoint registrations.
+    private static readonly Dictionary<string,string> AlgoSchemas=new(StringComparer.Ordinal)
+    {
+        ["/api/v5/trade/order-algo"]="instType instId ccy ordId algoId clOrdId sz closeFraction ordType side posSide tdMode tgtCcy state lever tpTriggerPx tpTriggerPxType tpOrdPx slTriggerPx slTriggerPxType slOrdPx triggerPx triggerPxType ordPx advanceOrdType actualSz actualPx tag actualSide triggerTime pxVar pxSpread szLimit pxLimit timeInterval callbackRatio callbackSpread activePx moveTriggerPx reduceOnly quickMgnType last failCode algoClOrdId amendPxOnTriggerType cTime uTime isTradeBorrowMode chaseType chaseVal maxChaseType maxChaseVal tradeQuoteCcy",
+        ["/api/v5/trade/orders-algo-pending"]="instType instId ccy ordId algoId clOrdId sz closeFraction ordType side posSide tdMode tgtCcy state lever tpTriggerPx tpTriggerPxType tpOrdPx slTriggerPx slTriggerPxType slOrdPx triggerPx triggerPxType ordPx advanceOrdType actualSz actualPx tag actualSide triggerTime pxVar pxSpread szLimit pxLimit timeInterval callbackRatio callbackSpread activePx moveTriggerPx reduceOnly quickMgnType last failCode algoClOrdId amendPxOnTriggerType cTime uTime isTradeBorrowMode chaseType chaseVal maxChaseType maxChaseVal tradeQuoteCcy lmtOrderNumber aggressiveness",
+        ["/api/v5/trade/orders-algo-history"]="instType instId ccy ordId algoId clOrdId sz closeFraction ordType side posSide tdMode tgtCcy state lever tpTriggerPx tpTriggerPxType tpOrdPx slTriggerPx slTriggerPxType slOrdPx triggerPx triggerPxType ordPx advanceOrdType actualSz actualPx tag actualSide triggerTime pxVar pxSpread szLimit pxLimit timeInterval callbackRatio callbackSpread activePx moveTriggerPx reduceOnly quickMgnType last failCode algoClOrdId amendPxOnTriggerType cTime uTime isTradeBorrowMode chaseType chaseVal maxChaseType maxChaseVal tradeQuoteCcy lmtOrderNumber aggressiveness",
+    };
+    private static OkxExecutionAlgoDto ParseAlgo(JsonElement r,string strings,bool advanced)
+    {
+        ValidateAlgoShape(r,strings,advanced);
+        return AlgoRow(r);
+    }
+    internal static void ValidateAlgoShape(JsonElement r,string strings,bool advanced)
+    {
+        if(r.ValueKind!=JsonValueKind.Object)throw new JsonException();
+        foreach(var p in r.EnumerateObject())
+        {
+            if(p.Name is "ordIdList" or "subAlgoIdList")
+            {if(p.Value.ValueKind!=JsonValueKind.Array)throw new JsonException();if(p.Value.GetArrayLength()>256)throw new CardinalityException();_=StringArray(p.Value);}
+            else if(p.Name=="linkedOrd")Shape(p.Value,"ordId");
+            else if(p.Name is "advChaseParams" or "attachAlgoOrds"||advanced&&p.Name=="triggerParams")
+            {
+                if(p.Value.ValueKind!=JsonValueKind.Array)throw new JsonException();if(p.Value.GetArrayLength()>32)throw new CardinalityException();
+                foreach(var a in p.Value.EnumerateArray())Shape(a,p.Name switch {
+                    "advChaseParams"=>"chaseType chaseVal maxChaseType maxChaseVal",
+                    "attachAlgoOrds"=>"attachAlgoClOrdId tpTriggerPx tpTriggerRatio tpTriggerPxType tpOrdPx slTriggerPx slTriggerRatio slTriggerPxType slOrdPx callbackRatio callbackSpread activePx",
+                    _=>"triggerAction triggerStrategy triggerPx triggerCond timeframe thold timePeriod"});
+            }
+            else if(!strings.Split(' ').Contains(p.Name,StringComparer.Ordinal)||p.Value.ValueKind!=JsonValueKind.String)throw new JsonException();
+        }
+        if(S(r,"instType").Length==0||S(r,"instId").Length is 0 or >128||!Grammar.OrderId(S(r,"algoId")))throw new JsonException();
+    }
+    internal static OkxExecutionAlgoDto AlgoRow(JsonElement r)=>new(S(r,"instType"),
+        S(r,"instId"),
+        S(r,"algoId"),
+        Optional(r,"algoClOrdId"),
+        Optional(r,"clOrdId"),
+        Optional(r,"ordId"),
+        Optional(r,"state"),
+        Optional(r,"ordType"),
+        Optional(r,"side"),
+        Optional(r,"posSide"),
+        Optional(r,"tdMode"),
+        Optional(r,"tgtCcy"),
+        Optional(r,"ccy"),
+        Optional(r,"tag"),
+        Optional(r,"actualSide"),
+        Optional(r,"tpTriggerPxType"),
+        Optional(r,"slTriggerPxType"),
+        Optional(r,"triggerPxType"),
+        Optional(r,"failCode"),
+        Optional(r,"reduceOnly"),
+        Optional(r,"isTradeBorrowMode"),
+        Optional(r,"amendPxOnTriggerType"),
+        Optional(r,"tradeQuoteCcy"),
+        Optional(r,"advanceOrdType"),
+        Optional(r,"chaseType"),
+        Optional(r,"maxChaseType"),
+        Optional(r,"quickMgnType"),
+        Number(r,"sz"),
+        Number(r,"closeFraction"),
+        Number(r,"actualSz"),
+        Number(r,"actualPx"),
+        Number(r,"tpTriggerPx"),
+        Number(r,"tpOrdPx"),
+        Number(r,"slTriggerPx"),
+        Number(r,"slOrdPx"),
+        Number(r,"triggerPx"),
+        Number(r,"ordPx"),
+        Number(r,"last"),
+        Number(r,"callbackRatio"),
+        Number(r,"callbackSpread"),
+        Number(r,"activePx"),
+        Number(r,"moveTriggerPx"),
+        Number(r,"chaseVal"),
+        Number(r,"maxChaseVal"),
+        Timestamp(r,"cTime"),
+        Timestamp(r,"uTime"),
+        Timestamp(r,"triggerTime"),
+        r.TryGetProperty("ordIdList",out var ordIdList)?StringArray(ordIdList):null,
+        r.TryGetProperty("subAlgoIdList",out var subAlgoIdList)?StringArray(subAlgoIdList):null,
+        r.TryGetProperty("attachAlgoOrds",out var attachments)?attachments.EnumerateArray().Select(AlgoAttachmentRow).ToImmutableArray():null,
+        r.TryGetProperty("advChaseParams",out var chase)?chase.EnumerateArray().Select(AlgoChaseRow).ToImmutableArray():null,
+        r.TryGetProperty("linkedOrd",out var linked)?new OkxAlgoLinkedOrderDto(Optional(linked,"ordId"),PayloadDigest(linked)):null,
+        PayloadDigest(r));
+    private static OkxAlgoAttachmentDto AlgoAttachmentRow(JsonElement r)=>new(Optional(r,"attachAlgoClOrdId"),
+        Optional(r,"tpTriggerPxType"),
+        Optional(r,"slTriggerPxType"),
+        Number(r,"tpTriggerPx"),
+        Number(r,"tpTriggerRatio"),
+        Number(r,"tpOrdPx"),
+        Number(r,"slTriggerPx"),
+        Number(r,"slTriggerRatio"),
+        Number(r,"slOrdPx"),
+        Number(r,"callbackRatio"),
+        Number(r,"callbackSpread"),
+        Number(r,"activePx"),
+        PayloadDigest(r));
+    private static OkxAlgoChaseDto AlgoChaseRow(JsonElement r)=>new(Optional(r,"chaseType"),
+        Optional(r,"maxChaseType"),
+        Number(r,"chaseVal"),
+        Number(r,"maxChaseVal"),
+        PayloadDigest(r));
 }

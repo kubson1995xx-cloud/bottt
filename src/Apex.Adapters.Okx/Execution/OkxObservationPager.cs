@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Collections.Immutable;
 namespace Apex.Adapters.Okx.Execution;
 
 /// <summary>Bounded transport traversal only. Collected is not coverage, finality, hold release or START authority.</summary>
@@ -103,6 +104,72 @@ public sealed class OkxObservationPager
         }
         }
         finally { CollectionBudgets.TryRemove(linked.Token,out _); }
+    }
+    public async Task<OkxAlgoObservationCollection> CollectAlgosAsync(OkxObservationAlgoPageQuery query,OkxObservationContext context,CancellationToken ct)
+    {
+        context??=new(Guid.Empty,Guid.Empty);
+        var clock=client.ObservationClock;var startUtc=clock.GetUtcNow();var startMono=clock.GetTimestamp();var lastUtc=startUtc;var lastMono=startMono;var endUtc=startUtc;var endMono=startMono;
+        var rows=new List<OkxExecutionAlgoDto>();var trace=new List<OkxAlgoObservationPageTrace>();
+        var limitations=new List<string>{"NoAtomicSnapshot","RetentionNotEstablished","CollectionNotFinancialAuthority"};
+        if(query?.Surface==OkxAlgoObservationSurface.History)limitations.Add("HistoryHasNoTimeFilter");
+        if(query?.OrderType==OkxAlgoOrderFilter.TrailingStop)limitations.Add("TrailingStreamNotSubscribed");
+        var variants=new Dictionary<(string,string),HashSet<string>>();var cursors=new HashSet<string>(StringComparer.Ordinal);var opening=new HashSet<(string,string,string)>();
+        var original=query!;var current=query!;bool bookend=false,conflict=false;int requests=0,occurrences=0;string? denied=null;
+        OkxAlgoObservationCollection Result(OkxObservationCollectionStatus status,string? error)=>new(conflict?OkxObservationCollectionStatus.Conflict:status,client.RequestedObservationScope,original,context,startUtc,endUtc,startMono,endMono,rows.ToImmutableArray(),trace.ToImmutableArray(),limitations.ToImmutableArray(),error);
+        string? BudgetError()
+        {
+            if(denied is not null)return denied;var utc=clock.GetUtcNow();var mono=clock.GetTimestamp();bool rollback=utc<lastUtc||mono<lastMono;lastUtc=utc;lastMono=mono;
+            if(ct.IsCancellationRequested)return denied="Canceled";
+            if(rollback)return denied="ClockRollback";
+            return denied=utc-startUtc>=Budget||clock.GetElapsedTime(startMono,mono)>=Budget?"CollectionBudget":null;
+        }
+        OkxAlgoObservationCollection Stop(string error)
+        {
+            endUtc=clock.GetUtcNow();endMono=clock.GetTimestamp();
+            trace.Add(new(current,current is null?"":AlgoRequest.Endpoint(current.Surface),current is null?"":AlgoRequest.Query(current),context,trace.Count,bookend,true,OkxObservationStatus.Failed,0,null,endUtc,endUtc,endMono,endMono,current?.Cursor,null,false,error));
+            return Result(OkxObservationCollectionStatus.Incomplete,error);
+        }
+        if(query is null||query.Cursor is not null||context.ConnectionId==Guid.Empty||context.CaptureId==Guid.Empty)return Stop("InvalidObservationRequest");
+        using var timeout=new CancellationTokenSource(Budget,clock);using var linked=CancellationTokenSource.CreateLinkedTokenSource(ct,timeout.Token);
+        CollectionBudgets.TryAdd(linked.Token,()=>!linked.IsCancellationRequested&&BudgetError() is null);
+        try
+        {
+            while(true)
+            {
+                var error=BudgetError();if(error is not null)return Stop(error);
+                if(!client.CanContinueObservation(context))return Stop("ObservationStopped");
+                if((error=BudgetError()) is not null)return Stop(error);
+                if(requests>=20||!bookend&&requests>=19)return Stop("PageLimit");
+                var page=await (current.Surface==OkxAlgoObservationSurface.Pending?client.ReadPendingAlgosAsync(current,context,linked.Token):client.ReadAlgoHistoryAsync(current,context,linked.Token)).ConfigureAwait(false);requests++;
+                endUtc=page.ReceiveUtc;endMono=page.ReceiveMonotonic;
+                var next=page.Status==OkxObservationStatus.Observed&&page.Rows.Count>0&&!bookend?new OkxObservationAlgoCursor(original.Surface,original.OrderType,original.State,original.AlgoId,original.Instrument,OkxObservationCursorDirection.After,page.Rows[^1].AlgoId):null;
+                trace.Add(new(current,page.Endpoint,page.ExactQuery,context,trace.Count,requests==1||bookend,false,page.Status,page.Rows.Count,page.ResponseDigest,page.RequestUtc,page.ReceiveUtc,page.RequestMonotonic,page.ReceiveMonotonic,current.Cursor,next,page.Status==OkxObservationStatus.Observed&&page.Rows.Count==0,page.ErrorCode));
+                if(page.Status!=OkxObservationStatus.Observed)return Result(OkxObservationCollectionStatus.Incomplete,page.ErrorCode);
+                occurrences=checked(occurrences+page.Rows.Count);var head=new HashSet<(string,string,string)>();
+                foreach(var row in page.Rows)
+                {
+                    var key=(row.InstId,row.AlgoId);head.Add((row.InstId,row.AlgoId,row.PayloadDigest));
+                    if(!variants.TryGetValue(key,out var set))variants.Add(key,set=new(StringComparer.Ordinal));
+                    if(set.Count>0&&!set.Contains(row.PayloadDigest))conflict=true;
+                    if(set.Add(row.PayloadDigest))rows.Add(row);
+                }
+                if(requests==1)opening=head;
+                if(bookend&&!opening.SetEquals(head)){conflict=true;return Result(OkxObservationCollectionStatus.Conflict,"MovingBookend");}
+                if(conflict)return Result(OkxObservationCollectionStatus.Conflict,"IdentityPayloadConflict");
+                if(occurrences>2000)return Stop("RowLimit");
+                if((error=BudgetError()) is not null)return Stop(error);
+                if(!client.CanContinueObservation(context))return Stop("ObservationStopped");
+                if((error=BudgetError()) is not null)return Stop(error);
+                if(bookend)return Result(OkxObservationCollectionStatus.Collected,null);
+                if(page.Rows.Count==0){bookend=true;current=original;continue;}
+                var numeric=page.Rows.Select(x=>BigInteger.Parse(x.AlgoId,System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                if(numeric[^1]!=numeric.Min())return Stop("AmbiguousPageOrder");
+                if(current.Cursor is not null&&!numeric.Any(x=>x<BigInteger.Parse(current.Cursor.Value,System.Globalization.CultureInfo.InvariantCulture)))return Stop("NoCursorProgress");
+                if(!cursors.Add(next!.Value))return Stop("CursorCycle");
+                current=new(original.Surface,original.OrderType,original.State,original.AlgoId,original.Instrument,next,original.Limit);
+            }
+        }
+        finally {CollectionBudgets.TryRemove(linked.Token,out _);}
     }
     private async Task<Page> ReadPage(OkxObservationSurface surface,OkxObservationPageQuery query,OkxObservationContext context,CancellationToken ct)
     {

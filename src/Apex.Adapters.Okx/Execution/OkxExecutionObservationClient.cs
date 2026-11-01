@@ -70,6 +70,18 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
         valid=valid&&RecoveryRequest.Valid(surface,page);
         return Read<T>(RecoveryRequest.Endpoint(surface),valid?RecoveryRequest.Query(surface,page):"",context,true,valid,ct,valid?page.Limit:null);
     }
+    public Task<OkxObservationRead<OkxExecutionAlgoDto>> ReadAlgoAsync(OkxObservationAlgoQuery query,OkxObservationContext context,CancellationToken ct)
+    {
+        var q=query is null?"":"?"+(query.AlgoClientOrderId is null?"":"algoClOrdId="+query.AlgoClientOrderId+(query.AlgoId is null?"":"&"))+(query.AlgoId is null?"":"algoId="+query.AlgoId);
+        return Read<OkxExecutionAlgoDto>("/api/v5/trade/order-algo",q,context,true,query is not null,ct);
+    }
+    public Task<OkxObservationRead<OkxExecutionAlgoDto>> ReadPendingAlgosAsync(OkxObservationAlgoPageQuery query,OkxObservationContext context,CancellationToken ct)=>AlgoPage(OkxAlgoObservationSurface.Pending,query,context,ct);
+    public Task<OkxObservationRead<OkxExecutionAlgoDto>> ReadAlgoHistoryAsync(OkxObservationAlgoPageQuery query,OkxObservationContext context,CancellationToken ct)=>AlgoPage(OkxAlgoObservationSurface.History,query,context,ct);
+    private Task<OkxObservationRead<OkxExecutionAlgoDto>> AlgoPage(OkxAlgoObservationSurface surface,OkxObservationAlgoPageQuery query,OkxObservationContext context,CancellationToken ct)
+    {
+        bool valid=query is not null&&query.Surface==surface;
+        return Read<OkxExecutionAlgoDto>(AlgoRequest.Endpoint(surface),valid?AlgoRequest.Query(query!):"",context,true,valid,ct,valid?query!.Limit:null);
+    }
     private async Task<OkxObservationRead<T>> Read<T>(string endpoint,string query,OkxObservationContext context,bool isPrivate,bool valid,CancellationToken caller,int? pageLimit=null,string? detailInstrument=null)
     {
         context??=new(Guid.Empty,Guid.Empty);
