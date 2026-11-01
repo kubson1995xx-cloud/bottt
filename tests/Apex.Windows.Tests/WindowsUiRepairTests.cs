@@ -106,6 +106,8 @@ public sealed class WindowsUiRepairTests
                 await b.CommandAsync("Network.setBlockedURLs",new{urls=Array.Empty<string>()},sid);await Click(b,sid,"[data-action=refresh]");await b.Wait(sid,"!document.querySelector('[data-action=start]').disabled","Restored actual status did not recover controls");
                 foreach(var(route,title) in new[]{("command","Command Center"),("radar","Tactical Radar"),("fleets","Fleet Operations"),("animations","Trade Animations"),("analytics","Analytics Center")}){
                     await Click(b,sid,".rail nav a[href='#/"+route+"']");await b.Wait(sid,"document.querySelector('main h1')?.textContent==="+J(title),"Pointer navigation failed: "+route);
+                    await b.Wait(sid,"(()=>{let s=document.querySelector('.scene-status')?.textContent;return !s||s.includes('3D historical')||s.includes('_FAILED')||s.includes('CONTEXT_LOST')||s.includes('NO_WEBGL2')||!!document.querySelector('.naval-app.minimal');})()","Optional renderer did not settle before control inventory");
+                    records.Add(new{viewport,route,renderer=await b.Evaluate(sid,"document.querySelector('.scene-status')?.textContent??'not present'")});
                     await b.Evaluate(sid,"document.querySelector('main').scrollIntoView({block:'start'})");await Screenshot(b,sid,viewport+"-"+route);
                     // Enumerate every currently present view control. Pure test locator attributes,
                     // no event handlers/state/globals injected; every action uses CDP input.

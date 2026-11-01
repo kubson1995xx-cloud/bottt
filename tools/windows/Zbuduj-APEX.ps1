@@ -71,7 +71,7 @@ if ($UiOnlyReuseRoot) {
     $priorInputs=Get-Content (Join-Path $UiOnlyReuseRoot 'Weryfikacja/source-inputs.json') -Raw|ConvertFrom-Json
     $old=@{};foreach ($f in $priorInputs.files) { $old[$f.path]=$f.sha256 }
     $now=@{};foreach ($f in $before.files) { $now[$f.path]=$f.sha256 }
-    $allowed='\A(?:frontend/naval/src/ui/Shell\.tsx|frontend/naval/src/styles/naval\.css|src/Apex\.Desktop/Apex\.Desktop\.csproj|src/Apex\.Desktop/Okx/(?:okx-controls\.(?:js|css)|OkxControlEndpoints\.cs|WindowsOkxDialog\.cs|WindowsOkxProvisioning\.cs)|tests/Apex\.Windows\.Tests/(?:WindowsUiRepairTests|WindowsNativeUi|WindowsCdpBrowser|WindowsBrowserAcceptanceTests)\.cs|tests/panel/okx-ui\.test\.cjs|tests/package/safe_extract\.py|tools/windows/(?:Zbuduj-APEX|Test-UiRepairOriginal|Test-UiRepairDelivery)\.ps1|tools/windows/PRZECZYTAJ-WINDOWS\.md|\.github/workflows/windows-demo\.yml)\z'
+    $allowed='\A(?:frontend/naval/src/ui/Shell\.tsx|frontend/naval/src/styles/naval\.css|src/Apex\.Desktop/Apex\.Desktop\.csproj|src/Apex\.Desktop/Okx/(?:okx-controls\.(?:js|css)|OkxControlEndpoints\.cs|WindowsOkxDialog\.cs|WindowsOkxProvisioning\.cs)|tests/Apex\.Windows\.Tests/(?:WindowsUiRepairTests|WindowsNativeUi|WindowsCdpBrowser|WindowsBrowserAcceptanceTests)\.cs|tests/panel/okx-ui\.test\.cjs|tests/package/safe_extract\.py|tools/windows/(?:Zbuduj-APEX|Test-UiRepairOriginal|Test-UiRepairDelivery|Test-UiRepairAcceptance)\.ps1|tools/windows/PRZECZYTAJ-WINDOWS\.md|\.github/workflows/windows-demo\.yml)\z'
     $delta=@();$same=@()
     foreach ($name in @(@($old.Keys)+@($now.Keys)|Sort-Object -Unique)) {
         if ($old[$name] -ceq $now[$name]) { $same+=@{path=$name;sha256=$now[$name]};continue }

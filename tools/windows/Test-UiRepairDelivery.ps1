@@ -16,6 +16,7 @@ $output=Join-Path $env:RUNNER_TEMP 'APEX-NAVAL-COMMAND-Windows-x64'
 & (Join-Path $PSScriptRoot 'Zbuduj-APEX.ps1') -Target win-x64 -Wyjscie $output -UiOnlyReuseRoot $prior
 $dotnet=(Get-Command dotnet).Source
 $env:APEX_PACKAGE_ROOT=$output+'-extracted';$env:APEX_WINDOWS_EVIDENCE=$e;$env:DOTNET_HOST_PATH=$dotnet
+$env:APEX_LEGACY_EXE=Join-Path $prior 'APEX-Desktop/ApexDesktop.exe';$env:APEX_LEGACY_EXE_SHA256=(Get-FileHash $env:APEX_LEGACY_EXE -Algorithm SHA256).Hash.ToLowerInvariant()
 $sdk=Join-Path $env:RUNNER_TEMP 'ui-final-sdk';New-Item -ItemType Directory -Path $sdk|Out-Null
 [IO.File]::WriteAllText((Join-Path $sdk 'global.json'),'{"sdk":{"version":"8.0.427","rollForward":"disable"}}')
 $runtime=Join-Path $e 'test-runtime';New-Item -ItemType Directory -Path $runtime|Out-Null
@@ -23,7 +24,7 @@ Copy-Item (Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0/*') $run
 $failed=$false
 Push-Location $sdk
 try {
- foreach ($gate in @('UiRepair','UiInventory')) {
+ foreach ($gate in @('UiRepair','UiInventory','UiUpgrade','UiNavigation')) {
   & $dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$gate+'.trx') --results-directory $e
   if ($LASTEXITCODE -ne 0) {$failed=$true}
  }
