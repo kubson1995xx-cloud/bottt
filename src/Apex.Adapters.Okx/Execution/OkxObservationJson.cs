@@ -255,22 +255,74 @@ internal static class OkxObservationJson
     }
     private static string PayloadDigest(JsonElement row)
     {
-        // Fixed non-growing canonical buffer, cleared including private discarded metadata.
-        // At most six escaped UTF-8 bytes per decoded UTF-16 code unit, plus JSON punctuation.
-        // Input body is capped; derive a non-growing bound BEFORE any private canonical write.
+        // One bounded allocation BEFORE private writes. Neither a stream writer nor its
+        // pooled escaping helpers may own growing/abandoned plaintext arrays here.
+        // Six bytes per UTF-16 code unit covers JSON escaping as well as raw UTF-8.
         byte[] buffer=new byte[CanonicalBound(row)];
+        int position=0;
         try
         {
-            using var stream=new MemoryStream(buffer,0,buffer.Length,true,true);
-            using(var writer=new Utf8JsonWriter(stream,new JsonWriterOptions { Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))Write(row,writer);
-            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(buffer.AsSpan(0,checked((int)stream.Position)))).ToLowerInvariant();
+            Write(row);
+            Span<byte> hash=stackalloc byte[32];
+            try
+            {
+                System.Security.Cryptography.SHA256.HashData(buffer.AsSpan(0,position),hash);
+                return Convert.ToHexString(hash).ToLowerInvariant();
+            }
+            finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(hash); }
         }
         finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(buffer); }
-        static void Write(JsonElement e,Utf8JsonWriter w)
+        void Byte(byte value)=>buffer[position++]=value;
+        void Hex(char value)
         {
-            if(e.ValueKind==JsonValueKind.Object){w.WriteStartObject();foreach(var p in e.EnumerateObject().OrderBy(x=>x.Name,StringComparer.Ordinal)){w.WritePropertyName(p.Name);Write(p.Value,w);}w.WriteEndObject();}
-            else if(e.ValueKind==JsonValueKind.Array){w.WriteStartArray();foreach(var v in e.EnumerateArray())Write(v,w);w.WriteEndArray();}
-            else if(e.ValueKind==JsonValueKind.String)w.WriteStringValue(e.GetString());else throw new JsonException();
+            const string digits="0123456789ABCDEF";
+            Byte((byte)'\\');Byte((byte)'u');
+            Byte((byte)digits[(value>>12)&15]);Byte((byte)digits[(value>>8)&15]);
+            Byte((byte)digits[(value>>4)&15]);Byte((byte)digits[value&15]);
+        }
+        void String(string value)
+        {
+            Byte((byte)'"');
+            for(int i=0;i<value.Length;i++)
+            {
+                char c=value[i];int scalar=c;
+                if(char.IsHighSurrogate(c))
+                {
+                    if(i+1==value.Length||!char.IsLowSurrogate(value[i+1]))throw new JsonException();
+                    scalar=char.ConvertToUtf32(c,value[++i]);
+                }
+                else if(char.IsLowSurrogate(c))throw new JsonException();
+                // Query the same BCL allowlist, but do not call its escaping routines:
+                // large-string writer escaping can rent additional uncleared arrays.
+                if(System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping.WillEncode(scalar))
+                {
+                    byte escape=c switch {'"'=>(byte)'"','\\'=>(byte)'\\','\b'=>(byte)'b','\t'=>(byte)'t','\n'=>(byte)'n','\f'=>(byte)'f','\r'=>(byte)'r',_=>0};
+                    if(escape!=0){Byte((byte)'\\');Byte(escape);}
+                    else {Hex(c);if(scalar>0xffff)Hex(value[i]);}
+                }
+                else if(scalar<=0x7f)Byte((byte)scalar);
+                else if(scalar<=0x7ff){Byte((byte)(0xc0|(scalar>>6)));Byte((byte)(0x80|(scalar&63)));}
+                else if(scalar<=0xffff){Byte((byte)(0xe0|(scalar>>12)));Byte((byte)(0x80|((scalar>>6)&63)));Byte((byte)(0x80|(scalar&63)));}
+                else {Byte((byte)(0xf0|(scalar>>18)));Byte((byte)(0x80|((scalar>>12)&63)));Byte((byte)(0x80|((scalar>>6)&63)));Byte((byte)(0x80|(scalar&63)));}
+            }
+            Byte((byte)'"');
+        }
+        void Write(JsonElement e)
+        {
+            if(e.ValueKind==JsonValueKind.Object)
+            {
+                Byte((byte)'{');bool comma=false;
+                foreach(var p in e.EnumerateObject().OrderBy(x=>x.Name,StringComparer.Ordinal))
+                {if(comma)Byte((byte)',');comma=true;String(p.Name);Byte((byte)':');Write(p.Value);}
+                Byte((byte)'}');
+            }
+            else if(e.ValueKind==JsonValueKind.Array)
+            {
+                Byte((byte)'[');bool comma=false;
+                foreach(var v in e.EnumerateArray()){if(comma)Byte((byte)',');comma=true;Write(v);}
+                Byte((byte)']');
+            }
+            else if(e.ValueKind==JsonValueKind.String)String(e.GetString()!);else throw new JsonException();
         }
     }
     private static string S(JsonElement e,string n)=>Grammar.String(e,n);
