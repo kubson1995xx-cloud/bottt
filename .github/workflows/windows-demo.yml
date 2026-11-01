@@ -5,8 +5,16 @@ on:
       mode:
         description: 'full-delivery packages; task1-source/task2-source/task3-source/task4-source validate only the named source prerequisite'
         type: choice
-        options: [ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
+        options: [ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
         default: full-delivery
+      ui_run_id:
+        description: 'Immutable UI candidate artifact run for test-only acceptance'
+        type: string
+        required: false
+      ui_zip_sha256:
+        description: 'Exact SHA256 pin for test-only UI candidate acceptance'
+        type: string
+        required: false
       phase:
         description: 'Source evidence label only; RED failures still fail the run'
         type: choice
@@ -31,6 +39,42 @@ on:
 permissions:
   contents: read
 jobs:
+  uiRepairAcceptance:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'ui-repair-acceptance' && github.ref == 'refs/heads/feature/apex-naval-command'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.427'
+      - uses: actions/download-artifact@v4
+        with:
+          name: UI-Repair-Candidate-${{ inputs.ui_run_id }}-1
+          run-id: ${{ inputs.ui_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/ui-candidate-input
+      - uses: actions/download-artifact@v4
+        with:
+          name: APEX-NAVAL-COMMAND-Windows-x64
+          run-id: 41338154933
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/ui-original-input
+      - name: Exact candidate acceptance only, no runtime rebuild or engine rerun
+        shell: powershell
+        env:
+          UI_ZIP_SHA256: ${{ inputs.ui_zip_sha256 }}
+        run: ./tools/windows/Test-UiRepairAcceptance.ps1 -Download "$env:RUNNER_TEMP/ui-candidate-input" -Original "$env:RUNNER_TEMP/ui-original-input" -ZipSha256 $env:UI_ZIP_SHA256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: UI-Acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ui-acceptance-evidence/**
+          if-no-files-found: error
+          retention-days: 30
   uiRepairDelivery:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'ui-repair-delivery' && github.ref == 'refs/heads/feature/apex-naval-command'
     runs-on: windows-latest

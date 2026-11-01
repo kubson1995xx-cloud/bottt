@@ -35,6 +35,25 @@ public sealed class WindowsUiRepairTests
         exceptions=b.Events.Count(e=>e.Session==sid&&e.Method=="Runtime.exceptionThrown"),
         console=b.Events.Where(e=>e.Session==sid&&e.Method=="Runtime.consoleAPICalled").Select(e=>new{type=e.Data.GetProperty("type").GetString()}).ToArray(),
         responses=b.Events.Where(e=>e.Session==sid&&e.Method=="Network.responseReceived").Select(e=>new{path=new Uri(e.Data.GetProperty("response").GetProperty("url").GetString()!).AbsolutePath,status=e.Data.GetProperty("response").GetProperty("status").GetInt32()}).ToArray()};
+    [Fact,Trait("Gate","UiUpgrade")]
+    public async Task PreviousExeProfilePreservedByFreshUiAndRestart()
+    {
+        await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());h.Port=WindowsTestHost.FreePort();
+        await h.StartAsync(new[]{"--data",h.DataRoot,"--port",h.Port.ToString(),"--no-browser"},legacyGenerator:true);await h.ReadyAsync();
+        h.Credentials=Apex.Desktop.Services.WindowsLocalAccess.Load(h.DataRoot,"presentation");await h.StopAsync();
+        var before=WindowsTestHost.Inventory(h.DataRoot).Where(p=>!p.Key.StartsWith("logi/",StringComparison.Ordinal)).ToDictionary(p=>p.Key,p=>p.Value);
+        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"upgrade-ui-edge"));string sid=await b.NewPage();
+        for(int n=0;n<2;n++){
+            await h.StartAsync(new[]{"--data",h.DataRoot,"--port",h.Port.ToString(),"--no-browser"});await h.ReadyAsync();await b.Navigate(sid,new Uri(h.Origin,"/naval/").AbsoluteUri);
+            await b.Wait(sid,"document.querySelector('#okx-operator-slot #okx-operator')!==null && document.querySelector('.connection.connected')!==null","Preserved prior EXE profile UI failed");
+            foreach(string route in new[]{"command","radar","fleets","animations","analytics"}){await Click(b,sid,".rail nav a[href='#/"+route+"']");await b.Wait(sid,"location.hash==="+J("#/"+route),"Preserved profile navigation failed");}
+            await Screenshot(b,sid,"preserved-profile-"+n);await h.StopAsync();
+            await WindowsTestHost.Until(()=>{try{using var l=new FileStream(Path.Combine(h.DataRoot,"apex.lock"),FileMode.Open,FileAccess.ReadWrite,FileShare.None);return Task.FromResult(true);}catch(IOException){return Task.FromResult(false);}},"Preserved profile lock did not release");
+            var after=WindowsTestHost.Inventory(h.DataRoot);foreach(var pair in before)Assert.True(after.TryGetValue(pair.Key,out var hash)&&hash==pair.Value,"Private profile bytes changed; contents withheld");
+        }
+        Assert.Equal(0,b.AuthenticationCommands);Assert.Equal(0,b.AuthorizationRequests);Assert.Equal(0,b.BasicChallenges);
+        WindowsTestHost.Evidence("ui-preserved-profile",new{originalExeSha256=Environment.GetEnvironmentVariable("APEX_LEGACY_EXE_SHA256"),newExeSha256=h.PayloadHash,preservedFiles=before.Count,twoStartsFiveViews=true,noLogin=true,diagnostics=Diagnostics(b,sid)});
+    }
     [Fact,Trait("Gate","UiInventory")]
     public async Task AllViewsControlsAndOperatorPointerInventory()
     {
@@ -63,6 +82,11 @@ public sealed class WindowsUiRepairTests
                 }
                 var disabled=await b.Evaluate(sid,"({recover:document.querySelector('[data-action=recover]').disabled,recoverySelector:document.querySelector('#okx-reservation').disabled,reason:document.querySelector('[data-action=recover]').title})");records.Add(new{viewport,action="recover",result=disabled});Assert.True(disabled.GetProperty("recover").GetBoolean());Assert.True(disabled.GetProperty("recoverySelector").GetBoolean());
                 await Click(b,sid,"[data-action=refresh]");await b.Wait(sid,"!document.querySelector('[data-action=refresh]').disabled","Manual refresh did not finish");
+                await b.CommandAsync("Network.setBlockedURLs",new{urls=new[]{"*/api/naval/okx/status*"}},sid);
+                await b.Wait(sid,"document.querySelector('#okx-status').textContent.includes('Status niedostępny')","Network status failure not surfaced");
+                await Click(b,sid,"[data-action=stop]");await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('OPERATOR_STOP')","STOP must not wait on failed status");
+                records.Add(new{viewport,fault="actual browser network status denial",result="visible error; risk controls disabled; independent STOP replied"});
+                await b.CommandAsync("Network.setBlockedURLs",new{urls=Array.Empty<string>()},sid);await Click(b,sid,"[data-action=refresh]");await b.Wait(sid,"!document.querySelector('[data-action=start]').disabled","Restored actual status did not recover controls");
                 foreach(var(route,title) in new[]{("command","Command Center"),("radar","Tactical Radar"),("fleets","Fleet Operations"),("animations","Trade Animations"),("analytics","Analytics Center")}){
                     await Click(b,sid,".rail nav a[href='#/"+route+"']");await b.Wait(sid,"document.querySelector('main h1')?.textContent==="+J(title),"Pointer navigation failed: "+route);
                     await b.Evaluate(sid,"document.querySelector('main').scrollIntoView({block:'start'})");await Screenshot(b,sid,viewport+"-"+route);
@@ -132,7 +156,7 @@ public sealed class WindowsUiRepairTests
         await Screenshot(b,sid,"pointer-configure-before");await Pointer(b,sid,hit);
         await Task.Delay(750);
         var after=await b.Evaluate(sid,"({result:document.querySelector('#okx-result').textContent,hash:location.hash,box:document.querySelector('#okx-operator').getBoundingClientRect().toJSON(),rail:document.querySelector('.rail').getBoundingClientRect().toJSON()})");
-        WindowsTestHost.Evidence("pointer-configure",new{hit,after,pointerInput=true,domClick=false,exeSha256=h.PayloadHash});
+        WindowsTestHost.Evidence("pointer-configure",new{hit,after,pointerInput=true,domClick=false,exeSha256=h.PayloadHash,diagnostics=Diagnostics(b,sid)});
         await Screenshot(b,sid,"pointer-configure-after");
         Assert.True(hit.GetProperty("hit").GetBoolean(),"Configure center occluded: actual pointer is not delivered to the button");
         var pointerNative=await WindowsNativeUi.Metadata(h.Pid);WindowsTestHost.Evidence("native-pointer-configure",WindowsNativeUi.Observe(pointerNative,h.Pid));WindowsNativeUi.ScreenshotMetadata(pointerNative,"native-pointer-configure");WindowsNativeUi.Cancel(pointerNative);
