@@ -23,6 +23,76 @@ public sealed class WindowsUiRepairTests
         await b.CommandAsync("Input.dispatchMouseEvent",new{type="mousePressed",x,y,button="left",clickCount=1},sid);
         await b.CommandAsync("Input.dispatchMouseEvent",new{type="mouseReleased",x,y,button="left",clickCount=1},sid);
     }
+    private static async Task<JsonElement> Click(WindowsCdpBrowser b,string sid,string selector)
+    {
+        var hit=await Hit(b,sid,selector);Assert.True(hit.GetProperty("hit").GetBoolean(),"Pointer target occluded: "+selector);await Pointer(b,sid,hit);return hit;
+    }
+    private static async Task Key(WindowsCdpBrowser b,string sid,string key,int code)
+    {
+        await b.CommandAsync("Input.dispatchKeyEvent",new{type="keyDown",key,code=key,windowsVirtualKeyCode=code},sid);await b.CommandAsync("Input.dispatchKeyEvent",new{type="keyUp",key,code=key,windowsVirtualKeyCode=code},sid);
+    }
+    private static object Diagnostics(WindowsCdpBrowser b,string sid)=>new{
+        exceptions=b.Events.Count(e=>e.Session==sid&&e.Method=="Runtime.exceptionThrown"),
+        console=b.Events.Where(e=>e.Session==sid&&e.Method=="Runtime.consoleAPICalled").Select(e=>new{type=e.Data.GetProperty("type").GetString()}).ToArray(),
+        responses=b.Events.Where(e=>e.Session==sid&&e.Method=="Network.responseReceived").Select(e=>new{path=new Uri(e.Data.GetProperty("response").GetProperty("url").GetString()!).AbsolutePath,status=e.Data.GetProperty("response").GetProperty("status").GetInt32()}).ToArray()};
+    [Fact,Trait("Gate","UiInventory")]
+    public async Task AllViewsControlsAndOperatorPointerInventory()
+    {
+        await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();
+        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"inventory-edge"));string sid=await b.NewPage();
+        var records=new List<object>();
+        try{
+            // Owned nonsecret metadata fixture ONLY: zero key envelope, private connection or trade.
+            await h.StopAsync();string config=Path.Combine(h.DataRoot,"apex.config.json");var c=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(config))!;
+            c["OkxNaval"]=System.Text.Json.Nodes.JsonNode.Parse("{\"Schema\":\"okx-naval-config-v1\",\"Scopes\":[{\"ScopeId\":\"ui-demo\",\"Environment\":\"OkxDemo\",\"Region\":\"EEA\",\"ExpectedUid\":\"123456\",\"ExpectedMainUid\":\"123456\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential\",\"SafetyVersion\":\"okx-cash-v1\"},{\"ScopeId\":\"ui-demo-two\",\"Environment\":\"OkxDemo\",\"Region\":\"EEA\",\"ExpectedUid\":\"234567\",\"ExpectedMainUid\":\"234567\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential-two\",\"SafetyVersion\":\"okx-cash-v1\"}]}");
+            File.WriteAllText(config,c.ToJsonString());await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();
+            foreach(var (width,height,scale) in new[]{(1440,900,1d),(900,650,1.25d),(640,800,1.25d)}){
+                string viewport=width+"x"+height;
+                await b.CommandAsync("Emulation.setDeviceMetricsOverride",new{width,height,deviceScaleFactor=scale,mobile=false},sid);
+                await b.Navigate(sid,new Uri(h.Origin,"/naval/").AbsoluteUri);
+                await b.Wait(sid,"document.querySelector('#okx-scope')?.value==='ui-demo' && document.querySelector('.connection.connected')!==null","Actual host state did not render");
+                var layout=await b.Evaluate(sid,"(()=>{let p=document.querySelector('#okx-operator').getBoundingClientRect(),r=document.querySelector('.rail').getBoundingClientRect();return {horizontalOverflow:document.documentElement.scrollWidth>innerWidth,overlap:Math.min(p.right,r.right)>Math.max(p.left,r.left)&&Math.min(p.bottom,r.bottom)>Math.max(p.top,r.top),slot:document.querySelector('#okx-operator').parentElement.id,globalReadOnly:document.body.textContent.includes('READ-ONLY APPLICATION')};})()");
+                records.Add(new{viewport,layout});Assert.False(layout.GetProperty("overlap").GetBoolean());Assert.False(layout.GetProperty("horizontalOverflow").GetBoolean());Assert.False(layout.GetProperty("globalReadOnly").GetBoolean());
+                await Screenshot(b,sid,viewport+"-operator");
+                await Click(b,sid,"#okx-scope");await Key(b,sid,"ArrowDown",40);await Key(b,sid,"Enter",13);
+                await b.Wait(sid,"document.querySelector('#okx-scope').value==='ui-demo-two'","Pointer/keyboard scope selection failed");records.Add(new{viewport,control="okx-scope",result="ui-demo-two; selection only, no connect"});
+                await Click(b,sid,"#okx-scope");await Key(b,sid,"ArrowUp",38);await Key(b,sid,"Enter",13);
+                foreach(var(action,expected) in new[]{("connect","LOCAL_ACTION_REFUSED_PRESERVED"),("baseline","BASELINE_REFUSED_PRESERVED"),("arm","BASELINE_REQUIRED"),("start","BASELINE_REQUIRED"),("stop","OPERATOR_STOP"),("emergency","EMERGENCY_STOP_NO_OPEN_OWNER"),("disconnect","DISCONNECTED_STOP")}){
+                    await b.Wait(sid,"!document.querySelector('[data-action="+action+"]').disabled","Action remained busy: "+action);
+                    var hit=await Click(b,sid,"#okx-operator button[data-action="+action+"]");await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes("+J(expected)+")","Missing control result: "+action);records.Add(new{viewport,action,hit,result=expected});
+                }
+                var disabled=await b.Evaluate(sid,"({recover:document.querySelector('[data-action=recover]').disabled,recoverySelector:document.querySelector('#okx-reservation').disabled,reason:document.querySelector('[data-action=recover]').title})");records.Add(new{viewport,action="recover",result=disabled});Assert.True(disabled.GetProperty("recover").GetBoolean());Assert.True(disabled.GetProperty("recoverySelector").GetBoolean());
+                await Click(b,sid,"[data-action=refresh]");await b.Wait(sid,"!document.querySelector('[data-action=refresh]').disabled","Manual refresh did not finish");
+                foreach(var(route,title) in new[]{("command","Command Center"),("radar","Tactical Radar"),("fleets","Fleet Operations"),("animations","Trade Animations"),("analytics","Analytics Center")}){
+                    await Click(b,sid,".rail nav a[href='#/"+route+"']");await b.Wait(sid,"document.querySelector('main h1')?.textContent==="+J(title),"Pointer navigation failed: "+route);
+                    await b.Evaluate(sid,"document.querySelector('main').scrollIntoView({block:'start'})");await Screenshot(b,sid,viewport+"-"+route);
+                    // Enumerate every currently present view control. Pure test locator attributes,
+                    // no event handlers/state/globals injected; every action uses CDP input.
+                    var controls=await b.Evaluate(sid,"Array.from(document.querySelectorAll('main button,main summary,main [role=button]')).map((e,i)=>{e.setAttribute('data-ui-probe',String(i));return {id:i,label:(e.getAttribute('aria-label')||e.textContent).trim(),disabled:!!e.disabled};})");
+                    foreach(var item in controls.EnumerateArray()){
+                        string selector="[data-ui-probe='"+item.GetProperty("id").GetInt32()+"']";
+                        if(!(await b.Evaluate(sid,"document.querySelector("+J(selector)+")!==null")).GetBoolean()){records.Add(new{viewport,route,item,result="removed by prior legitimate selection"});continue;}
+                        var hit=await Hit(b,sid,selector);if(hit.GetProperty("width").GetDouble()==0||hit.GetProperty("height").GetDouble()==0){records.Add(new{viewport,route,item,result="not rendered (optional capability / closed details)"});continue;}
+                        Assert.True(hit.GetProperty("hit").GetBoolean(),"View control occluded: "+route+" "+item.GetProperty("label").GetString());await Pointer(b,sid,hit);await Task.Delay(40);
+                        var after=await b.Evaluate(sid,"(()=>{let e=document.querySelector("+J(selector)+");return {pressed:e?.getAttribute('aria-pressed'),disabled:!!e?.disabled,detailsOpen:e?.parentElement?.open??null};})()");records.Add(new{viewport,route,item,hit,after});
+                    }
+                    var toolbar=await b.Evaluate(sid,"Array.from(document.querySelectorAll('.toolbar input,.toolbar select,.toolbar button')).map((e,i)=>{e.setAttribute('data-toolbar-probe',String(i));return {id:i,tag:e.tagName,label:e.parentElement.textContent.trim()};})");
+                    foreach(var item in toolbar.EnumerateArray()){
+                        string selector="[data-toolbar-probe='"+item.GetProperty("id").GetInt32()+"']";await Click(b,sid,selector);
+                        if(item.GetProperty("tag").GetString()=="SELECT"){await Key(b,sid,"ArrowDown",40);await Key(b,sid,"Enter",13);await Click(b,sid,selector);await Key(b,sid,"Home",36);await Key(b,sid,"Enter",13);}
+                        else if(item.GetProperty("tag").GetString()=="INPUT")await Click(b,sid,selector);
+                        records.Add(new{viewport,route,toolbar=item,result="real pointer; input toggled/restored or resync completed"});
+                    }
+                    await b.Wait(sid,"document.querySelector('.connection.connected')!==null","Resync did not recover");
+                }
+                await b.Reload(sid);await b.Wait(sid,"document.querySelector('#okx-operator-slot #okx-operator')!==null && document.querySelector('.connection.connected')!==null","Reload broke integration");
+                await Click(b,sid,"#okx-operator nav a[href='/']");await b.Wait(sid,"document.querySelector('.app')!==null && document.querySelector('#okx-operator')!==null","Old panel link failed");await Screenshot(b,sid,viewport+"-old-panel");
+                await Click(b,sid,"#okx-operator nav a[href='/naval/']");await b.Wait(sid,"document.querySelector('.naval-app')!==null","Return Naval failed");records.Add(new{viewport,navigation="old-panel-and-back; reload",result="PASS"});
+            }
+            Assert.Equal(0,b.AuthenticationCommands);Assert.Equal(0,b.AuthorizationRequests);Assert.Equal(0,b.BasicChallenges);
+            var state=await h.Json("/api/naval/okx/status");Assert.All(state.GetProperty("accounts").EnumerateArray(),a=>{Assert.False(a.GetProperty("connected").GetBoolean());Assert.False(a.GetProperty("ready").GetBoolean());Assert.Equal("STOP",a.GetProperty("mode").GetString());});Assert.False(Directory.Exists(Path.Combine(h.DataRoot,"okx")));
+        }finally{WindowsTestHost.Evidence("ui-inventory",new{records,diagnostics=Diagnostics(b,sid),syntheticNonsecretBindings=true,credentialsEntered=false,privateBrokerConnected=false,domClick=false,exeSha256=h.PayloadHash});}
+    }
     [Fact,Trait("Gate","UiRepair")]
     public async Task NativeInvalidMetadataMustRemainVisible()
     {
@@ -38,7 +108,17 @@ public sealed class WindowsUiRepairTests
         if(remains)WindowsNativeUi.ScreenshotMetadata(window,"native-metadata-validation");
         Assert.True(remains,"Invalid metadata silently closes the native form instead of showing validation");
         Assert.False(string.IsNullOrWhiteSpace(WindowsNativeUi.Error(window)));
-        WindowsNativeUi.Cancel(window);await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('NATIVE_CANCELLED')","Native cancel missing");
+        foreach(var (id,text) in new[]{(100,"demo"),(101,"ui-form-proof"),(102,"123456"),(103,"EUR")})WindowsNativeUi.Text(window,id,text);
+        WindowsNativeUi.Click(window,1);await Task.Delay(250);Assert.True(WindowsNativeUi.Visible(window));Assert.Contains("Niepoprawny",WindowsNativeUi.Error(window));
+        WindowsNativeUi.ScreenshotMetadata(window,"native-metadata-invalid-environment");
+        WindowsNativeUi.Text(window,100,"DEMO");WindowsNativeUi.Click(window,1);
+        await WindowsTestHost.Until(()=>Task.FromResult(!WindowsNativeUi.Visible(window)),"Valid DEMO metadata did not advance from the actual native form");
+        // Genuine secure approval may use the secure desktop. No password is known for
+        // the hosted runner identity, and no bypass/provider replacement is permitted.
+        await Task.Delay(1200);
+        WindowsTestHost.Evidence("native-metadata-progression",new{validDemoMetadataAccepted=true,securePositiveVerified=false,maskedSecretFormVerified=false,windowsPasswordEntered=false,providerReplaced=false,reason="Hosted runner account has no owned interactive credential acceptance lane; stop before approval / secret enrollment"});
+        await h.StopAsync();
+        Assert.False(Directory.Exists(Path.Combine(h.DataRoot,"okx")));
     }
     [Fact,Trait("Gate","UiRepair")]
     public async Task ExtractedPointerConfigureMustBeReachable()
@@ -55,7 +135,12 @@ public sealed class WindowsUiRepairTests
         WindowsTestHost.Evidence("pointer-configure",new{hit,after,pointerInput=true,domClick=false,exeSha256=h.PayloadHash});
         await Screenshot(b,sid,"pointer-configure-after");
         Assert.True(hit.GetProperty("hit").GetBoolean(),"Configure center occluded: actual pointer is not delivered to the button");
-        await h.CancelOkxConfigurationAsync();
+        var pointerNative=await WindowsNativeUi.Metadata(h.Pid);WindowsTestHost.Evidence("native-pointer-configure",WindowsNativeUi.Observe(pointerNative,h.Pid));WindowsNativeUi.ScreenshotMetadata(pointerNative,"native-pointer-configure");WindowsNativeUi.Cancel(pointerNative);
         await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('NATIVE_CANCELLED')","Native cancellation not shown");
+        await b.CommandAsync("Page.bringToFront",new{},sid);
+        await b.Evaluate(sid,"document.querySelector('[data-action=configure]').focus()");await Key(b,sid,"Enter",13);
+        var native=await WindowsNativeUi.Metadata(h.Pid);WindowsTestHost.Evidence("native-keyboard-configure",WindowsNativeUi.Observe(native,h.Pid));WindowsNativeUi.ScreenshotMetadata(native,"native-keyboard-configure");WindowsNativeUi.Cancel(native);
+        await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('NATIVE_CANCELLED')","Keyboard native cancellation not shown");
+        WindowsTestHost.Evidence("configure-diagnostics",Diagnostics(b,sid));
     }
 }

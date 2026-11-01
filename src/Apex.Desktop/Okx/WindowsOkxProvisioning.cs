@@ -15,16 +15,16 @@ internal static class WindowsOkxProvisioning
         if(!OperatingSystem.IsWindows())throw new InvalidOperationException("NATIVE_WINDOWS_REQUIRED");
         var metadata=await WindowsOkxDialog.ShowAsync("APEX — konfiguracja OKX","Dedykowany cash SPOT ≤1x, bez pożyczek, feeType=1: opłaty tylko w quote. Warunkowe TP/SL po fill może zawieść; po anulowaniu i nieudanej sprzedaży może pozostać niechroniona reszta bez limitu czasu. STOP nie likwiduje. Bez połączenia/START; LIVE domyślnie OFF. Istniejących zakresów nie nadpisujemy.",new[]{
             new OkxNativeField("Środowisko: wpisz dokładnie DEMO albo LIVE (brak domyślnego)"),new OkxNativeField("Nazwa zakresu (litery ASCII, cyfry, - lub _)"),
-            new OkxNativeField("UID głównego rachunku (bez subkonta)"),new OkxNativeField("Rzeczywista waluta kwotowana (np. EUR; bez przeliczania USDT)")},ct).ConfigureAwait(false);
+            new OkxNativeField("UID głównego rachunku (bez subkonta)"),new OkxNativeField("Rzeczywista waluta kwotowana (np. EUR; bez przeliczania USDT)")},ct,values=>
+            {
+                try { ReadMetadata(config,values);return null; }
+                catch(Exception e) when(e is InvalidDataException or InvalidOperationException or ArgumentException) { return "OKX_METADATA_INVALID"; }
+            }).ConfigureAwait(false);
         if(metadata==null)return null;
         OkxScopeOptions option;OkxScopeBinding binding;
         try
         {
-            string env=Encoding.UTF8.GetString(metadata[0]);
-            if(env is not ("DEMO" or "LIVE"))throw new InvalidDataException("OKX_SCOPE_INVALID");
-            option=new(){ScopeId=Encoding.UTF8.GetString(metadata[1]),Environment=env=="DEMO"?"OkxDemo":"Live",Region="EEA",ExpectedUid=Encoding.UTF8.GetString(metadata[2]),ExpectedMainUid=Encoding.UTF8.GetString(metadata[2]),QuoteCurrency=Encoding.UTF8.GetString(metadata[3]),CredentialBindingId=Guid.NewGuid().ToString("N"),SafetyVersion="okx-cash-v1"};
-            var all=(config.Config.OkxNaval?.Scopes??Array.Empty<OkxScopeOptions>()).Append(option).ToArray();
-            binding=OkxConfiguration.Bind(new(){Schema="okx-naval-config-v1",Scopes=all}).Single(b=>b.ScopeId==option.ScopeId);
+            (option,binding)=ReadMetadata(config,metadata);
         }
         finally{foreach(var bytes in metadata)CryptographicOperations.ZeroMemory(bytes);}
         if(!await WindowsOkxApprovalProvider.ConfirmAsync(WindowsOkxApprovalProvider.Scope(binding)+"\nUtworzenie lokalnego magazynu klucza. Pochodzenie klucza musi odpowiadać wybranemu środowisku. Nie uruchamia handlu. Bez wypłat, transferów ani pożyczek.",ct).ConfigureAwait(false))return null;
@@ -39,5 +39,14 @@ internal static class WindowsOkxProvisioning
             return binding;
         }
         finally{foreach(var bytes in secrets)CryptographicOperations.ZeroMemory(bytes);}
+    }
+    private static (OkxScopeOptions,OkxScopeBinding) ReadMetadata(ConfigStore config,byte[][] metadata)
+    {
+        string env=Encoding.UTF8.GetString(metadata[0]);
+        if(env is not ("DEMO" or "LIVE"))throw new InvalidDataException("OKX_SCOPE_INVALID");
+        var option=new OkxScopeOptions{ScopeId=Encoding.UTF8.GetString(metadata[1]),Environment=env=="DEMO"?"OkxDemo":"Live",Region="EEA",ExpectedUid=Encoding.UTF8.GetString(metadata[2]),ExpectedMainUid=Encoding.UTF8.GetString(metadata[2]),QuoteCurrency=Encoding.UTF8.GetString(metadata[3]),CredentialBindingId=Guid.NewGuid().ToString("N"),SafetyVersion="okx-cash-v1"};
+        var all=(config.Config.OkxNaval?.Scopes??Array.Empty<OkxScopeOptions>()).Append(option).ToArray();
+        var binding=OkxConfiguration.Bind(new(){Schema="okx-naval-config-v1",Scopes=all}).Single(b=>b.ScopeId==option.ScopeId);
+        return (option,binding);
     }
 }

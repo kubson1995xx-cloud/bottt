@@ -17,6 +17,7 @@ internal static class OkxControlEndpoints
     internal static void Map(WebApplication app,OkxOperatorControl control)
     {
         app.MapGet("/okx-controls.js",()=>Results.Stream(typeof(OkxControlEndpoints).Assembly.GetManifestResourceStream("Apex.Desktop.Okx.okx-controls.js")!,"text/javascript; charset=utf-8"));
+        app.MapGet("/okx-controls.css",()=>Results.Stream(typeof(OkxControlEndpoints).Assembly.GetManifestResourceStream("Apex.Desktop.Okx.okx-controls.css")!,"text/css; charset=utf-8"));
         app.MapGet("/api/naval/okx/status",()=>Results.Json(control.ReadStatus()));
         app.MapPost("/api/naval/okx/configure",(Delegate)((HttpContext ctx)=>Command(ctx,"", "configure")));
         app.MapPost("/api/naval/okx/{scope}/{action}",(HttpContext ctx,string scope,string action)=>Command(ctx,scope,action));

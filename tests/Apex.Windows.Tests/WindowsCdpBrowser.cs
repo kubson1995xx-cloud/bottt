@@ -91,7 +91,7 @@ internal sealed class WindowsCdpBrowser : IAsyncDisposable
                     }
                     if(name=="Network.responseReceived" && data.GetProperty("response").GetProperty("headers").EnumerateObject().Any(h=>h.Name.Equals("WWW-Authenticate",StringComparison.OrdinalIgnoreCase)&&h.Value.ToString().StartsWith("Basic",StringComparison.OrdinalIgnoreCase)))Interlocked.Increment(ref BasicChallenges);
                     // Keep sensitive auth/request headers out of retained event records.
-                    if(name is "Network.responseReceived" or "Network.loadingFinished" or "Page.javascriptDialogOpening")
+                    if(name is "Network.responseReceived" or "Network.loadingFinished" or "Page.javascriptDialogOpening" or "Runtime.exceptionThrown" or "Runtime.consoleAPICalled" or "Log.entryAdded")
                     {if(Events.Count>12000)throw new Exception("Event bound exceeded");Events.Enqueue((name,data,session));}
                     var handler=OnEvent;if(handler!=null){int key=Interlocked.Increment(ref eventSerial);Task task=Task.Run(()=>handler(name,data,session));handlers[key]=task;_=task.ContinueWith(_=>handlers.TryRemove(key,out var ignored));}
                 }

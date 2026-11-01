@@ -13,20 +13,20 @@ internal sealed record OkxNativeField(string Label, bool Secret=false, string In
 // Native local-only inputs. No clipboard, browser, child-process arguments or plaintext files.
 internal static class WindowsOkxDialog
 {
-    internal static Task<byte[][]?> ShowAsync(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct)
+    internal static Task<byte[][]?> ShowAsync(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct,Func<byte[][],string?>? validate=null)
     {
         if(!OperatingSystem.IsWindows()||!Environment.UserInteractive||ct.IsCancellationRequested)return Task.FromResult<byte[][]?>(null);
         var completion=new TaskCompletionSource<byte[][]?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread=new Thread(()=>{try{completion.SetResult(Show(title,explanation,fields,ct));}catch(Exception e) when(e is not OutOfMemoryException){completion.SetResult(null);}});
+        var thread=new Thread(()=>{try{completion.SetResult(Show(title,explanation,fields,ct,validate));}catch(Exception e) when(e is not OutOfMemoryException){completion.SetResult(null);}});
         thread.SetApartmentState(ApartmentState.STA);thread.IsBackground=true;thread.Start();return completion.Task;
     }
-    private static byte[][]? Show(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct)
+    private static byte[][]? Show(string title,string explanation,IReadOnlyList<OkxNativeField> fields,CancellationToken ct,Func<byte[][],string?>? validate)
     {
         if(!OperatingSystem.IsWindows())return null;
         if(fields.Count>12)throw new ArgumentException("NATIVE_FIELD_LIMIT");
         using var memory=new MemoryStream();using var w=new BinaryWriter(memory,Encoding.Unicode,true);
-        int height=76+fields.Count*28;
-        w.Write(0x90C808C4u);w.Write(0u);w.Write((ushort)(3+fields.Count*2));w.Write((short)0);w.Write((short)0);w.Write((short)350);w.Write((short)height);
+        int height=100+fields.Count*28;
+        w.Write(0x90C808C4u);w.Write(0u);w.Write((ushort)(4+fields.Count*2));w.Write((short)0);w.Write((short)0);w.Write((short)350);w.Write((short)height);
         w.Write((ushort)0);w.Write((ushort)0);Text(w,title);w.Write((ushort)9);Text(w,"Segoe UI");
         Item(w,0x50000000,8,6,334,38,90,0x82,explanation);
         for(int i=0;i<fields.Count;i++)
@@ -34,12 +34,13 @@ internal static class WindowsOkxDialog
             Item(w,0x50000000,8,46+i*28,334,10,200+i,0x82,fields[i].Label);
             Item(w,0x50810080u|(fields[i].Secret?0x20u:0),8,57+i*28,334,14,100+i,0x81,fields[i].Initial);
         }
+        Item(w,0x50000000,8,height-48,334,22,91,0x82,"");
         Item(w,0x50010001,176,height-22,78,15,1,0x80,"Zatwierdź");Item(w,0x50010000,262,height-22,78,15,2,0x80,"Anuluj");
         byte[] template=memory.ToArray();var pin=GCHandle.Alloc(template,GCHandleType.Pinned);byte[][]? result=null;
         long until=Environment.TickCount64+120000;
         DialogProc callback=(window,message,a,b)=>
         {
-            if(message==0x110){SetTimer(window,new IntPtr(1),100,IntPtr.Zero);return new IntPtr(1);}
+            if(message==0x110){SetTimer(window,new IntPtr(1),100,IntPtr.Zero);ShowWindow(window,5);SetForegroundWindow(window);BringWindowToTop(window);SetFocus(GetDlgItem(window,100));return IntPtr.Zero;}
             if(message==0x113&&(ct.IsCancellationRequested||Environment.TickCount64>=until)){EndDialog(window,new IntPtr(2));return new IntPtr(1);}
             if(message==0x10){EndDialog(window,new IntPtr(2));return new IntPtr(1);}
             if(message==0x111&&((a.ToInt64()&0xffff)==1||(a.ToInt64()&0xffff)==2))
@@ -56,8 +57,10 @@ internal static class WindowsOkxDialog
                             try{int count=GetDlgItemTextW(window,100+i,chars,chars.Length);if(count<=0||count>=4096)throw new InvalidDataException("NATIVE_INPUT_INVALID");result[i]=Encoding.UTF8.GetBytes(chars,0,count);}
                             finally{Array.Clear(chars);}
                         }
+                        string? error=validate?.Invoke(result);
+                        if(error!=null)throw new InvalidDataException(error);
                     }
-                    catch{foreach(var bytes in result)if(bytes!=null)CryptographicOperations.ZeroMemory(bytes);result=null;}
+                    catch(Exception e) when(e is not OutOfMemoryException){foreach(var bytes in result)if(bytes!=null)CryptographicOperations.ZeroMemory(bytes);result=null;SetDlgItemTextW(window,91,e is InvalidDataException&&e.Message=="OKX_METADATA_INVALID"?"Niepoprawny lub istniejący zakres. DEMO/LIVE, unikalna nazwa, UID i waluta są wymagane.":"Uzupełnij wszystkie pola (1–4095 znaków). Formularz pozostaje otwarty.");SetFocus(GetDlgItem(window,100));return new IntPtr(1);}
                 }
                 for(int i=0;i<fields.Count;i++)SetDlgItemTextW(window,100+i,"");
                 EndDialog(window,new IntPtr(accept&&result!=null?1:2));return new IntPtr(1);
@@ -79,4 +82,9 @@ internal static class WindowsOkxDialog
     [DllImport("user32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern bool SetDlgItemTextW(IntPtr w,int id,string text);
     [DllImport("user32.dll")]private static extern bool EndDialog(IntPtr w,IntPtr result);
     [DllImport("user32.dll")]private static extern IntPtr SetTimer(IntPtr w,IntPtr id,uint milliseconds,IntPtr callback);
+    [DllImport("user32.dll")]private static extern bool ShowWindow(IntPtr w,int command);
+    [DllImport("user32.dll")]private static extern bool SetForegroundWindow(IntPtr w);
+    [DllImport("user32.dll")]private static extern bool BringWindowToTop(IntPtr w);
+    [DllImport("user32.dll")]private static extern IntPtr SetFocus(IntPtr w);
+    [DllImport("user32.dll")]private static extern IntPtr GetDlgItem(IntPtr w,int id);
 }

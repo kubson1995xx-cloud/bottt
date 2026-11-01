@@ -2,6 +2,15 @@
 
 **Windows desktop-local — bez ręcznego logowania. Kandydat oczekuje niezależnego odbioru.** Wymagane są testy dokładnego EXE: pierwszy start, aktualizacja poprzedniego profilu, przeglądarka bez podawania poświadczeń i restart. Sprawdź osobne wyniki dla dokładnego SHA źródeł i ZIP-a. Hosted Windows Server nie jest fizycznym Windows 11 Pro użytkownika.
 
+## START po poprawce interfejsu OKX / Naval
+
+- Zatrzymaj starą instancję świadomie, zachowując prywatne dane. Rozpakuj **cały nowy ZIP do nowego folderu** i uruchom nowe `APEX-Desktop\ApexDesktop.exe`, nie stary skrót. Nie kasuj `%LOCALAPPDATA%\APEX Trading AI`.
+- Operator OKX jest teraz osobnym panelem w normalnym układzie treści, bez zasłaniania przez lewy pasek. Przycisk **Operator OKX ↑** wraca do niego; **Wróć do widoku Naval** przewija do bieżącego widoku. Stary polski panel i pięć widoków pozostają dostępne.
+- **Dodaj konto** otwiera osobne rzeczywiste okno Windows „APEX — konfiguracja OKX”. Gdy przeglądarka pozostała z przodu, sprawdź pasek zadań lub **Alt+Tab**. Nie wpisuj kluczy ani hasła w stronę WWW. Puste/niepoprawne metadane pokazują błąd w otwartym formularzu; **Anuluj** nie zapisuje konta.
+- Brak konta / połączenia / własnego stanu do redukcji to jawny powód niedostępności odpowiednich poleceń, nie uszkodzony przycisk. Przy błędzie odczytu użyj **Odśwież status**. Odpowiedź `BASELINE_REQUIRED` lub odmowa nie jest sukcesem połączenia ani START. Nie ponawiaj niepewnego wyniku mutacji w ciemno.
+- Nagłówek „Naval: tylko odczyt historii” opisuje **syntetyczne widoki Naval**, nie osobnego operatora OKX. Żadnych syntetycznych sald nie uznajemy za rzeczywiste saldo OKX.
+- Dowód otwarcia/obsługi metadanych nie jest dowodem pomyślnego chronionego uwierzytelnienia Windows ani zapisu maskowanych sekretów. Pozytywny etap zgody, provisioning i prywatne DEMO pozostają osobnymi lokalnymi kryteriami; nie obchodź ich.
+
 ## Rozpakowanie i start
 
 1. Porównaj SHA-256 pliku `APEX-NAVAL-COMMAND-Windows-x64.zip` z otrzymanym z zaufanego źródła plikiem `.zip.sha256` (`Get-FileHash -Algorithm SHA256`). Suma i manifest nie są podpisem wydawcy. Pliki nie są podpisane: nie omijaj bezrefleksyjnie SmartScreen ani ostrzeżeń systemu; przy nieznanym źródle przerwij.

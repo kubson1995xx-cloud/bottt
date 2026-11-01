@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <# Frontend-first builder. No test bypass, deployment, provisioning or broker smoke. #>
-param([string]$Wyjscie = '', [ValidateSet('win-x64','linux-x64')][string]$Target='win-x64', [switch]$Offline)
+param([string]$Wyjscie = '', [ValidateSet('win-x64','linux-x64')][string]$Target='win-x64', [switch]$Offline, [string]$UiOnlyReuseRoot='')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'TestEvidence.ps1')
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -62,6 +62,29 @@ function NodeGate([string]$name,[string[]]$arguments) {
 $buildEvidence=$Wyjscie+'-build-evidence';New-Item -ItemType Directory -Path $buildEvidence | Out-Null
 Copy-Item (Join-Path $sdkSelection 'global.json') (Join-Path $buildEvidence 'sdk-global.json')
 $before=Inputs;Json (Join-Path $evidence 'source-inputs.json') $before
+$reuse=$null
+if ($UiOnlyReuseRoot) {
+    if ($Target -cne 'win-x64') { throw 'UI-only evidence reuse is Windows-only' }
+    & (Join-Path $UiOnlyReuseRoot 'Sprawdz-Pakiet.ps1') -Pakiet $UiOnlyReuseRoot
+    $priorMeta=Get-Content (Join-Path $UiOnlyReuseRoot 'apex-build.json') -Raw|ConvertFrom-Json
+    if ($priorMeta.sourceCommit -cne 'd1f928e6d272fd5e4f0c5570685f91802a8c1d9f') { throw 'Unapproved reuse source' }
+    $priorInputs=Get-Content (Join-Path $UiOnlyReuseRoot 'Weryfikacja/source-inputs.json') -Raw|ConvertFrom-Json
+    $old=@{};foreach ($f in $priorInputs.files) { $old[$f.path]=$f.sha256 }
+    $now=@{};foreach ($f in $before.files) { $now[$f.path]=$f.sha256 }
+    $allowed='\A(?:frontend/naval/src/ui/Shell\.tsx|frontend/naval/src/styles/naval\.css|src/Apex\.Desktop/Apex\.Desktop\.csproj|src/Apex\.Desktop/Okx/(?:okx-controls\.(?:js|css)|OkxControlEndpoints\.cs|WindowsOkxDialog\.cs|WindowsOkxProvisioning\.cs)|tests/Apex\.Windows\.Tests/(?:WindowsUiRepairTests|WindowsNativeUi|WindowsCdpBrowser|WindowsBrowserAcceptanceTests)\.cs|tests/panel/okx-ui\.test\.cjs|tests/package/safe_extract\.py|tools/windows/(?:Zbuduj-APEX|Test-UiRepairOriginal|Test-UiRepairDelivery)\.ps1|tools/windows/PRZECZYTAJ-WINDOWS\.md|\.github/workflows/windows-demo\.yml)\z'
+    $delta=@();$same=@()
+    foreach ($name in @(@($old.Keys)+@($now.Keys)|Sort-Object -Unique)) {
+        if ($old[$name] -ceq $now[$name]) { $same+=@{path=$name;sha256=$now[$name]};continue }
+        if ($name -cnotmatch $allowed -or -not $now.ContainsKey($name)) { throw ('UI reuse refused changed engine/unapproved input: '+$name) }
+        $delta+=@{path=$name;prior=$old[$name];current=$now[$name]}
+    }
+    $suiteBindings=@{};foreach ($suite in @('bot','platform','backtester')) {
+        $p=Join-Path $UiOnlyReuseRoot ('Weryfikacja/'+$suite+'.trx');Read-ApexTestCounts $p|Out-Null
+        $suiteBindings[$suite]=@{execution='reused-not-rerun';sha256=(Hash $p);sourceCommit=$priorMeta.sourceCommit}
+    }
+    $reuse=@{kind='ui-only-unchanged-engine-evidence';sourceCommit=$priorMeta.sourceCommit;zipSha256='87deacbf67fd9de196511951ed95c50ff3c1f2595e8c769037824252d8732005';sourceInputsSha256=$priorMeta.sourceInputsSha256;unchangedCount=$same.Count;delta=$delta;suites=$suiteBindings;legacyFlags='TestsRun flags mean retained passing evidence; these three suites were NOT executed in this build'}
+    Json (Join-Path $buildEvidence 'engine-evidence-reuse.json') @{reuse=$reuse;unchangedInputs=$same;priorSourceInputs=$priorInputs}
+}
 Copy-Item (Join-Path $evidence 'source-inputs.json') $buildEvidence
 function Save-BinaryMap([string]$Name) {
     $paths=@('src/Apex.Desktop/bin/Release/net8.0','tests/Apex.Tests/bin/Release/net8.0','tests/Apex.Windows.Tests/bin/Release/net8.0','tests/Apex.Backtester.Tests/bin/Release/net8.0','src/Platforms/cTrader/Tests/bin/Release/net8.0','tools/Apex.Backtester/bin/Release/net8.0')
@@ -92,7 +115,8 @@ try {
     $built=Test-ApexNavalAssets (Join-Path $repo 'src/Apex.Desktop/bin/Release/net8.0/wwwroot/naval');if ($built.sha256 -cne $naval.sha256) { throw 'Build/Naval parity failed' }
     Save-BinaryMap 'before-product-tests.json'
     foreach ($suite in @(@('bot','tests/Apex.Tests/Apex.Tests.csproj'),@('platform','src/Platforms/cTrader/Tests/Apex.Platform.Tests.csproj'),@('backtester','tests/Apex.Backtester.Tests/Apex.Backtester.Tests.csproj'))) {
-        Invoke-ApexBuildDotnet test $suite[1] -c Release --no-build --no-restore --logger ('trx;LogFileName='+$suite[0]+'.trx') --results-directory $evidence;Sprawdz $suite[0]
+        if ($reuse) { Copy-Item (Join-Path $UiOnlyReuseRoot ('Weryfikacja/'+$suite[0]+'.trx')) $evidence }
+        else { Invoke-ApexBuildDotnet test $suite[1] -c Release --no-build --no-restore --logger ('trx;LogFileName='+$suite[0]+'.trx') --results-directory $evidence;Sprawdz $suite[0] }
     }
     $testCounts=[ordered]@{bot=(Read-ApexTestCounts (Join-Path $evidence 'bot.trx'));platform=(Read-ApexTestCounts (Join-Path $evidence 'platform.trx'));backtester=(Read-ApexTestCounts (Join-Path $evidence 'backtester.trx'))}
     & npm test;Sprawdz 'Root panel and packaging tests'
@@ -234,6 +258,7 @@ exec dotnet "$here/APEX-Desktop/ApexDesktop.dll" --data "$data" --no-browser
     $after=Inputs
     if (($before|ConvertTo-Json -Depth 12 -Compress) -cne ($after|ConvertTo-Json -Depth 12 -Compress)) { throw 'Source inputs changed during build; preserve evidence, rebind before promotion' }
     $info=[ordered]@{schema='apex-build-v2';product='APEX Trading AI DEMO';sourceCommit="$commit".Trim();sourceDirty=$dirty;builtUtc=[DateTime]::UtcNow.ToString('o');target=$Target;deploymentMode=$mode;requiredRuntime=$runtime;demoOnly=$true;botTestsRun=$true;platformTestsRun=$true;backtesterTestsRun=$true;testCounts=$testCounts;panelTestsRun=$true;frontendTestsRun=$true;frontendBuildVerified=$true;brokerTested=$false;windowsRuntimeTested=$false;navalReadDefaultEnabled=$false;task7Acceptance='accepted-local-linux';sourceInputsSha256=(Hash (Join-Path $evidence 'source-inputs.json'));rootLockSha256=(Hash 'package-lock.json');navalLockSha256=(Hash 'frontend/naval/package-lock.json');navalManifestSha256=$naval.sha256;frontendResultsSha256=(Hash (Join-Path $evidence 'frontend-results.json'));tools=@{node=$node;npm=$npm;dotnet=$sdk;powershell=$PSVersionTable.PSVersion.ToString()};originalPanelSha256=$rootHashes}
+    if ($reuse) { $info.evidenceReuse=$reuse }
     if ($Target -eq 'win-x64') { $info.navalReadDefaultEnabled=$true;$info.firstRunProfile='windows-local-presentation-v1';$info.existingConfigPolicy='preserve';$info.task7Acceptance='pending' }
     Json (Join-Path $Wyjscie 'apex-build.json') $info
     $base=$Wyjscie.TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar
