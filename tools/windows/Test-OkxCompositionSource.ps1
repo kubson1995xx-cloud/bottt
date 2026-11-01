@@ -50,7 +50,7 @@ try {
     $filter='FullyQualifiedName~OkxConfigTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxNativeCredentialTests'
     if ($Gate -eq 'credentials') { $filter='FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxNativeCredentialTests' }
     if ($Gate -eq 'broker-store') { $filter='FullyQualifiedName~OkxNativeBrokerStoreTests' }
-    if ($Gate -eq 'native-controls') { $filter='FullyQualifiedName~OkxNativeControlTests' }
+    if ($Gate -eq 'native-controls') { $filter='FullyQualifiedName~OkxCompositionTests.OkxComposition_ProductionIgnoresSyntheticUnlocks|FullyQualifiedName~OkxOperationalTradingTests.Fresh_reconnect_opens_original_nonempty_account_allocation_then_reconciles_without_reseed_or_resend' }
     if ($Gate -eq 'native-controls') {
         $runtime=Join-Path $evidence 'runtime'; New-Item -ItemType Directory -Path $runtime | Out-Null
         Copy-Item -LiteralPath (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') -Destination (Join-Path $runtime 'tests') -Recurse

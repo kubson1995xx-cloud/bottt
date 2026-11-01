@@ -187,7 +187,16 @@ public sealed class OkxOperationalTradingTests
         Assert.True(connected,initial.Status+" paths="+string.Join(",",f.Paths));Assert.True(await initial.ApproveAndCreateAsync(default),initial.Status);
         await using var loop=OkxOperationalTradingService.ForTests(initial,(s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxExecutionClient.ForTests(peer,TimeProvider.System,s,p,h,x),peer,TimeProvider.System);
         var execute=f.Request with{Purpose=OkxActivationPurpose.Execute,Session=initial.TradingSessionId,ExpiresUtc=DateTimeOffset.UtcNow.AddSeconds(120)};var armed=await f.Runtime.Activation.RequestAsync(execute,default);Assert.True(loop.Arm(execute,armed!));
-        Assert.Equal(NavalMutationStatus.Applied,(await loop.ReconcileAsync(default)).Status);Assert.Equal(NavalMutationStatus.Applied,loop.Start().Status);Assert.Equal(NavalMutationStatus.Applied,(await loop.RunOnceAsync(NavalFleet.Alpha,"BTC-USDC",default)).Status);
+        string Predicate(string phase,NavalRiskResult result)
+        {
+            var quoteMap=(System.Collections.Generic.Dictionary<string,NavalBrokerQuote>)typeof(OkxOperationalTradingService).GetField("quotes",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(loop)!;
+            var now=DateTimeOffset.UtcNow;var state=initial.BrokerSession!.ReadState();
+            return System.Text.Json.JsonSerializer.Serialize(new{phase,result.Code,result.Status,utc=now,peerUtc=f.Clock.GetUtcNow(),snapshot=initial.Coordinator!.Snapshot().Reason,
+                obligations=state.NavalBroker!.Operational?.Obligations,quotes=quoteMap.Values.Select(q=>new{q.SourceUtc,q.ReceivedUtc,sourceAfterReceipt=q.SourceUtc>q.ReceivedUtc,ageMilliseconds=(now-q.SourceUtc).TotalMilliseconds}),reads=f.Paths.Count,posts=peer.Posts});
+        }
+        var initialReconcile=await loop.ReconcileAsync(default);Assert.True(initialReconcile.Status==NavalMutationStatus.Applied,Predicate("initial-reconcile",initialReconcile));
+        var initialStart=loop.Start();Assert.True(initialStart.Status==NavalMutationStatus.Applied,Predicate("initial-start",initialStart));
+        var initialEntry=await loop.RunOnceAsync(NavalFleet.Alpha,"BTC-USDC",default);Assert.True(initialEntry.Status==NavalMutationStatus.Applied,Predicate("initial-entry",initialEntry));
         TradingEconomicsFixture.Install(f,peer,peer.Size,peer.Size*.11m,true);Assert.Equal(NavalMutationStatus.Applied,(await loop.ReconcileAsync(default)).Status);decimal cash=initial.Coordinator!.Snapshot().Cash;
         await loop.DisposeAsync();await initial.DisconnectAsync();await using var service=Service();
         var request=f.Request with{Session=Guid.NewGuid(),ExpiresUtc=DateTimeOffset.UtcNow.AddSeconds(120)};var lease=await f.Runtime.Activation.RequestAsync(request,default);

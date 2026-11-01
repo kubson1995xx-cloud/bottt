@@ -42,7 +42,17 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
     internal static OkxOperationalTradingService Create(OkxAccountConnectionService account)=>new(account,TimeProvider.System,null,null,null);
     internal static OkxOperationalTradingService ForTests(OkxAccountConnectionService account,Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxFinalDispatchFence,OkxExecutionClient> writes,HttpMessageHandler market,TimeProvider clock,bool protocolProtection=true)
         =>new(account,clock,writes,market,protocolProtection?"SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION":null);
-    internal bool Arm(OkxActivationRequest request,OkxActivationLease lease)=>armed=SourceCurrent&&account.ArmExecution(request,lease);
+    private long armingEpoch;
+    internal bool Arm(OkxActivationRequest request,OkxActivationLease lease)
+    {
+        long epoch=Interlocked.Read(ref armingEpoch);
+        bool approved=SourceCurrent&&account.ArmExecution(request,lease);
+        armed=approved&&epoch==Interlocked.Read(ref armingEpoch);
+        // STOP may happen after the equality check but before the volatile assignment.
+        if(epoch!=Interlocked.Read(ref armingEpoch))armed=false;
+        return armed;
+    }
+    private void RevokeArming(){Interlocked.Increment(ref armingEpoch);armed=false;}
     private NavalRiskResult Refuse(string code)=>new(NavalMutationStatus.Refused,code,null,session.Coordinator.Snapshot().DurableRevision);
     private static IReadOnlyList<T> Observed<T>(OkxObservationRead<T> read)
     {if(read.Status!=OkxObservationStatus.Observed)throw new InvalidDataException("BROKER_OBSERVATION_FAILED");return read.Rows;}
@@ -129,12 +139,12 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
     private static string N(decimal n)=>n.ToString("0.############################",CultureInfo.InvariantCulture);
     public bool CanDispatch(OkxPreparedRequest request,DateTimeOffset now)=>false;
     public IDisposable? TryEnterDispatch(OkxPreparedRequest request,DateTimeOffset now)=>current==null?null:session.EnterDispatch(current,request.Digest,now);
-    internal void Stop(){armed=false;if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("OPERATOR_STOP");}
+    internal void Stop(){RevokeArming();if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("OPERATOR_STOP");}
     private readonly object closing=new();private Task? disposal;
     public ValueTask DisposeAsync(){lock(closing)return new(disposal??=DrainAsync());}
     private async Task DrainAsync()
     {
-        armed=false;disposed=true;if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("BROKER_TRADING_DISPOSED");
+        RevokeArming();disposed=true;if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("BROKER_TRADING_DISPOSED");
         await client.DisposeAsync().ConfigureAwait(false);await lane.WaitAsync().ConfigureAwait(false);
         try{feed.Dispose();account.UnregisterTrading(this);}finally{lane.Release();}
     }

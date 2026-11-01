@@ -16,7 +16,7 @@ internal sealed partial class OkxOperationalTradingService
         return new(view.Mode,Status,SourceCurrent,armed,protection!=null&&protection!="SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION",view.Ready&&CanExecute&&protection!=null&&protection!="SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION",
             state.DurableRevision,view.Cash,view.Held,b.Baseline.Observations.Catalog.Select(i=>i.Instrument).ToArray(),b.Operational?.Obligations??Array.Empty<string>());
     }
-    internal void EmergencyStop(){armed=false;session.EmergencyStop();}
+    internal void EmergencyStop(){RevokeArming();session.EmergencyStop();}
     // Explicit host-owned lifetime; no task/network/secret access is started by construction/startup.
     // Reconciliation continues while stopped, but neither this loop nor a successful refresh STARTs trading.
     internal async Task RunAsync(CancellationToken ct)

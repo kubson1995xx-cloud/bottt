@@ -25,7 +25,25 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
         if(copy.Select(b=>b.Account.Environment).Distinct().Count()!=copy.Length||copy.Select(b=>b.ScopeId).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=copy.Length)throw new System.IO.InvalidDataException("OKX_SCOPE_INVALID");
         Bindings=Array.AsReadOnly(copy);this.secrets=new(secrets);Activation=new(activation,()=>DateTimeOffset.UtcNow);
     }
-    internal static OkxNavalRuntime Compose(string admittedDataRoot,IReadOnlyList<OkxScopeBinding> bindings)=>new(admittedDataRoot,bindings,()=>new WindowsOkxCredentialStore(admittedDataRoot),new WindowsOkxApprovalProvider());
+    internal static OkxNavalRuntime Compose(string admittedDataRoot,IReadOnlyList<OkxScopeBinding> bindings)
+    {
+        OkxNavalRuntime? runtime=null;
+        var provider=new WindowsOkxApprovalProvider(activationAdmitted:r=>runtime?.NativeActivationAdmitted(r)==true);
+        runtime=new(admittedDataRoot,bindings,()=>new WindowsOkxCredentialStore(admittedDataRoot),provider);return runtime;
+    }
+    private bool NativeActivationAdmitted(OkxActivationRequest request)
+    {
+        lock(sync)
+        {
+            if(disposed||!Bindings.Contains(request.Binding)||request.Purpose==OkxActivationPurpose.Execute&&!accountServices.Any(s=>s.IsConnected&&s.Binding==request.Binding&&s.TradingSessionId==request.Session))return false;
+            try
+            {
+                using var credential=secrets.Value.Open(request.Binding,OkxConfiguration.Paths(dataRoot,request.Binding));
+                return credential.Binding==request.Binding&&credential.Fingerprint==request.CredentialFingerprint;
+            }
+            catch(Exception e) when(e is not OutOfMemoryException){return false;}
+        }
+    }
     internal static OkxNavalRuntime Compose(string admittedDataRoot,IReadOnlyList<OkxScopeBinding> bindings,IOkxExecutionSecretProvider secrets,IOkxProtectedActivationProvider activation)=>new(admittedDataRoot,bindings,()=>secrets,activation);
     internal static OkxNavalExecutionDispatcher ComposeOfflineExecutionForTests(Apex.Core.Naval.NavalExecutionTransactions transactions,
         Func<Apex.Adapters.Okx.Execution.IOkxSerializedDispatchFence,Apex.Adapters.Okx.Execution.OkxExecutionClient> offlineClientFactory)=>new(transactions,offlineClientFactory);
