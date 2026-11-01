@@ -35,7 +35,7 @@ internal static class WindowsOkxDialog
         w.Write(0x90C808C4u);w.Write(0u);w.Write((ushort)(4+fields.Count*2+(connect?2:0)));w.Write((short)0);w.Write((short)0);w.Write((short)350);w.Write((short)height);
         w.Write((ushort)0);w.Write((ushort)0);Text(w,title);w.Write((ushort)9);Text(w,"Segoe UI");
         Item(w,0x50000000,8,6,334,38,90,0x82,explanation);
-        if(connect){Item(w,0x50010009,8,46,150,18,80,0x80,"DEMO — tylko odczyt");Item(w,0x58000009,170,46,170,18,81,0x80,"LIVE — zablokowane");}
+        if(connect){Item(w,0x50000000,8,46,150,18,80,0x82,"DEMO — tylko odczyt");Item(w,0x58000000,170,46,170,18,81,0x80,"LIVE — zablokowane");}
         for(int i=0;i<fields.Count;i++)
         {
             Item(w,0x50000000,8,offset+46+i*28,334,10,200+i,0x82,fields[i].Label);
@@ -49,7 +49,7 @@ internal static class WindowsOkxDialog
         void ClearFields(IntPtr window){for(int i=0;i<fields.Count;i++)SetDlgItemTextW(window,100+i,"");}
         DialogProc callback=(window,message,a,b)=>
         {
-            if(message==0x110){if(connect)SendMessageW(GetDlgItem(window,80),0xF1,new IntPtr(1),IntPtr.Zero);SetTimer(window,new IntPtr(1),100,IntPtr.Zero);ShowWindow(window,5);SetForegroundWindow(window);BringWindowToTop(window);SetFocus(GetDlgItem(window,100));return IntPtr.Zero;}
+            if(message==0x110){SetTimer(window,new IntPtr(1),100,IntPtr.Zero);ShowWindow(window,5);SetForegroundWindow(window);BringWindowToTop(window);SetFocus(GetDlgItem(window,100));return IntPtr.Zero;}
             if(message==0x113&&sending?.IsCompleted==true){string? error=sending.IsCompletedSuccessfully?sending.Result:"CONNECT_LOCAL_REFUSED";sending=null;if(error==null&&!operation.IsCancellationRequested){ClearFields(window);EndDialog(window,new IntPtr(1));return new IntPtr(1);}if(result!=null)foreach(var value in result)CryptographicOperations.ZeroMemory(value);result=null;EnableWindow(GetDlgItem(window,1),true);SetDlgItemTextW(window,91,error??"CONNECT_CANCELLED");SetFocus(GetDlgItem(window,100));}
             if(message==0x113&&(ct.IsCancellationRequested||Environment.TickCount64>=until)){operation.Cancel();ClearFields(window);EndDialog(window,new IntPtr(2));return new IntPtr(1);}
             if(message==0x10){operation.Cancel();ClearFields(window);EndDialog(window,new IntPtr(2));return new IntPtr(1);}
@@ -101,5 +101,5 @@ internal static class WindowsOkxDialog
     [DllImport("user32.dll")]private static extern IntPtr SetFocus(IntPtr w);
     [DllImport("user32.dll")]private static extern IntPtr GetDlgItem(IntPtr w,int id);
     [DllImport("user32.dll")]private static extern bool EnableWindow(IntPtr w,bool enable);
-    [DllImport("user32.dll")]private static extern IntPtr SendMessageW(IntPtr w,uint message,IntPtr a,IntPtr b);
+
 }

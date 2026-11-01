@@ -56,6 +56,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '26'
+      - uses: actions/download-artifact@v4
+        if: inputs.mode == 'okx-simple-connect-delivery'
+        with:
+          name: APEX-NAVAL-COMMAND-Windows-x64
+          run-id: 41338154933
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/simple-connect-prior
       - name: Scoped native connect gate
         shell: powershell
         env:
@@ -67,6 +74,9 @@ jobs:
           name: OKX-Simple-Connect-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/okx-simple-connect/**
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64-build-evidence/**
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64-package-evidence/**
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64/Weryfikacja/**
             ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64.zip
             ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64.zip.sha256
           if-no-files-found: error

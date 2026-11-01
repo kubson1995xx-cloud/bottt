@@ -43,11 +43,12 @@
     options(recovery,(current?.inventory||[]).map(i=>[i.reservationId,`${i.instrument} | ${i.quantity} | ${i.state} | ${i.reservationId}`]),'Brak własnego stanu do redukcji');
     select.disabled=!healthy||busy||connected||!accounts.length;
     recovery.disabled=!healthy||busy||!recovery.value;
-    reason.textContent=!healthy?'Status niepotwierdzony. Polecenia zwiększające ryzyko są niedostępne; odśwież status. STOP / Emergency / rozłączenie pozostają dostępne dla ostatniego znanego zakresu.':!accounts.length?'Brak konta OKX. Użyj „Dodaj konto” — otworzy się osobne natywne okno Windows.':connected?'Połączony rachunek: przed zmianą zakresu lub konfiguracji użyj „Rozłącz”.':'Zakres skonfigurowany, nie jest dowodem połączenia, uzbrojenia ani gotowości START. Odmowę backendu pokazujemy poniżej.';
+    reason.textContent=!healthy?'Status niepotwierdzony. Polecenia zwiększające ryzyko są niedostępne; odśwież status. STOP / Emergency / rozłączenie pozostają dostępne dla ostatniego znanego zakresu.':!accounts.length?'Brak konta OKX. Użyj „Połącz konto OKX” — trzy pola w lokalnym oknie Windows, DEMO domyślne.':current?.readOnly?'READ-ONLY / STOP / nieuzbrojony. Salda według walut, bez przeliczeń i bez finansowego ownera. Po restarcie lub wygaśnięciu odczytu użyj Połącz ponownie.':connected?'Połączony rachunek: przed zmianą zakresu lub konfiguracji użyj „Rozłącz”.':'Starszy zakres zachowany; konfiguracja nie jest dowodem połączenia ani gotowości START.';
     for(const b of actions.querySelectorAll('button')){
       const action=b.dataset.action,safety=['stop','emergency','disconnect'].includes(action);
       if(action==='cancel'){b.disabled=false;continue;}
       if(current?.readOnly&&['connect','baseline','arm','start','recover'].includes(action)){b.disabled=true;b.title='Konto tylko do odczytu — brak uprawnień aktywacji';continue;}
+      if(action==='reconnect'&&!current?.readOnly){b.disabled=true;b.title='Starszy zakres: użyj istniejącego testu odczytu DEMO';continue;}
       const why=action==='refresh'?(polling?'Pobieranie statusu':''):action==='configure'?(busy?'Trwa lokalne polecenie':connected?'Najpierw rozłącz rachunek':state?.nativeAvailable===false?'Wymagany interaktywny Windows':''):!current?'Brak konta OKX':safety?'':!healthy?'Brak potwierdzonego statusu':busy?'Trwa lokalne polecenie':action==='test-demo'&&(current.environment!=='OkxDemo'||connected)?'Tylko DEMO, przed testem rozłącz aktywną sesję':action==='recover'&&!recovery.value?'Brak własnego stanu do redukcji':'';
       b.disabled=!!why;b.title=why;b.setAttribute('aria-describedby','okx-reason');
     }
@@ -61,7 +62,7 @@
       state=next;healthy=true;options(select,state.accounts.map(a=>[a.scopeId,`${a.environment==='Live'?'LIVE':'DEMO'} | UID ${a.uid} | ${a.quote||'waluty osobno / READ-ONLY'} | ${a.scopeId}`]),'Brak konta OKX');
       const current=state.accounts.find(a=>a.scopeId===select.value);
       stage.textContent=enrollmentHelp(state.enrollmentStage);
-      status.textContent=(current?JSON.stringify(current,null,2):'Brak konta. Dodaj je w lokalnym formularzu Windows. Żadne prywatne połączenie nie jest uruchomione.')+'\nMagazyn: '+(state.unboundStoreState||'status nieznany')+'\nDla bota DEMO zapisz od razu docelowy klucz read_only,trade. Test salda dopuszcza read_only albo read_only,trade, ale wykonuje wyłącznie odczyt. To nie P&L, baza kapitału ani zgoda na handel. Jeden niezmienny zakres na środowisko; UI nie oferuje rotacji. Nie usuwaj ani nie nadpisuj istniejących danych.';
+      status.textContent=(current?JSON.stringify(current,null,2):'Brak konta. Połącz je w lokalnym formularzu Windows. Żadne prywatne połączenie nie jest uruchomione.')+'\nMagazyn starszych zakresów: '+(state.unboundStoreState||'status nieznany')+'\nAkceptowane read_only albo read_only,trade, wyłącznie odczyt. To nie P&L, baza kapitału ani zgoda na handel. Salda walut są oddzielne; brak salda oznacza brak obserwacji, nie wymyślone zero. Brak automatycznego rynku i USD/USDT. UI nie oferuje rotacji ani nadpisywania istniejących danych.';
     }catch(e){healthy=false;status.textContent='Status niedostępny — '+(e.name==='AbortError'?'przekroczono 5 s':e.message)+'. Nie jest to potwierdzenie stanu rachunku.';}
     finally{clearTimeout(timer);polling=false;render();}
   }

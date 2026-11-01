@@ -6,7 +6,7 @@ namespace Apex.Windows.Tests;
 internal static class WindowsNativeUi
 {
     internal static async Task<IntPtr> Metadata(int pid)
-        =>await Window(pid,"APEX — konfiguracja OKX");
+        =>await Window(pid,"APEX — lokalny klucz OKX");
     internal static bool Masked(IntPtr w,int id)=>(GetWindowLongPtrW(GetDlgItem(w,id),-16).ToInt64()&0x20)!=0;
     internal static async Task<IntPtr> Window(int pid,string title)
     {
@@ -30,7 +30,10 @@ internal static class WindowsNativeUi
     }
     internal static void ScreenshotMetadata(IntPtr w,string name)
     {
-        var title=new StringBuilder(256);GetWindowText(w,title,title.Capacity);Assert.Equal("APEX — konfiguracja OKX",title.ToString());
+        var title=new StringBuilder(256);GetWindowText(w,title,title.Capacity);Assert.Equal("APEX — lokalny klucz OKX",title.ToString());
+        // Screenshots are permitted only before any secret input. Masking is not
+        // a privacy oracle: refuse populated native fields even when masked.
+        for(int id=100;id<103;id++){var value=new StringBuilder(4097);GetWindowText(GetDlgItem(w,id),value,value.Capacity);Assert.True(value.Length==0,"Never screenshot a populated credential form");}
         GetWindowRect(w,out var r);int width=r.Right-r.Left,height=r.Bottom-r.Top;Assert.InRange(width,100,2000);Assert.InRange(height,100,1600);
         IntPtr dc=GetWindowDC(w),copy=CreateCompatibleDC(dc),bitmap=CreateCompatibleBitmap(dc,width,height),old=SelectObject(copy,bitmap);
         try{

@@ -107,7 +107,7 @@ public sealed class WindowsUiRepairTests
                 var layout=await b.Evaluate(sid,"(()=>{let p=document.querySelector('#okx-operator').getBoundingClientRect(),r=document.querySelector('.rail').getBoundingClientRect();return {horizontalOverflow:document.documentElement.scrollWidth>innerWidth,overlap:Math.min(p.right,r.right)>Math.max(p.left,r.left)&&Math.min(p.bottom,r.bottom)>Math.max(p.top,r.top),slot:document.querySelector('#okx-operator').parentElement.id,globalReadOnly:document.body.textContent.includes('READ-ONLY APPLICATION')};})()");
                 records.Add(new{viewport,layout});Assert.False(layout.GetProperty("overlap").GetBoolean());Assert.False(layout.GetProperty("horizontalOverflow").GetBoolean());Assert.False(layout.GetProperty("globalReadOnly").GetBoolean());
                 await Screenshot(b,sid,viewport+"-operator");
-                await Click(b,sid,"[data-action=configure]");var form=await WindowsNativeUi.Metadata(h.Pid);records.Add(new{viewport,action="configure",native=WindowsNativeUi.Observe(form,h.Pid)});WindowsNativeUi.ScreenshotMetadata(form,viewport+"-native-configure");WindowsNativeUi.Cancel(form);await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('METADATA_USER_CANCELLED')","Constrained native Cancel did not return");await b.CommandAsync("Page.bringToFront",new{},sid);
+                await Click(b,sid,"[data-action=configure]");var form=await WindowsNativeUi.Metadata(h.Pid);records.Add(new{viewport,action="configure",native=WindowsNativeUi.Observe(form,h.Pid)});WindowsNativeUi.ScreenshotMetadata(form,viewport+"-native-configure");WindowsNativeUi.Cancel(form);await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('CONNECT_USER_CANCELLED')","Constrained native Cancel did not return");await b.CommandAsync("Page.bringToFront",new{},sid);
                 await Click(b,sid,"#okx-scope");await Key(b,sid,"ArrowDown",40);await Key(b,sid,"Enter",13);
                 await b.Wait(sid,"document.querySelector('#okx-scope').value==='ui-demo-two'","Pointer/keyboard scope selection failed");records.Add(new{viewport,control="okx-scope",result="ui-demo-two; selection only, no connect"});
                 await Click(b,sid,"#okx-scope");await Key(b,sid,"ArrowUp",38);await Key(b,sid,"Enter",13);
@@ -182,15 +182,13 @@ public sealed class WindowsUiRepairTests
         if(remains)WindowsNativeUi.ScreenshotMetadata(window,"native-metadata-validation");
         Assert.True(remains,"Invalid metadata silently closes the native form instead of showing validation");
         Assert.False(string.IsNullOrWhiteSpace(WindowsNativeUi.Error(window)));
-        foreach(var (id,text) in new[]{(100,"demo"),(101,"ui-form-proof"),(102,"123456"),(103,"EUR")})WindowsNativeUi.Text(window,id,text);
-        WindowsNativeUi.Click(window,1);await Task.Delay(250);Assert.True(WindowsNativeUi.Visible(window));Assert.Contains("Niepoprawny",WindowsNativeUi.Error(window));
-        WindowsNativeUi.ScreenshotMetadata(window,"native-metadata-invalid-environment");
-        WindowsNativeUi.Text(window,100,"DEMO");WindowsNativeUi.Click(window,1);
-        await WindowsTestHost.Until(()=>Task.FromResult(!WindowsNativeUi.Visible(window)),"Valid DEMO metadata did not advance from the actual native form");
-        // Genuine secure approval may use the secure desktop. No password is known for
-        // the hosted runner identity, and no bypass/provider replacement is permitted.
-        await Task.Delay(1200);
-        WindowsTestHost.Evidence("native-metadata-progression",new{validDemoMetadataAccepted=true,securePositiveVerified=false,maskedSecretFormVerified=false,windowsPasswordEntered=false,providerReplaced=false,reason="Hosted runner account has no owned interactive credential acceptance lane; stop before approval / secret enrollment"});
+        // Do not enter synthetic keys through production: Połącz now really
+        // performs private GETs. Empty validation + cancel proves the native
+        // boundary without any agent broker call or fake protected positive.
+        Assert.True(Enumerable.Range(100,3).All(id=>WindowsNativeUi.Masked(window,id)));
+        WindowsNativeUi.Cancel(window);
+        await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('CONNECT_USER_CANCELLED')","Native cancel was not published");
+        WindowsTestHost.Evidence("native-single-form-boundary",new{defaultDemo=true,maskedSecretFields=3,emptyValidation=true,cancelled=true,privateBrokerCalled=false,securePositiveVerified=false,windowsPasswordEntered=false,providerReplaced=false});
         await h.StopAsync();
         Assert.False(Directory.Exists(Path.Combine(h.DataRoot,"okx")));
     }
@@ -210,13 +208,13 @@ public sealed class WindowsUiRepairTests
         await Screenshot(b,sid,"pointer-configure-after");
         Assert.True(hit.GetProperty("hit").GetBoolean(),"Configure center occluded: actual pointer is not delivered to the button");
         var pointerNative=await WindowsNativeUi.Metadata(h.Pid);WindowsTestHost.Evidence("native-pointer-configure",WindowsNativeUi.Observe(pointerNative,h.Pid));WindowsNativeUi.ScreenshotMetadata(pointerNative,"native-pointer-configure");WindowsNativeUi.Cancel(pointerNative);
-        await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('METADATA_USER_CANCELLED')","Native cancellation not shown");
+        await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('CONNECT_USER_CANCELLED')","Native cancellation not shown");
         await b.Wait(sid,"!document.querySelector('[data-action=configure]').disabled","Configure must leave busy state before keyboard action");
         await b.CommandAsync("Page.bringToFront",new{},sid);
         await b.Evaluate(sid,"document.querySelector('[data-action=configure]').focus()");await Key(b,sid,"Enter",13);
         WindowsTestHost.Evidence("native-keyboard-admission",new{state=await b.Evaluate(sid,"({focused:document.hasFocus(),action:document.activeElement?.dataset?.action,disabled:document.querySelector('[data-action=configure]').disabled,result:document.querySelector('#okx-result').textContent})"),diagnostics=Diagnostics(b,sid)});
         var native=await WindowsNativeUi.Metadata(h.Pid);WindowsTestHost.Evidence("native-keyboard-configure",WindowsNativeUi.Observe(native,h.Pid));WindowsNativeUi.ScreenshotMetadata(native,"native-keyboard-configure");WindowsNativeUi.Cancel(native);
-        await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('METADATA_USER_CANCELLED')","Keyboard native cancellation not shown");
+        await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('CONNECT_USER_CANCELLED')","Keyboard native cancellation not shown");
         WindowsTestHost.Evidence("configure-diagnostics",Diagnostics(b,sid));
     }
 }

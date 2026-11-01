@@ -20,7 +20,7 @@ public sealed class WindowsOkxSimpleConnectTests
             var w=await WindowsNativeUi.Window(Environment.ProcessId,"APEX — lokalny klucz OKX");
             Assert.True(Enumerable.Range(100,3).All(i=>WindowsNativeUi.Masked(w,i)),"Three native masked fields required");
             Assert.NotEqual(IntPtr.Zero,GetDlgItem(w,80));
-            Assert.Equal(new IntPtr(1),SendMessageW(GetDlgItem(w,80),0xF0,IntPtr.Zero,IntPtr.Zero));
+            var classes=new List<string>();EnumChildWindows(w,(child,_)=>{var name=new StringBuilder(128);GetClassNameW(child,name,name.Capacity);classes.Add(name.ToString());return true;},IntPtr.Zero);Assert.Equal(3,classes.Count(c=>c=="Edit"));Assert.DoesNotContain("ComboBox",classes);
             Assert.NotEqual(IntPtr.Zero,GetDlgItem(w,81));Assert.False(IsWindowEnabled(GetDlgItem(w,81)));
             var text=new StringBuilder(80);GetWindowTextW(GetDlgItem(w,1),text,text.Capacity);Assert.Equal("Połącz",text.ToString());
             WindowsNativeUi.Click(w,1);await Task.Delay(100);Assert.True(WindowsNativeUi.Visible(w));
@@ -63,5 +63,7 @@ public sealed class WindowsOkxSimpleConnectTests
     [DllImport("user32.dll")]private static extern IntPtr GetDlgItem(IntPtr w,int id);
     [DllImport("user32.dll")]private static extern bool IsWindowEnabled(IntPtr w);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)]private static extern int GetWindowTextW(IntPtr w,StringBuilder text,int count);
-    [DllImport("user32.dll")]private static extern IntPtr SendMessageW(IntPtr w,uint msg,IntPtr a,IntPtr b);
+    private delegate bool EnumChild(IntPtr w,IntPtr p);
+    [DllImport("user32.dll")]private static extern bool EnumChildWindows(IntPtr w,EnumChild callback,IntPtr p);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)]private static extern int GetClassNameW(IntPtr w,StringBuilder name,int count);
 }
