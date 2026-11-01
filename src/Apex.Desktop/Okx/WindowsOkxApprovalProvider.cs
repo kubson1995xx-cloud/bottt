@@ -78,7 +78,7 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
             uint us=(uint)user.Length,ds=(uint)domain.Length,ps=(uint)password.Length;
             // Documented same-logon protected credential decryption. No PIN to
             // password conversion or generic/nonsecure fallback is attempted.
-            if(!CredUnPackAuthenticationBufferW(4,packed,packedSize,user,ref us,domain,ref ds,password,ref ps))return new(false,"APPROVAL_UNPACK_UNSUPPORTED_METHOD",(uint)Marshal.GetLastWin32Error());
+            if(!UnpackProtected(packed,packedSize,user,ref us,domain,ref ds,password,ref ps))return new(false,"APPROVAL_UNPACK_UNSUPPORTED_METHOD",(uint)Marshal.GetLastWin32Error());
             u=GCHandle.Alloc(user,GCHandleType.Pinned);d=GCHandle.Alloc(domain,GCHandleType.Pinned);p=GCHandle.Alloc(password,GCHandleType.Pinned);
             // UPN names require NULL domain. Preserve an explicit local/domain/
             // MicrosoftAccount provider domain exactly; do not guess or retry it.
@@ -101,6 +101,8 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
             if(packed!=IntPtr.Zero){for(uint i=0;i<packedSize;i++)Marshal.WriteByte(packed,(int)i,0);Marshal.FreeCoTaskMem(packed);}
         }
     }
+    internal static bool UnpackProtected(IntPtr packed,uint size,char[] user,ref uint userSize,char[] domain,ref uint domainSize,char[] password,ref uint passwordSize)=>
+        CredUnPackAuthenticationBufferW(4,packed,size,user,ref userSize,domain,ref domainSize,password,ref passwordSize);
     public async ValueTask<OkxKeyScopeInspection?> InspectAsync(OkxScopeBinding binding,string fingerprint,CancellationToken ct)
     {
         var fields=await WindowsOkxDialog.ShowAsync("APEX — uprawnienia klucza OKX",Scope(binding)+"\nSprawdź klucz w OKX. Trade może obejmować dodatkowe operacje. Nie potwierdzaj bez dowodu wykluczenia finansowania/pożyczek/earn/wypłat.",new[]{
