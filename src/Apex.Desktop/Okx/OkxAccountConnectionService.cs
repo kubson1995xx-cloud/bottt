@@ -80,7 +80,12 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
             if(!connected)throw new InvalidOperationException("OBSERVATION_GAP");
             var inspection=await approval.InspectAsync(binding,request.CredentialFingerprint,linked.Token).ConfigureAwait(false);
             if(inspection==null||inspection.Fingerprint!=request.CredentialFingerprint||inspection.Policy!="okx-dedicated-cash-no-funding-v1"||
-                string.IsNullOrWhiteSpace(inspection.Evidence)||inspection.Ip!=observations.Account.Ip){status="PERMISSION_SCOPE_UNPROVEN";return false;}
+                string.IsNullOrWhiteSpace(inspection.Evidence)||inspection.Ip!=observations.Account.Ip)
+            {
+                connected=false;bootstrap?.Revoke();runtime.Activation.Revoke();
+                await DrainTransportsAsync().ConfigureAwait(false);
+                status="PERMISSION_SCOPE_UNPROVEN";return false;
+            }
             store=storeFactory();brokerBinding=new(binding.Account,binding.MainUid,binding.ScopeId,binding.ConfigDigest,binding.CredentialBindingId,request.CredentialFingerprint,binding.SafetyVersion,store.StorageIdentity);
             bootstrap=new(brokerBinding,this,this);
             // Existing state is never interpreted as a candidate for a new allocation.

@@ -39,7 +39,9 @@ internal sealed class NavalBrokerBootstrap
         var now=clock.UtcNow;var mono=clock.Timestamp;
         if(closed||clock.TimestampFrequency<=0||now<lastUtc||mono<lastTimestamp||now<o.CaptureUtc||mono<o.CaptureTimestamp||now-o.CaptureUtc>=TimeSpan.FromSeconds(30)||
             (decimal)(mono-o.CaptureTimestamp)/clock.TimestampFrequency>=30||o.ServerUtc>now||now-o.ServerUtc>=TimeSpan.FromSeconds(30)||
-            o.Balances[0].SourceUtc>now||now-o.Balances[0].SourceUtc>=TimeSpan.FromSeconds(30))throw new InvalidOperationException("BASELINE_EXPIRED");
+            o.Balances[0].SourceUtc>now)throw new InvalidOperationException("BASELINE_EXPIRED");
+        // Currency uTime is last-change provenance, not response freshness. The original
+        // value stays in the digest/bookends; capture, server and monotonic budgets expire.
         lastUtc=now;lastTimestamp=mono;
     }
     internal async ValueTask<NavalBaselineApproval?> RequestApprovalAsync(NavalBaselineCandidate candidate,CancellationToken ct)
