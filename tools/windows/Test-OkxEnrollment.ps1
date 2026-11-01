@@ -22,10 +22,8 @@ public static class ApexNativeApprovalProbe {
  public static Task<uint> Start(){return Task.Run(()=>{var i=new Info{Size=Marshal.SizeOf(typeof(Info)),Caption="APEX — native diagnostic",Message="No credentials required by automated diagnostic; cancel if visible."};uint p=0,s=0;IntPtr o=IntPtr.Zero;bool save=false;try{return CredUIPromptForWindowsCredentialsW(ref i,0,ref p,IntPtr.Zero,0,out o,out s,ref save,0x1200);}finally{if(o!=IntPtr.Zero){for(uint x=0;x<s;x++)Marshal.WriteByte(o,(int)x,0);Marshal.FreeCoTaskMem(o);}}});}
 }
 '@
-$probe=[ApexNativeApprovalProbe]::Start();$returned=$probe.Wait(5000)
-@{flags='0x1200';owner='NULL';input='NULL';authPackage=0;returned=$returned;code=$(if($returned){$probe.Result}else{$null});securePositive=$false;passwordEntered=$false;userInteractive=[Environment]::UserInteractive;session=(Get-Process -Id $PID).SessionId}|ConvertTo-Json|Set-Content (Join-Path $e 'original-native-api.json') -Encoding UTF8
 Push-Location (Join-Path $repo 'frontend/naval')
-try{& npm ci --ignore-scripts --no-audit --no-fund *> (Join-Path $e 'npm.log');if($LASTEXITCODE -ne 0){throw 'npm failed'};& npm run build *> (Join-Path $e 'frontend.log');if($LASTEXITCODE -ne 0){throw 'frontend failed'}}finally{Pop-Location}
+try{$old=$ErrorActionPreference;$ErrorActionPreference='Continue';& npm ci --ignore-scripts --no-audit --no-fund *> (Join-Path $e 'npm.log');$install=$LASTEXITCODE;& npm run build *> (Join-Path $e 'frontend.log');$build=$LASTEXITCODE;$ErrorActionPreference=$old;if($install -ne 0 -or $build -ne 0){throw 'Frontend setup failed'}}finally{Pop-Location}
 Push-Location $sdk
 try{
  if((& $dotnet --version) -cne '8.0.427'){throw 'SDK mismatch'}

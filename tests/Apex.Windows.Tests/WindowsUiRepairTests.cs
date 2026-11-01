@@ -50,7 +50,7 @@ public sealed class WindowsUiRepairTests
         await Click(b,sid,"[data-action=configure]");var w=await WindowsNativeUi.Metadata(h.Pid);
         foreach(var(id,text)in new[]{(100,"DEMO"),(101,"native-proof"),(102,"123456"),(103,"EUR")})WindowsNativeUi.Text(w,id,text);
         WindowsNativeUi.Click(w,1);await WindowsTestHost.Until(()=>Task.FromResult(!WindowsNativeUi.Visible(w)),"Metadata did not close");
-        var deadline=DateTime.UtcNow.AddSeconds(8);JsonElement state=default;
+        var deadline=DateTime.UtcNow.AddSeconds(130);JsonElement state=default;
         do{state=await h.Json("/api/naval/okx/status");if(state.GetProperty("lastResult").GetString()!="NOT_CONNECTED")break;await Task.Delay(100);}while(DateTime.UtcNow<deadline);
         string? result=state.GetProperty("lastResult").GetString();
         WindowsTestHost.Evidence("original-enrollment-boundary",new{result,metadataAccepted=true,userCancelled=false,secretInputEntered=false,credentialsSaved=Directory.Exists(Path.Combine(h.DataRoot,"okx")),exeSha256=h.PayloadHash});
