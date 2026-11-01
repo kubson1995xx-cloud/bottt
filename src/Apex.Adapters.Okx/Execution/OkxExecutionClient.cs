@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Lane = Apex.Adapters.Okx.Execution.OkxExecutionQuota.Lane;
 using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
@@ -9,7 +10,6 @@ namespace Apex.Adapters.Okx.Execution;
 /// No Desktop caller exists. Caller must supply protected identity/readiness and durable dispatch authority.</summary>
 public sealed class OkxExecutionClient : IAsyncDisposable
 {
-    private sealed class Lane { internal readonly SemaphoreSlim Gate=new(1,1); internal DateTimeOffset Next; }
     // UID/operation/instrument quotas outlive every client and credential binding. Separate from reader quotas.
     private static readonly ConcurrentDictionary<string,Lane> Lanes=new(StringComparer.Ordinal);
     private readonly OkxExecutionScope scope;
@@ -77,13 +77,19 @@ public sealed class OkxExecutionClient : IAsyncDisposable
             if(ExecutionDiagnostics.Unsafe) return new(false,"UnsafeHttpDiagnostics");
             await sendLock.WaitAsync(ct).ConfigureAwait(false); held=true;
             if(!Admitted()) return new(false,"ExpiredOrStopped");
-            lane=Lanes.GetOrAdd(scope.Environment+":"+scope.Uid+":"+r.Operation+":"+r.Instrument,_=>new());
+            lane=r.Operation==OkxExecutionOperation.Lookup?OkxExecutionQuota.OrderDetail(scope,r.Instrument):Lanes.GetOrAdd(scope.Environment+":"+scope.Uid+":"+r.Operation+":"+r.Instrument,_=>new());
             await lane.Gate.WaitAsync(ct).ConfigureAwait(false); laneHeld=true;
             var wait=lane.Next-clock.GetUtcNow();
+            if(r.Operation==OkxExecutionOperation.Lookup&&ReferenceEquals(lane.Clock,clock))
+            {
+                var monoWait=clock.GetElapsedTime(clock.GetTimestamp(),lane.NextMonotonic);
+                if(monoWait>wait)wait=monoWait;
+            }
             if(wait>TimeSpan.Zero)
             {
                 if(clock.GetUtcNow()+wait>=r.Deadline || clock.GetUtcNow()+wait>=budgetEnd) return new(false,"DeadlineBeforeQuota");
                 await delay(wait,ct).ConfigureAwait(false);
+                if(r.Operation==OkxExecutionOperation.Lookup&&(clock.GetUtcNow()<lane.Next||ReferenceEquals(lane.Clock,clock)&&clock.GetTimestamp()<lane.NextMonotonic))return new(false,"QuotaWaitIncomplete");
             }
             // No preflight GET, account inference or authority bootstrap occurs here.
             if(!Admitted()) return new(false,"ExpiredOrStopped");
@@ -115,6 +121,11 @@ public sealed class OkxExecutionClient : IAsyncDisposable
                     if(!Admitted()) return new(false,"ExpiredOrStopped");
                     // Guard remains held through synchronous invocation, never across response await.
                     lane.Next=clock.GetUtcNow()+TimeSpan.FromMilliseconds(r.Operation is OkxExecutionOperation.PlaceProtection or OkxExecutionOperation.CancelProtection?110:40);
+                    if(r.Operation==OkxExecutionOperation.Lookup)
+                    {
+                        lane.Clock=clock;
+                        lane.NextMonotonic=checked(clock.GetTimestamp()+(long)(0.040*clock.TimestampFrequency));
+                    }
                     invoked=true;
                     sending=http.SendAsync(request,ct);
                 }

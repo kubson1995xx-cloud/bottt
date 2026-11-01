@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 namespace Apex.Adapters.Okx.Execution;
 
-/// <summary>Five closed REST observation surfaces. Construction does not open credentials or invoke HTTP.
+/// <summary>Closed REST observation surfaces. Construction does not open credentials or invoke HTTP.
 /// Observed establishes shape only, never account acceptance, readiness, coverage or financial authority.</summary>
 public sealed class OkxExecutionObservationClient : IAsyncDisposable
 {
@@ -53,11 +53,28 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
         bool valid=Grammar.Instrument(instrument);
         return Read<OkxExecutionFeeDto>("/api/v5/account/trade-fee",valid?"?instId="+instrument+"&instType=SPOT":"",context,true,valid,ct);
     }
-    private async Task<OkxObservationRead<T>> Read<T>(string endpoint,string query,OkxObservationContext context,bool isPrivate,bool valid,CancellationToken caller)
+    internal OkxExecutionScope RequestedObservationScope=>scope;
+    internal TimeProvider ObservationClock=>clock;
+    internal bool CanContinueObservation(OkxObservationContext context)=>!Volatile.Read(ref disposed)&&!ExecutionDiagnostics.Unsafe&&context is not null&&context.ConnectionId!=Guid.Empty&&context.CaptureId!=Guid.Empty&&fence.CanObserve(scope,context,clock.GetUtcNow());
+    public Task<OkxObservationRead<OkxExecutionOrderDto>> ReadOrderAsync(OkxObservationOrderQuery query,OkxObservationContext context,CancellationToken ct)
+    {
+        var q=query is null?"":(query.ClientOrderId is null?"?":"?clOrdId="+query.ClientOrderId+"&")+"instId="+query.Instrument+(query.OrderId is null?"":"&ordId="+query.OrderId);
+        return Read<OkxExecutionOrderDto>("/api/v5/trade/order",q,context,true,query is not null,ct,detailInstrument:query?.Instrument);
+    }
+    public Task<OkxObservationRead<OkxExecutionOrderDto>> ReadPendingAsync(OkxObservationPageQuery page,OkxObservationContext context,CancellationToken ct)=>Page<OkxExecutionOrderDto>(OkxObservationSurface.Pending,page,context,true,ct);
+    public Task<OkxObservationRead<OkxExecutionOrderDto>> ReadHistoryAsync(OkxObservationWindow window,OkxObservationPageQuery page,OkxObservationContext context,CancellationToken ct)=>Page<OkxExecutionOrderDto>(window==OkxObservationWindow.Archive?OkxObservationSurface.HistoryArchive:OkxObservationSurface.History,page,context,Enum.IsDefined(window),ct);
+    public Task<OkxObservationRead<OkxExecutionFillDto>> ReadFillsAsync(OkxObservationWindow window,OkxObservationPageQuery page,OkxObservationContext context,CancellationToken ct)=>Page<OkxExecutionFillDto>(window==OkxObservationWindow.Archive?OkxObservationSurface.FillsArchive:OkxObservationSurface.Fills,page,context,Enum.IsDefined(window),ct);
+    public Task<OkxObservationRead<OkxExecutionBillDto>> ReadBillsAsync(OkxObservationWindow window,OkxObservationPageQuery page,OkxObservationContext context,CancellationToken ct)=>Page<OkxExecutionBillDto>(window==OkxObservationWindow.Archive?OkxObservationSurface.BillsArchive:OkxObservationSurface.Bills,page,context,Enum.IsDefined(window),ct);
+    private Task<OkxObservationRead<T>> Page<T>(OkxObservationSurface surface,OkxObservationPageQuery page,OkxObservationContext context,bool valid,CancellationToken ct)
+    {
+        valid=valid&&RecoveryRequest.Valid(surface,page);
+        return Read<T>(RecoveryRequest.Endpoint(surface),valid?RecoveryRequest.Query(surface,page):"",context,true,valid,ct,valid?page.Limit:null);
+    }
+    private async Task<OkxObservationRead<T>> Read<T>(string endpoint,string query,OkxObservationContext context,bool isPrivate,bool valid,CancellationToken caller,int? pageLimit=null,string? detailInstrument=null)
     {
         context??=new(Guid.Empty,Guid.Empty);
         var startUtc=clock.GetUtcNow();var startMono=clock.GetTimestamp();var lastUtc=startUtc;var lastMono=startMono;
-        bool held=false,laneHeld=false;Lane? lane=null;byte[]? buffer=null;string? digest=null;
+        bool held=false,laneHeld=false,detailHeld=false;Lane? lane=null;OkxExecutionQuota.Lane? detail=null;byte[]? buffer=null;string? digest=null;
         // Timer bounds real asynchronous waits; UTC and independent monotonic checks also bound scripted/provider work.
         using var timeout=new CancellationTokenSource(Budget,clock);
         using var linked=CancellationTokenSource.CreateLinkedTokenSource(caller,closing.Token,timeout.Token);
@@ -66,7 +83,7 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
         bool Admitted()
         {
             var utc=clock.GetUtcNow();var mono=clock.GetTimestamp();
-            bool okay=!Volatile.Read(ref disposed)&&!ct.IsCancellationRequested&&utc>=lastUtc&&mono>=lastMono&&utc-startUtc<Budget&&clock.GetElapsedTime(startMono,mono)<Budget;
+            bool okay=!Volatile.Read(ref disposed)&&!ct.IsCancellationRequested&&utc>=lastUtc&&mono>=lastMono&&utc-startUtc<Budget&&clock.GetElapsedTime(startMono,mono)<Budget&&OkxObservationPager.WithinCollectionBudget(caller);
             lastUtc=utc;lastMono=mono;return okay;
         }
         string? Check()
@@ -98,6 +115,25 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
                 if(clock.GetUtcNow()<lane.NextUtc || ReferenceEquals(lane.Clock,clock)&&clock.GetTimestamp()<lane.NextMonotonic)return Result("QuotaWaitIncomplete");
             }
             denied=Check();if(denied is not null)return Result(denied);
+            if(detailInstrument is not null)
+            {
+                // Fixed lock order: client -> private observation -> shared detail. Old Lookup never takes private.
+                detail=OkxExecutionQuota.OrderDetail(scope,detailInstrument);
+                await detail.Gate.WaitAsync(ct).ConfigureAwait(false);detailHeld=true;
+                var detailWait=detail.Next-clock.GetUtcNow();
+                if(ReferenceEquals(detail.Clock,clock))
+                {
+                    var monoWait=clock.GetElapsedTime(clock.GetTimestamp(),detail.NextMonotonic);
+                    if(monoWait>detailWait)detailWait=monoWait;
+                }
+                if(detailWait>TimeSpan.Zero)
+                {
+                    if(clock.GetUtcNow()-startUtc+detailWait>=Budget||clock.GetElapsedTime(startMono,clock.GetTimestamp())+detailWait>=Budget)return Result("BudgetBeforeQuota");
+                    await delay(detailWait,ct).ConfigureAwait(false);
+                    if(clock.GetUtcNow()<detail.Next||ReferenceEquals(detail.Clock,clock)&&clock.GetTimestamp()<detail.NextMonotonic)return Result("QuotaWaitIncomplete");
+                }
+                denied=Check();if(denied is not null)return Result(denied);
+            }
             using var material=isPrivate?await OpenMaterial(ct).ConfigureAwait(false):null;
             if(isPrivate && material is null)return Result("CredentialUnavailable");
             if(isPrivate && (material!.Scope!=scope || material.Fingerprint!=fingerprint || material.Provenance!=(scope.Environment=="Demo"?"DemoTradingApi":"LiveAccountApi")))return Result("CredentialBindingMismatch");
@@ -120,6 +156,11 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
                 var spacing=TimeSpan.FromMilliseconds(isPrivate?600:250);
                 lane.NextUtc=clock.GetUtcNow()+spacing;lane.Clock=clock;
                 lane.NextMonotonic=checked(clock.GetTimestamp()+(long)(spacing.TotalSeconds*clock.TimestampFrequency));
+                if(detail is not null)
+                {
+                    detail.Next=clock.GetUtcNow()+TimeSpan.FromMilliseconds(40);detail.Clock=clock;
+                    detail.NextMonotonic=checked(clock.GetTimestamp()+(long)(0.040*clock.TimestampFrequency));
+                }
                 sending=http.SendAsync(request,ct);
             }
             using var response=await sending.ConfigureAwait(false);
@@ -136,7 +177,7 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
             if(!Admitted())return Result("ExpiredOrStopped");
             digest=Convert.ToHexString(SHA256.HashData(buffer.AsSpan(0,used))).ToLowerInvariant();
             IReadOnlyList<T> rows;
-            try{rows=OkxObservationJson.Parse<T>(buffer.AsMemory(0,used),endpoint);}
+            try{rows=OkxObservationJson.Parse<T>(buffer.AsMemory(0,used),endpoint,pageLimit);}
             catch(OkxObservationJson.CardinalityException){return Result("Cardinality");}
             catch(OkxObservationJson.VenueException e){return Result(e.Code);}
             catch(Exception e) when(e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException or DecoderFallbackException){return Result("InvalidPayload");}
@@ -148,7 +189,7 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
         finally
         {
             if(buffer is not null)CryptographicOperations.ZeroMemory(buffer);
-            if(laneHeld)lane!.Gate.Release();if(held)sendLock.Release();
+            if(detailHeld)detail!.Gate.Release();if(laneHeld)lane!.Gate.Release();if(held)sendLock.Release();
         }
     }
     private async ValueTask<OkxSigningMaterial?> OpenMaterial(CancellationToken ct)

@@ -39,6 +39,7 @@ internal sealed class OkxExecutionObservationHttpFixture : HttpMessageHandler, I
     internal string Fingerprint=>Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(Key))).ToLowerInvariant();
     internal OkxExecutionObservationHttpFixture()
     { var id=NextUid();Scope=new("Demo",id,id,"USD","observation"); }
+    internal OkxExecutionObservationHttpFixture(ObservationTestClock clock):this(){Clock=clock;}
     internal OkxExecutionObservationClient Client()=>OkxExecutionObservationClient.ForTests(this,Clock,Scope,this,Fingerprint,this,Delay??((t,ct)=>{ct.ThrowIfCancellationRequested();Clock.Advance(t);return Task.CompletedTask;}));
     public ValueTask<OkxSigningMaterial> OpenAsync(CancellationToken ct)
     { Opens++;OnOpen?.Invoke();if(ProviderError is not null)throw ProviderError;LastMaterial=new OkxSigningMaterial(MaterialScope??Scope,Scope.Environment=="Demo"?"DemoTradingApi":"LiveAccountApi",Encoding.ASCII.GetBytes(Key),Encoding.ASCII.GetBytes(Secret),Encoding.ASCII.GetBytes(Pass));return ValueTask.FromResult(LastMaterial); }

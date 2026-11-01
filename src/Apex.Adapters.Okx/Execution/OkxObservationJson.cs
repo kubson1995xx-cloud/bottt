@@ -10,7 +10,7 @@ internal static class OkxObservationJson
 {
     internal sealed class CardinalityException : Exception { }
     internal sealed class VenueException(string code) : Exception { internal string Code { get; }=code; }
-    internal static IReadOnlyList<T> Parse<T>(ReadOnlyMemory<byte> bytes,string endpoint)
+    internal static IReadOnlyList<T> Parse<T>(ReadOnlyMemory<byte> bytes,string endpoint,int? pageLimit=null)
     {
         _=new UTF8Encoding(false,true).GetCharCount(bytes.Span);
         using var doc=JsonDocument.Parse(bytes,new JsonDocumentOptions { MaxDepth=32 });
@@ -20,17 +20,63 @@ internal static class OkxObservationJson
         if(code!="0" && !Grammar.Match(code,"[1-9][0-9]{4,7}"))throw new JsonException();
         var data=root.GetProperty("data");if(data.ValueKind!=JsonValueKind.Array)throw new JsonException();
         if(code!="0")throw new VenueException(code);
-        if(endpoint=="/api/v5/account/instruments") { if(data.GetArrayLength()>4096)throw new CardinalityException(); }
-        else if(data.GetArrayLength()!=1)throw new CardinalityException();
-        return data.EnumerateArray().Select(r=>(T)(object)(endpoint switch
+        var recovery=RecoverySchemas.GetValueOrDefault(endpoint);
+        Type expected=recovery?.Type??(endpoint switch
         {
-            "/api/v5/public/time"=>Time(r),
-            "/api/v5/account/config"=>(object)Account(r),
-            "/api/v5/account/balance"=>Balance(r),
-            "/api/v5/account/instruments"=>Instrument(r),
-            "/api/v5/account/trade-fee"=>Fees(r),
-            _=>throw new JsonException()
+            "/api/v5/public/time"=>typeof(OkxTimeDto),"/api/v5/account/config"=>typeof(OkxExecutionAccountDto),
+            "/api/v5/account/balance"=>typeof(OkxExecutionBalanceDto),"/api/v5/account/instruments"=>typeof(OkxExecutionInstrumentDto),
+            "/api/v5/account/trade-fee"=>typeof(OkxExecutionFeeDto),_=>throw new JsonException()
+        });
+        if(typeof(T)!=expected)throw new JsonException();
+        if(recovery is not null&&endpoint!="/api/v5/trade/order")
+        {if(pageLimit is null or <1 or >100)throw new JsonException();if(data.GetArrayLength()>pageLimit)throw new CardinalityException();}
+        else if(endpoint=="/api/v5/account/instruments") { if(data.GetArrayLength()>4096)throw new CardinalityException(); }
+        else if(data.GetArrayLength()!=1)throw new CardinalityException();
+        return data.EnumerateArray().Select(r=>(T)(recovery is not null?Recovery(r,recovery):endpoint switch
+        {
+            "/api/v5/public/time"=>(object)Time(r),"/api/v5/account/config"=>Account(r),
+            "/api/v5/account/balance"=>Balance(r),"/api/v5/account/instruments"=>Instrument(r),
+            "/api/v5/account/trade-fee"=>Fees(r),_=>throw new JsonException()
         })).ToImmutableArray();
+    }
+    private sealed record RecoverySchema(Type Type,string Strings);
+    // Separate registration for each endpoint; no schema union with old lookup, algos or streams.
+    private static readonly Dictionary<string,RecoverySchema> RecoverySchemas=new(StringComparer.Ordinal)
+    {
+        ["/api/v5/trade/order"]=new(typeof(OkxExecutionOrderDto),"instType instId tgtCcy ccy ordId clOrdId tag px pxUsd pxVol pxType sz pnl ordType side posSide tdMode accFillSz fillPx tradeId fillSz fillTime avgPx state stpId stpMode lever attachAlgoClOrdId tpTriggerPx tpTriggerPxType tpOrdPx slTriggerPx slTriggerPxType slOrdPx feeCcy fee rebateCcy rebate source category reduceOnly isTpLimit cancelSource cancelSourceReason quickMgnType algoClOrdId algoId uTime cTime tradeQuoteCcy outcome"),
+        ["/api/v5/trade/orders-pending"]=new(typeof(OkxExecutionOrderDto),"instType instId tgtCcy ccy ordId clOrdId tag px pxUsd pxVol pxType sz pnl ordType side posSide tdMode accFillSz fillPx tradeId fillSz fillTime avgPx state stpId stpMode lever attachAlgoClOrdId tpTriggerPx tpTriggerPxType tpOrdPx slTriggerPx slTriggerPxType slOrdPx feeCcy fee rebateCcy rebate source category reduceOnly isTpLimit cancelSource cancelSourceReason quickMgnType algoClOrdId algoId uTime cTime tradeQuoteCcy outcome"),
+        ["/api/v5/trade/orders-history"]=new(typeof(OkxExecutionOrderDto),"instType instId tgtCcy ccy ordId clOrdId tag px pxUsd pxVol pxType sz pnl ordType side posSide tdMode accFillSz fillPx tradeId fillSz fillTime avgPx state stpId stpMode lever attachAlgoClOrdId tpTriggerPx tpTriggerPxType tpOrdPx slTriggerPx slTriggerPxType slOrdPx feeCcy fee rebateCcy rebate source category reduceOnly isTpLimit cancelSource cancelSourceReason quickMgnType algoClOrdId algoId uTime cTime tradeQuoteCcy outcome"),
+        ["/api/v5/trade/orders-history-archive"]=new(typeof(OkxExecutionOrderDto),"instType instId tgtCcy ccy ordId clOrdId tag px pxUsd pxVol pxType sz pnl ordType side posSide tdMode accFillSz fillPx tradeId fillSz fillTime avgPx state stpId stpMode lever attachAlgoClOrdId tpTriggerPx tpTriggerPxType tpOrdPx slTriggerPx slTriggerPxType slOrdPx feeCcy fee rebateCcy rebate source category reduceOnly isTpLimit cancelSource cancelSourceReason quickMgnType algoClOrdId algoId uTime cTime tradeQuoteCcy outcome"),
+        ["/api/v5/trade/fills"]=new(typeof(OkxExecutionFillDto),"instType instId tradeId ordId clOrdId billId subType tag fillPx fillSz fillIdxPx fillPnl fillPxVol fillPxUsd fillMarkVol fillFwdPx fillMarkPx side posSide execType feeCcy fee ts fillTime feeRate tradeQuoteCcy"),
+        ["/api/v5/trade/fills-history"]=new(typeof(OkxExecutionFillDto),"instType instId tradeId ordId clOrdId billId subType tag fillPx fillSz fillIdxPx fillPnl fillPxVol fillPxUsd fillMarkVol fillFwdPx fillMarkPx side posSide execType feeCcy fee ts fillTime feeRate tradeQuoteCcy"),
+        ["/api/v5/account/bills"]=new(typeof(OkxExecutionBillDto),"instType billId type subType ts balChg posBalChg bal posBal sz px ccy pnl fee earnAmt earnApr mgnMode instId ordId execType from to notes interest tag fillTime tradeId clOrdId fillIdxPx fillMarkPx fillPxVol fillPxUsd fillMarkVol fillFwdPx"),
+        ["/api/v5/account/bills-archive"]=new(typeof(OkxExecutionBillDto),"instType billId type subType ts balChg posBalChg bal posBal sz px ccy pnl fee earnAmt earnApr mgnMode instId ordId execType from to notes interest tag fillTime tradeId clOrdId fillIdxPx fillMarkPx fillPxVol fillPxUsd fillMarkVol fillFwdPx"),
+    };
+    private static object Recovery(JsonElement r,RecoverySchema schema)
+    {
+        if(schema.Type==typeof(OkxExecutionOrderDto))
+        {
+            if(r.ValueKind!=JsonValueKind.Object)throw new JsonException();
+            foreach(var p in r.EnumerateObject())
+                if(p.Name=="linkedAlgoOrd")Shape(p.Value,"algoId");
+                else if(p.Name=="attachAlgoOrds")
+                {
+                    if(p.Value.ValueKind!=JsonValueKind.Array)throw new JsonException();
+                    if(p.Value.GetArrayLength()>32)throw new CardinalityException();
+                    foreach(var a in p.Value.EnumerateArray())Shape(a,"attachAlgoId attachAlgoClOrdId tpOrdKind tpTriggerPx tpTriggerRatio tpTriggerPxType tpOrdPx slTriggerPx slTriggerRatio slTriggerPxType slOrdPx sz amendPxOnTriggerType callbackRatio callbackSpread activePx failCode failReason");
+                }
+                else if(!schema.Strings.Split(' ').Contains(p.Name,StringComparer.Ordinal)||p.Value.ValueKind!=JsonValueKind.String)throw new JsonException();
+            if(S(r,"instType").Length==0||!Grammar.Instrument(S(r,"instId"))||!Grammar.OrderId(S(r,"ordId")))throw new JsonException();
+            _=S(r,"clOrdId");return OrderRow(r);
+        }
+        Shape(r,schema.Strings);
+        if(!Grammar.OrderId(S(r,"billId")))throw new JsonException();
+        if(schema.Type==typeof(OkxExecutionFillDto))
+        {
+            if(S(r,"instType").Length==0||!Grammar.Instrument(S(r,"instId")))throw new JsonException();
+            _=S(r,"ordId");_=S(r,"tradeId");_=S(r,"clOrdId");return FillRow(r);
+        }
+        if(S(r,"ccy").Length==0)throw new JsonException();_=S(r,"type");_=S(r,"subType");return BillRow(r);
     }
     private static OkxTimeDto Time(JsonElement r) { Shape(r,"ts");return new(Timestamp(r,"ts",true)); }
     private static OkxExecutionAccountDto Account(JsonElement r)
@@ -79,6 +125,153 @@ internal static class OkxObservationJson
             output.Add(id,new(id,Number(g,"maker"),Number(g,"taker"),Number(g,"rpiMaker"),Number(g,"elpMaker")));
         }
         return new(S(r,"instType"),Timestamp(r,"ts",true),output.ToImmutable());
+    }
+    private static OkxExecutionOrderDto OrderRow(JsonElement r)=>new(S(r,"instType"),
+        S(r,"instId"),
+        S(r,"ordId"),
+        S(r,"clOrdId"),
+        Number(r,"px"),
+        Number(r,"sz"),
+        Number(r,"pnl"),
+        Number(r,"accFillSz"),
+        Number(r,"fillPx"),
+        Number(r,"fillSz"),
+        Number(r,"avgPx"),
+        Number(r,"tpTriggerPx"),
+        Number(r,"tpOrdPx"),
+        Number(r,"slTriggerPx"),
+        Number(r,"slOrdPx"),
+        Number(r,"fee"),
+        Number(r,"rebate"),
+        Timestamp(r,"fillTime"),
+        Timestamp(r,"uTime"),
+        Timestamp(r,"cTime"),
+        Optional(r,"tgtCcy"),
+        Optional(r,"ccy"),
+        Optional(r,"tag"),
+        Optional(r,"ordType"),
+        Optional(r,"side"),
+        Optional(r,"posSide"),
+        Optional(r,"tdMode"),
+        Optional(r,"tradeId"),
+        Optional(r,"state"),
+        Optional(r,"stpMode"),
+        Optional(r,"attachAlgoClOrdId"),
+        Optional(r,"tpTriggerPxType"),
+        Optional(r,"slTriggerPxType"),
+        Optional(r,"feeCcy"),
+        Optional(r,"rebateCcy"),
+        Optional(r,"source"),
+        Optional(r,"category"),
+        Optional(r,"reduceOnly"),
+        Optional(r,"isTpLimit"),
+        Optional(r,"cancelSource"),
+        Optional(r,"algoClOrdId"),
+        Optional(r,"algoId"),
+        Optional(r,"tradeQuoteCcy"),
+        Optional(r,"outcome"),
+        r.TryGetProperty("attachAlgoOrds",out var aa)?aa.EnumerateArray().Select(AttachmentRow).ToImmutableArray():null,
+        r.TryGetProperty("linkedAlgoOrd",out var ll)?LinkedAlgoRow(ll):null,
+        PayloadDigest(r));
+    private static OkxExecutionAttachmentDto AttachmentRow(JsonElement r)=>new(Optional(r,"attachAlgoId"),
+        Optional(r,"attachAlgoClOrdId"),
+        Optional(r,"tpOrdKind"),
+        Optional(r,"tpTriggerPxType"),
+        Optional(r,"slTriggerPxType"),
+        Optional(r,"amendPxOnTriggerType"),
+        Optional(r,"failCode"),
+        Number(r,"tpTriggerPx"),
+        Number(r,"tpTriggerRatio"),
+        Number(r,"tpOrdPx"),
+        Number(r,"slTriggerPx"),
+        Number(r,"slTriggerRatio"),
+        Number(r,"slOrdPx"),
+        Number(r,"sz"),
+        Number(r,"callbackRatio"),
+        Number(r,"callbackSpread"),
+        Number(r,"activePx"),
+        PayloadDigest(r));
+    private static OkxExecutionLinkedAlgoDto LinkedAlgoRow(JsonElement r)=>new(Optional(r,"algoId"));
+    private static OkxExecutionFillDto FillRow(JsonElement r)=>new(S(r,"instType"),
+        S(r,"instId"),
+        S(r,"billId"),
+        S(r,"tradeId"),
+        S(r,"ordId"),
+        S(r,"clOrdId"),
+        Number(r,"fillPx"),
+        Number(r,"fillSz"),
+        Number(r,"fillPnl"),
+        Number(r,"fee"),
+        Number(r,"feeRate"),
+        Timestamp(r,"ts"),
+        Timestamp(r,"fillTime"),
+        Optional(r,"subType"),
+        Optional(r,"tag"),
+        Optional(r,"side"),
+        Optional(r,"posSide"),
+        Optional(r,"execType"),
+        Optional(r,"feeCcy"),
+        Optional(r,"tradeQuoteCcy"),
+        PayloadDigest(r));
+    private static OkxExecutionBillDto BillRow(JsonElement r)=>new(S(r,"billId"),
+        S(r,"ccy"),
+        S(r,"type"),
+        S(r,"subType"),
+        Number(r,"balChg"),
+        Number(r,"posBalChg"),
+        Number(r,"bal"),
+        Number(r,"posBal"),
+        Number(r,"sz"),
+        Number(r,"px"),
+        Number(r,"pnl"),
+        Number(r,"fee"),
+        Number(r,"earnAmt"),
+        Number(r,"earnApr"),
+        Number(r,"interest"),
+        Timestamp(r,"ts"),
+        Timestamp(r,"fillTime"),
+        Optional(r,"instType"),
+        Optional(r,"mgnMode"),
+        Optional(r,"instId"),
+        Optional(r,"ordId"),
+        Optional(r,"execType"),
+        Optional(r,"from"),
+        Optional(r,"to"),
+        Optional(r,"tag"),
+        Optional(r,"tradeId"),
+        Optional(r,"clOrdId"),
+        PayloadDigest(r));
+    private static int CanonicalBound(JsonElement e)
+    {
+        checked
+        {
+            if(e.ValueKind==JsonValueKind.String)return 2+6*e.GetString()!.Length;
+            int size=2;
+            if(e.ValueKind==JsonValueKind.Object)foreach(var p in e.EnumerateObject())size+=4+6*p.Name.Length+CanonicalBound(p.Value);
+            else if(e.ValueKind==JsonValueKind.Array)foreach(var v in e.EnumerateArray())size+=1+CanonicalBound(v);
+            else throw new JsonException();
+            return size;
+        }
+    }
+    private static string PayloadDigest(JsonElement row)
+    {
+        // Fixed non-growing canonical buffer, cleared including private discarded metadata.
+        // At most six escaped UTF-8 bytes per decoded UTF-16 code unit, plus JSON punctuation.
+        // Input body is capped; derive a non-growing bound BEFORE any private canonical write.
+        byte[] buffer=new byte[CanonicalBound(row)];
+        try
+        {
+            using var stream=new MemoryStream(buffer,0,buffer.Length,true,true);
+            using(var writer=new Utf8JsonWriter(stream,new JsonWriterOptions { Encoder=System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))Write(row,writer);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(buffer.AsSpan(0,checked((int)stream.Position)))).ToLowerInvariant();
+        }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(buffer); }
+        static void Write(JsonElement e,Utf8JsonWriter w)
+        {
+            if(e.ValueKind==JsonValueKind.Object){w.WriteStartObject();foreach(var p in e.EnumerateObject().OrderBy(x=>x.Name,StringComparer.Ordinal)){w.WritePropertyName(p.Name);Write(p.Value,w);}w.WriteEndObject();}
+            else if(e.ValueKind==JsonValueKind.Array){w.WriteStartArray();foreach(var v in e.EnumerateArray())Write(v,w);w.WriteEndArray();}
+            else if(e.ValueKind==JsonValueKind.String)w.WriteStringValue(e.GetString());else throw new JsonException();
+        }
     }
     private static string S(JsonElement e,string n)=>Grammar.String(e,n);
     private static string? Optional(JsonElement e,string n)=>e.TryGetProperty(n,out var p)?p.GetString():null;
