@@ -42,7 +42,7 @@ public sealed class OkxExecutionStreamTests
     {
         var clock=new StreamTestClock();await using var f=new OkxExecutionWebSocketFixture(clock:clock);f.AutoPong=false;await using var s=f.Stream();await using var e=s.ObserveAsync(f.Context,default).GetAsyncEnumerator();
         var opening=Buffering(e);for(int tick=0;!opening.IsCompleted&&tick<30;tick++){clock.Advance(TimeSpan.FromMilliseconds(100));await Task.Delay(5);}await opening;
-        clock.Advance(TimeSpan.FromSeconds(15));await Until(()=>Volatile.Read(ref f.Pings)==2);
+        await Until(()=>clock.HeartbeatDelayCount==2);clock.Advance(TimeSpan.FromSeconds(15));await Until(()=>Volatile.Read(ref f.Pings)==2);await Until(()=>clock.HeartbeatDelayCount==2);
         clock.Advance(TimeSpan.FromSeconds(5),wall:true,monotonic:false);
         await f.Push(OkxStreamLane.PrivateOrders,"pong");
         // Receipt itself, not the next periodic tick, must enforce the independent pending-pong deadline.
@@ -180,8 +180,8 @@ public sealed class OkxExecutionStreamTests
     public async Task Stream_TextPingPongIsBounded(string variant)
     {
         var clock=new StreamTestClock();await using var f=new OkxExecutionWebSocketFixture(clock:clock);f.AutoPong=variant=="success";await using var s=f.Stream();await using var e=s.ObserveAsync(f.Context,default).GetAsyncEnumerator();var opening=Buffering(e);for(int tick=0;!opening.IsCompleted&&tick<50;tick++){clock.Advance(TimeSpan.FromMilliseconds(100));await Task.Delay(5);}await opening;
-        clock.Advance(TimeSpan.FromSeconds(15));await Until(()=>Volatile.Read(ref f.Pings)==2);
-        if(variant=="success"){await Until(()=>!PendingPing(s,0)&&!PendingPing(s,1));Assert.False(s.ReadState().HasGap);clock.Advance(TimeSpan.FromSeconds(15));await Until(()=>Volatile.Read(ref f.Pings)==4);await Until(()=>!PendingPing(s,0)&&!PendingPing(s,1));Assert.True(s.ReadState().PairedSubscribed);}
+        await Until(()=>clock.HeartbeatDelayCount==2);clock.Advance(TimeSpan.FromSeconds(15));await Until(()=>Volatile.Read(ref f.Pings)==2);await Until(()=>clock.HeartbeatDelayCount==2);
+        if(variant=="success"){await Until(()=>!PendingPing(s,0)&&!PendingPing(s,1)&&clock.HeartbeatDelayCount==2);Assert.False(s.ReadState().HasGap);clock.Advance(TimeSpan.FromSeconds(15));await Until(()=>Volatile.Read(ref f.Pings)==4);await Until(()=>!PendingPing(s,0)&&!PendingPing(s,1)&&clock.HeartbeatDelayCount==2);Assert.True(s.ReadState().PairedSubscribed);}
         else {if(variant=="data-not-pong"){var before=s.ReadState().Sequence;await f.Push(OkxStreamLane.PrivateOrders,f.Update("orders").ToJsonString());await Until(()=>s.ReadState().Sequence>before);Assert.True(PendingPing(s,0));}if(variant=="rollback"){clock.Advance(-TimeSpan.FromSeconds(1),wall:true,monotonic:false);clock.Advance(TimeSpan.FromMilliseconds(250),wall:false);}else clock.Advance(TimeSpan.FromSeconds(5));await f.Gap.Task.WaitAsync(TimeSpan.FromSeconds(5));Assert.Equal(variant=="rollback"?"ClockRollback":"HeartbeatTimeout",s.ReadState().ErrorCode);}
         await s.DisposeAsync();Assert.Equal(0,clock.TimerCount);
     }
@@ -189,7 +189,7 @@ public sealed class OkxExecutionStreamTests
     public async Task Stream_SlowTrickleAssemblyHasIndependentDeadline(string clockSide)
     {
         var clock=new StreamTestClock();await using var f=new OkxExecutionWebSocketFixture(clock:clock);await using var s=f.Stream();await using var e=s.ObserveAsync(f.Context,default).GetAsyncEnumerator();var opening=Buffering(e);for(int tick=0;!opening.IsCompleted&&tick<50;tick++){clock.Advance(TimeSpan.FromMilliseconds(100));await Task.Delay(5);}await opening;
-        var bytes=Encoding.UTF8.GetBytes(f.Update("orders").ToJsonString());await f.Peers[OkxStreamLane.PrivateOrders].SendAsync(new ArraySegment<byte>(bytes,0,1),System.Net.WebSockets.WebSocketMessageType.Text,false,default);await Until(()=>clock.TimerCount>=3);
+        await Until(()=>clock.HeartbeatDelayCount==2);var bytes=Encoding.UTF8.GetBytes(f.Update("orders").ToJsonString());await f.Peers[OkxStreamLane.PrivateOrders].SendAsync(new ArraySegment<byte>(bytes,0,1),System.Net.WebSockets.WebSocketMessageType.Text,false,default);await Until(()=>clock.TimerCount>=3);
         clock.Advance(TimeSpan.FromSeconds(5),wall:clockSide=="wall",monotonic:clockSide=="mono");if(clockSide=="wall")await f.Peers[OkxStreamLane.PrivateOrders].SendAsync(new ArraySegment<byte>(bytes,1,bytes.Length-1),System.Net.WebSockets.WebSocketMessageType.Text,true,default);
         await f.Gap.Task.WaitAsync(TimeSpan.FromSeconds(5));var observed=new List<OkxStreamObservation>();while(await e.MoveNextAsync())observed.Add(e.Current);Assert.DoesNotContain(observed,x=>x.Kind==OkxStreamObservationKind.OrdersUpdate);Assert.True(s.ReadState().HasGap);Assert.Equal(0,clock.TimerCount);
     }
@@ -270,7 +270,17 @@ public sealed class OkxExecutionStreamTests
     [Fact] public async Task Stream_IdleFenceRevocationDoesNotWaitForOrders()
     {
         var clock=new StreamTestClock();await using var f=new OkxExecutionWebSocketFixture(clock:clock);await using var s=f.Stream();await using var e=s.ObserveAsync(f.Context,default).GetAsyncEnumerator();var opening=Buffering(e);for(int tick=0;!opening.IsCompleted&&tick<50;tick++){clock.Advance(TimeSpan.FromMilliseconds(100));await Task.Delay(5);}await opening;
-        f.Allowed=false;clock.Advance(TimeSpan.FromMilliseconds(250));await f.Gap.Task.WaitAsync(TimeSpan.FromSeconds(5));Assert.Equal("ReadFenceDenied",s.ReadState().ErrorCode);Assert.False(s.ReadState().PairedSubscribed);Assert.Equal(2,f.Opens);Assert.Equal(2,f.Connects.Count);await s.DisposeAsync();Assert.Equal(0,clock.TimerCount);
+        await Until(()=>clock.HeartbeatDelayCount==2);f.Allowed=false;clock.Advance(TimeSpan.FromMilliseconds(250));await f.Gap.Task.WaitAsync(TimeSpan.FromSeconds(5));Assert.Equal("ReadFenceDenied",s.ReadState().ErrorCode);Assert.False(s.ReadState().PairedSubscribed);Assert.Equal(2,f.Opens);Assert.Equal(2,f.Connects.Count);await s.DisposeAsync();Assert.Equal(0,clock.TimerCount);
+    }
+    [Fact] public async Task Stream_PongBudgetStartsAfterActualSendCompletion()
+    {
+        var clock=new StreamTestClock();await using var f=new OkxExecutionWebSocketFixture(clock:clock);f.AutoPong=false;var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);int held=0;
+        f.AfterSend=async (bytes,ct)=>{if(bytes.AsSpan().SequenceEqual("ping"u8)){Interlocked.Increment(ref held);await release.Task.WaitAsync(ct);}};
+        await using var s=f.Stream();await using var e=s.ObserveAsync(f.Context,default).GetAsyncEnumerator();var opening=Buffering(e);for(int tick=0;!opening.IsCompleted&&tick<50;tick++){clock.Advance(TimeSpan.FromMilliseconds(100));await Task.Delay(5);}await opening;await Until(()=>clock.HeartbeatDelayCount==2);
+        clock.Advance(TimeSpan.FromSeconds(15));await Until(()=>Volatile.Read(ref held)==2&&Volatile.Read(ref f.Pings)==2);clock.Advance(TimeSpan.FromSeconds(4));Assert.False(s.ReadState().HasGap);release.SetResult();await Until(()=>clock.HeartbeatDelayCount==2);
+        clock.Advance(TimeSpan.FromSeconds(2));
+        if(!s.ReadState().HasGap){try{await f.Push(OkxStreamLane.PrivateOrders,"pong");await f.Push(OkxStreamLane.BusinessAlgos,"pong");}catch(System.Net.WebSockets.WebSocketException) when(s.ReadState().HasGap){}}
+        await Until(()=>s.ReadState().HasGap||!PendingPing(s,0)&&!PendingPing(s,1));Assert.False(s.ReadState().HasGap);Assert.True(s.ReadState().PairedSubscribed);
     }
     [Fact] public async Task Stream_LazyConstructionAndSingleUse()
     {

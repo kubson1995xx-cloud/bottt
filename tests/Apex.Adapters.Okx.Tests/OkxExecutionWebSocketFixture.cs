@@ -27,6 +27,7 @@ internal sealed class OkxExecutionWebSocketFixture : IAsyncDisposable,IOkxSignin
     internal bool Allowed=true,AutoPong=true;
     internal Action? OnOpen;
     internal Action? OnFence,GapAction;
+    internal Func<ArraySegment<byte>,CancellationToken,Task>? AfterSend;
     internal Func<ArraySegment<byte>,Task?>? OnSend;
     internal byte[] KeyBytes=Encoding.ASCII.GetBytes(OkxExecutionObservationHttpFixture.Key),PassBytes=Encoding.ASCII.GetBytes(OkxExecutionObservationHttpFixture.Pass),SecretBytes=Encoding.ASCII.GetBytes(OkxExecutionObservationHttpFixture.Secret);
     internal Func<CancellationToken,ValueTask<OkxSigningMaterial>>? OpenOverride;
@@ -56,7 +57,7 @@ internal sealed class OkxExecutionWebSocketFixture : IAsyncDisposable,IOkxSignin
         var (clientStream,serverStream)=Duplex.Pair();var client=WebSocket.CreateFromStream(clientStream,false,null,Timeout.InfiniteTimeSpan);var server=WebSocket.CreateFromStream(serverStream,true,null,Timeout.InfiniteTimeSpan);
         lock(Wires)Wires.Add(lane,serverStream);
         Interlocked.Add(ref ActiveSockets,2);lock(Peers)Peers.Add(lane,server);lock(Scripts)Scripts.Add(Script(server,lane));
-        return Task.FromResult<WebSocket>(new CountedSocket(client,()=>Interlocked.Decrement(ref ActiveSockets),(b,token)=>{if(BlockSend){SendEntered.TrySetResult();return Task.Delay(Timeout.Infinite,token);}return OnSend?.Invoke(b);}));
+        return Task.FromResult<WebSocket>(new CountedSocket(client,()=>Interlocked.Decrement(ref ActiveSockets),(b,token)=>{if(BlockSend){SendEntered.TrySetResult();return Task.Delay(Timeout.Infinite,token);}return OnSend?.Invoke(b);},(b,token)=>AfterSend?.Invoke(b,token)??Task.CompletedTask));
     }
     private async Task Script(WebSocket peer,OkxStreamLane lane)
     {
@@ -122,12 +123,12 @@ internal sealed class OkxExecutionWebSocketFixture : IAsyncDisposable,IOkxSignin
         Closing.Cancel();lock(Peers)foreach(var peer in Peers.Values)peer.Abort();Task[] scripts;lock(Scripts)scripts=Scripts.ToArray();await Task.WhenAll(scripts).WaitAsync(TimeSpan.FromSeconds(5));Closing.Dispose();
         Assert.Equal(0,ActiveSockets);foreach(var m in Materials){Assert.All(m.Key,b=>Assert.Equal(0,b));Assert.All(m.Passphrase,b=>Assert.Equal(0,b));Assert.All(m.Secret,b=>Assert.Equal(0,b));}
     }
-    private sealed class CountedSocket(WebSocket inner,Action disposed,Func<ArraySegment<byte>,CancellationToken,Task?> onSend):WebSocket
+    private sealed class CountedSocket(WebSocket inner,Action disposed,Func<ArraySegment<byte>,CancellationToken,Task?> onSend,Func<ArraySegment<byte>,CancellationToken,Task> afterSend):WebSocket
     {
         private int done;
         public override WebSocketCloseStatus? CloseStatus=>inner.CloseStatus;public override string? CloseStatusDescription=>inner.CloseStatusDescription;public override WebSocketState State=>inner.State;public override string? SubProtocol=>inner.SubProtocol;
         public override void Abort()=>inner.Abort();public override Task CloseAsync(WebSocketCloseStatus s,string? d,CancellationToken ct)=>inner.CloseAsync(s,d,ct);public override Task CloseOutputAsync(WebSocketCloseStatus s,string? d,CancellationToken ct)=>inner.CloseOutputAsync(s,d,ct);
-        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> b,CancellationToken ct)=>inner.ReceiveAsync(b,ct);public override Task SendAsync(ArraySegment<byte> b,WebSocketMessageType t,bool e,CancellationToken ct)=>onSend(b,ct)??inner.SendAsync(b,t,e,ct);
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> b,CancellationToken ct)=>inner.ReceiveAsync(b,ct);public override async Task SendAsync(ArraySegment<byte> b,WebSocketMessageType t,bool e,CancellationToken ct){await (onSend(b,ct)??inner.SendAsync(b,t,e,ct));await afterSend(b,ct);}
         public override void Dispose(){if(Interlocked.Exchange(ref done,1)==0){inner.Dispose();disposed();}}
     }
     private sealed class Duplex(Channel<byte[]> input,Channel<byte[]> output):Stream
@@ -152,6 +153,7 @@ internal sealed class StreamTestClock : TimeProvider
     internal StreamTestClock(){var earliest=OkxExecutionWebSocketFixture.LastPeerConnectUtc+TimeSpan.FromSeconds(1);if(earliest>utc)utc=earliest;}
     public override DateTimeOffset GetUtcNow(){lock(sync)return utc;}public override long GetTimestamp(){lock(sync)return mono;}public override long TimestampFrequency=>TimeSpan.TicksPerSecond;
     internal int TimerCount{get{lock(sync)return timers.Count(t=>!t.Disposed);}}
+    internal int HeartbeatDelayCount{get{lock(sync)return timers.Count(t=>!t.Disposed&&t.Due>mono&&t.Due-mono<=TimeSpan.FromMilliseconds(250).Ticks);}}
     public override ITimer CreateTimer(TimerCallback cb,object? state,TimeSpan due,TimeSpan period){lock(sync){var t=new Timer(this,cb,state);timers.Add(t);t.Change(due,period);return t;}}
     internal void Advance(TimeSpan delta, bool wall=true,bool monotonic=true)
     {

@@ -311,7 +311,13 @@ public sealed class OkxObservationStream : IAsyncDisposable
                     else if(now-lane.IdleUtc>=TimeSpan.FromSeconds(15)||clock.GetElapsedTime(lane.IdleMono,mono)>=TimeSpan.FromSeconds(15)){ping=true;lane.PingPending=true;lane.PingUtc=now;lane.PingMono=mono;}
                 }
                 if(expired){Gap("HeartbeatTimeout");return;}
-                if(ping)await Send(lane,"ping",null,now,mono,stopping.Token).ConfigureAwait(false);
+                if(ping)
+                {
+                    await Send(lane,"ping",null,now,mono,stopping.Token).ConfigureAwait(false);
+                    // The bounded send has finished. A fast pong may already have cleared the pending flag;
+                    // never resurrect it, but give an outstanding pong its own original five-second budget.
+                    lock(sync)if(lane.PingPending&&!gapped){lane.PingUtc=clock.GetUtcNow();lane.PingMono=clock.GetTimestamp();}
+                }
             }
         }
         catch(OperationCanceledException) when(stopping.IsCancellationRequested){}
