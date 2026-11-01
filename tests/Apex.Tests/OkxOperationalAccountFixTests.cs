@@ -57,6 +57,8 @@ public sealed class OkxOperationalAccountFixTests
     [InlineData("policy")]
     [InlineData("ip")]
     public async Task Refused_permission_inspection_drains_both_sockets_and_allows_fresh_other_service(string refusal)
+        =>await OkxSyntheticClockIsolationTests.Run("inspection-"+refusal);
+    internal static async Task InspectionScenario(string refusal)
     {
         await using var f=new OperationalPeer();
         var provider=new InspectionProvider(refusal);
