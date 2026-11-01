@@ -1,5 +1,8 @@
 # Naprawa testu DEMO dla klucza BOT — raport wykonania
 
+## Stan końcowy
+**Dostarczono nowy zweryfikowany Windows ZIP w wąskim zakresie testu salda DEMO.** Build/CI `41357352828` SUCCESS, źródła `1de3ad60839d16ef24cd7b3f400e5c6cc3e3a03e`, produkt `68181a21a40a326b40d76680924f839a4bbdab8b`. Artefakt i polska instrukcja: `/home/ubuntu/apex-deliveries/okx-demo-bot-read-fix/delivery/`. ZIP SHA `075e3618ca65f99e6186682f151d6cd0c9f73ea93df60434f33239f039babad8`; archiwum pozostaje niezmienione. Parent pozostaje właścicielem niezależnego odbioru/HANDOFF. Secure-positive i prawdziwe prywatne DEMO nadal zewnętrzne, niezweryfikowane.
+
 ## Punkt wejścia
 - Baza: `3ceb2b135952e71eb540cfadea0ff42f246f13c3`, produkt `800cab704f843d975098fd48966f8b0a64058cd6`, gałąź `feature/apex-naval-command`.
 - Przeczytano brief, raport wykonania, boundary review i independent review poprzedniej dostawy. Potwierdzony problem: nowy TEST używa ścisłego czytnika `read_only`; klucz BOT `read_only,trade` uwierzytelnia config, lecz nie dochodzi do balance. Jeden niezmienny scope na środowisko uniemożliwia późniejszą zamianę klucza przez UI.
@@ -45,5 +48,21 @@
 - Run `41357155189` FAILURE przed buildem: pin/CRC/manifest starego ZIP przeszły, guard zmian odmówił `tests/Apex.Tests/OkxNativeControlTests.cs`. To wcześniej zaakceptowana zmiana testu `NATIVE_CANCELLED` → `METADATA_USER_CANCELLED` z `3f0d731`, nie nowa zmiana produktu. Zachowano pełny log i mały rzeczywisty artifact evidence; nie ma testowego TRX ani nowego ZIP.
 - Porównanie wszystkich 31 zmienionych wejść względem `d1f928e` wykazało dokładnie ten jeden brak allowlisty. Rozszerzono tylko tę konkretną nazwę testu w builderze; żadnego katalogowego wildcard ani dopuszczenia engine delta.
 - `unchanged-boundary-reuse.json`: 31 istotnych runtime/test wejść accepted reader/adapter/admission/activation/secure approval zachowuje dokładne bajty lub jawny checkout CRLF starego ZIP `919ac...`; związano 3 stare dowody protected-timeoutu przez SHA. Historyczny runtime proof, nie nowy secure-positive.
+
+
+## Checkpoint — trzeci delivery
+- Commit narzędziowy `1de3ad60839d16ef24cd7b3f400e5c6cc3e3a03e`, remote zgodny; runtime nadal `68181a2`.
+- Manualny Windows run `41357352828` IN PROGRESS na `1de3ad6`, po obu wąskich poprawkach setup/reuse. Żadnego nowego private call ani secure-timeout rerun.
+
+
+## Końcowy checkpoint — nowy ZIP i Windows GREEN
+- Run `41357352828` SUCCESS, exact source `1de3ad60839d16ef24cd7b3f400e5c6cc3e3a03e`; remote wynik, head SHA i pobrany artifact odczytano. Żadnych zmian produktu po `68181a2`. Podczas oczekiwania lokalny watcher przekroczył limit narzędzia 420 s; CI nadal działało i następny odczyt potwierdził jego rzeczywisty SUCCESS, nie failure produktu.
+- Nowy ZIP: 43 775 687 bajtów, SHA `075e3618ca65f99e6186682f151d6cd0c9f73ea93df60434f33239f039babad8`; EXE `77949565c8d9190612298797649c0e8ede7411a8aaf614e3903d5eafb02daa14`. Launcher jest obecny. Bezpieczna niezależna ekstrakcja: CRC/ścieżki/kolizje/pełny manifest PASS, 52 pliki regularne. Stary ZIP `919ac...` pozostaje niezmieniony.
+- Świeże Windows wyniki, nie fikcyjna suma: Source78/78; extracted host113/113; Package6/6; Browser2/2; affected enrollment/read90/90 (w tym wszystkie 37 nowych testów odczytu oraz siedem native DPAPI/ACL przypadków wcześniej błędnie uruchomionych na Linux); EnrollmentSource2/2; UiRepair2/2; Inventory1/1; Upgrade1/1; Navigation1/1. Wszystkie bez failure/skip. Self-contained smoke PASS, bez machine .NET/VC; rzeczywisty Windows Server 2025 Datacenter 10.0.26100.0, nie fizyczny Windows11.
+- Native helper potwierdza trzy maskowane pola, walidację, syntetyczny roundtrip, CurrentUser DPAPI oraz config/runtime reopen, cancel/partial/no-overwrite. Jawnie `secureApprovalPositiveVerified=false`, `authorityCreated=false`, `networkCalled=false`. Nie przypisano temu pełnej produkcyjnej zgody Windows.
+- 531/531 wejść sealed źródeł/konfiguracji/testów/narzędzi ma zgodność z aktualnymi bajtami: 14 raw, 517 jawny native CRLF. `apex-build.json` wiąże dokładny SHA manifestu. Final binary/EXE i test closures pozostają osobno zachowane. Historyczne engine1201/platform126/backtester168 oznaczono REUSED, nie świeżo wykonane. Niezmieniony protected timeout wykorzystano z dokładną mapą wejść i hashami, nie powtarzano 120 s modala.
+- Dowody: `/home/ubuntu/apex-deliveries/okx-demo-bot-read-fix/verification-results.json`, `final-source-binding.json`, `unchanged-boundary-reuse.json`, `same-wire/`, `windows-41357352828/`. Czytelna nowa dostawa: `delivery/URUCHOMIENIE-OKX-PL.md` + ZIP/sidecar i focused review/report. Parent powinien sprawdzić wąski diff, oryginalny RED, same-wire RED/GREEN i manifesty; niezależny pełny child review nie był uruchamiany.
+- Zachowano wszystkie realne wcześniejsze niepowodzenia: oryginalny behavioral RED, omyłkowe Linux-native7, shallow-checkout CI setup i brak pojedynczego accepted-test w reuse allowliście. Ostatni CI jest osobnym rzeczywistym integrated SUCCESS, nie sumą wcześniejszych targeted replay.
+- Zakończono pracę nad artefaktem. Parent owns HANDOFF/progress/ostateczny odbiór. Nie wykonywano prywatnych połączeń, transakcji, bypassu zgody, merge/deploy, rotacji, nadpisania ani usunięcia danych użytkownika.
 
 - Nadal zewnętrzne i niezweryfikowane: prawdziwe pozytywne zatwierdzenie Windows → produkcyjny formularz sekretów → zapis/restart oraz prywatny odczyt DEMO uruchomiony lokalnie przez użytkownika. Nie będą zastąpione atrapą.

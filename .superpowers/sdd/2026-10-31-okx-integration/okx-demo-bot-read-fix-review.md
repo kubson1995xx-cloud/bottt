@@ -24,3 +24,13 @@ Autorski przegląd w osobnym przejściu, nie niezależny odbiór rodzica. Zmiana
 
 ## Ograniczenia obowiązujące po fixie
 Pełne pozytywne chronione zatwierdzenie Windows → produkcyjny formularz → DPAPI/config/runtime → restart oraz prywatny user-triggered DEMO pozostają zewnętrzne i niezweryfikowane. Jeden niezmienny scope na środowisko nadal nie ma rotacji przez UI. Wskazówki każą zapisać docelowy klucz BOT raz, nie usuwać danych i nie traktować jego Trade ani sukcesu GET jako uprawnienia do handlu.
+
+## Końcowe źródła i wykonany artifact
+- Produkt: `68181a21a40a326b40d76680924f839a4bbdab8b`; tooling/build: `1de3ad60839d16ef24cd7b3f400e5c6cc3e3a03e`. Późniejsze zmiany tego raportu nie zmieniają źródeł produktu.
+- Dodatkowy `same-wire/` ma identyczny Program.cs i identyczne pełne account.json/balance.json dla oryginalnych zachowanych DLL i finalnych DLL. Adaptacja `#if` dotyczy tylko rzeczywistej starej/nowej sygnatury factory. RED exit1/config1/balance0/UnsafeAccountConfig → GREEN exit0/config1/balance1/cash100/available90; oba rzeczywiste HMAC i GET-only true. To usuwa niepewność wynikającą z dodatkowych wymaganych pól parsera w fixture.
+- Windows run `41357352828` SUCCESS, wszystkie fresh Source78/extracted113/Package6/Browser2/affected90/EnrollmentSource2/UiRepair2/Inventory1/Upgrade1/Navigation1 PASS. Rzeczywisty native helper wykazał trzy maskowane pola, DPAPI i config/runtime reopen, bez authority/network i bez secure-positive. Self-contained smoke PASS na Windows Server2025, nie Windows11 użytkownika.
+- ZIP SHA `075e3618ca65f99e6186682f151d6cd0c9f73ea93df60434f33239f039babad8`, EXE SHA `77949565c8d9190612298797649c0e8ede7411a8aaf614e3903d5eafb02daa14`. Niezależna ekstrakcja CRC/manifest PASS. Wszystkie 531 wejść build manifestu zgodne z lokalnymi exact lub jawnie CRLF bajtami.
+- Dwa wcześniejsze Windows CI failure są setup/reuse, nie behavioral GREEN: brak historycznego obiektu w shallow checkout, następnie brak dokładnie jednego wcześniej naprawionego testu cancel w allowliście. Naprawiono tylko tooling. Pierwotny local91 (84 PASS/7 błędne OS) pozostaje zachowany; wszystkie siedem natywnych przypadków przeszło w Windows affected90.
+- Niezmienione accepted reader/adapter/admission/approval: 31 source/test wejść związanych z poprzednim ZIP, trzy pliki starego timeout proof przez SHA. Engine/platform/backtester testy wewnątrz ZIP są jawnie REUSED, a nie nowym full suite. Nie powtórzono 120 s modala.
+
+**Końcowy verdict autora:** wąski fix i Windows artifact zweryfikowane; parent ma sprawdzić diff/RED/GREEN/source/binary binding. Nie jest to pełny odbiór enrollment ani gotowego tradera. Brak kolejnego pełnego review child, prywatnego brokera, transakcji lub obchodzenia zabezpieczeń.
