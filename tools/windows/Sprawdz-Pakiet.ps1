@@ -65,7 +65,7 @@ $naval=Test-ApexNavalAssets (Join-Path $base 'APEX-Desktop/wwwroot/naval')
 # The Naval subtree is separately bounded by Test-ApexNavalAssets above.
 $allowed=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 foreach ($p in $required) { [void]$allowed.Add($p) }
-foreach ($p in @('APEX-Desktop/ApexDesktop.pdb','APEX-Desktop/Apex.Core.pdb')) { [void]$allowed.Add($p) }
+foreach ($p in @('APEX-Desktop/ApexDesktop.pdb','APEX-Desktop/Apex.Core.pdb','APEX-Desktop/Apex.Adapters.Okx.pdb')) { [void]$allowed.Add($p) }
 if ($meta.target -ceq 'linux-x64') { [void]$allowed.Add('APEX-Desktop/Apex.Core.dll') }
 $directories=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 foreach ($p in $allowed) { $parts=$p.Split('/');for ($i=1;$i -lt $parts.Length;$i++) { [void]$directories.Add(($parts[0..($i-1)] -join '/')) } }

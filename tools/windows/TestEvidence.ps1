@@ -228,7 +228,7 @@ function Test-ApexWindowsPublish([string]$Directory,[string]$EvidencePath) {
     foreach ($n in @('exeSha256','runtimeConfigSha256','assetsSha256')) { if ($m.$n -isnot [string] -or $m.$n -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Windows publish hash invalid' } }
     if ($m.exeSha256 -cne (Get-FileHash -LiteralPath (Join-Path $Directory 'ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Windows publish EXE binding invalid' }
     foreach ($f in Get-ChildItem -LiteralPath $Directory -Force) {
-        if (($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($f.PSIsContainer -and @('wwwroot','presentation') -cnotcontains $f.Name) -or (-not $f.PSIsContainer -and @('ApexDesktop.exe','ApexDesktop.pdb','Apex.Core.pdb') -cnotcontains $f.Name)) { throw 'Windows publish exact layout invalid; no arbitrary loose runtime files' }
+        if (($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($f.PSIsContainer -and @('wwwroot','presentation') -cnotcontains $f.Name) -or (-not $f.PSIsContainer -and @('ApexDesktop.exe','ApexDesktop.pdb','Apex.Core.pdb','Apex.Adapters.Okx.pdb') -cnotcontains $f.Name)) { throw ('Windows publish exact layout invalid; no arbitrary loose runtime files: '+$f.Name) }
     }
     $expected=@('publish','src/Apex.Desktop/Apex.Desktop.csproj','-c','Release','--no-restore','-r','win-x64','--self-contained','true','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:PublishTrimmed=false','-p:PublishReadyToRun=false','-p:IsTransformWebConfigDisabled=true','-o')
     if ($m.publishArgv -isnot [array] -or $m.publishArgv.Count -ne $expected.Count+1) { throw 'Windows publish argv invalid' }

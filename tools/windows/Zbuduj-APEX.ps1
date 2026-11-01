@@ -169,6 +169,7 @@ try {
         $staticHost=@{pack='Microsoft.NETCore.App.Host.win-x64';version=$hostFile.Directory.Parent.Parent.Parent.Name;templateSha256=(Hash $hostFile.FullName);runtimeListSha256=(Hash $runtimeListPath);codeSections=@(Read-ApexPeExecutableSections $hostFile.FullName);droppedNativeComponents=$dropped}
         $publishArgv[1]=Join-Path $repo 'src/Apex.Desktop/Apex.Desktop.csproj'
         Json (Join-Path $evidence 'windows-publish.json') ([ordered]@{schema='apex-windows-publish-v1';rid='win-x64';sdkVersion=$sdk;exeSha256=(Hash (Join-Path $desktop 'ApexDesktop.exe'));runtimeConfigUtf8=$runtimeText;runtimeConfigSha256=(Hash $runtimePath);assetsSha256=(Hash $assetsPath);publishArgv=$publishArgv;runtimePacks=$packs;nativeLibraries=$nativeLibraries;staticHost=$staticHost})
+        Json (Join-Path $buildEvidence 'publish-layout.json') @{files=@(Get-ChildItem -LiteralPath $desktop -File -Recurse|ForEach-Object {@{path=$_.FullName.Substring($desktop.Length+1).Replace('\','/');bytes=$_.Length;sha256=(Hash $_.FullName)}})}
         Test-ApexWindowsPublish $desktop (Join-Path $evidence 'windows-publish.json') | Out-Null
         Copy-Item (Join-Path $PSScriptRoot 'PRZECZYTAJ-WINDOWS.md') (Join-Path $Wyjscie 'PRZECZYTAJ.md')
     }
