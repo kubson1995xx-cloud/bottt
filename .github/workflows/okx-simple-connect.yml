@@ -1,0 +1,39 @@
+name: OKX Simple Connect
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [red, green, delivery]
+        default: green
+permissions:
+  contents: read
+  actions: read
+jobs:
+  native:
+    if: github.ref == 'refs/heads/feature/apex-naval-command'
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.427'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Native scoped gate
+        shell: powershell
+        run: ./tools/windows/Test-OkxSimpleConnect.ps1 -Phase '${{ inputs.phase }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: OKX-Simple-Connect-${{ inputs.phase }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/okx-simple-connect/**
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64.zip
+            ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
