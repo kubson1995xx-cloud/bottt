@@ -77,7 +77,7 @@ internal sealed class NavalBrokerBootstrap
     internal void VerifyPersistence()=>RequireFresh(consumed??throw NavalBrokerValidation.Invalid());
     internal void Revoke(){closed=true;candidates.Clear();approvals.Clear();}
 }
-internal sealed class NavalBrokerSession : IDisposable
+internal sealed partial class NavalBrokerSession : IDisposable
 {
     private readonly NavalCoreStateOwner owner;
     internal NavalPortfolioCoordinator Coordinator { get; }

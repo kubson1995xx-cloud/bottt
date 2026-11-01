@@ -123,6 +123,7 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
                     if(NavalJson.Serialize(candidate.NavalBroker?.Baseline)!=NavalJson.Serialize(_state.NavalBroker!.Baseline)||
                         candidate.NavalBroker!.Namespace!=_state.NavalBroker.Namespace||candidate.NavalBroker.Revisions.Count!=_state.NavalBroker.Revisions.Count+1||
                         !_state.NavalBroker.Revisions.SequenceEqual(candidate.NavalBroker.Revisions.Take(_state.NavalBroker.Revisions.Count)))throw NavalBrokerValidation.Invalid();
+                    NavalBrokerExecutionValidation.Transition(_state,candidate);
                     candidate.NavalBroker=NavalBrokerValidation.Seal(candidate.NavalBroker);
                 }
                 else NavalReadJournal.ValidateTransition(_state,candidate);

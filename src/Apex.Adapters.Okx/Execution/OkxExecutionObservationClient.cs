@@ -38,7 +38,9 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(scope);ArgumentNullException.ThrowIfNull(provider);ArgumentNullException.ThrowIfNull(fence);ArgumentNullException.ThrowIfNull(clock);
         if(!Grammar.Match(expectedFingerprint,"[0-9a-f]{64}"))throw new ArgumentException("InvalidObservationBinding");
         this.scope=scope;this.clock=clock;this.provider=provider;fingerprint=expectedFingerprint;this.fence=fence;
-        this.delay=delay??((t,ct)=>Task.Delay(t,clock,ct));http=new(handler,true);
+        // Task.Delay truncates fractional milliseconds and can wake before both quota clocks.
+        // Round the production wait upward; never weaken the existing post-wait admission check.
+        this.delay=delay??((t,ct)=>Task.Delay(TimeSpan.FromMilliseconds(Math.Ceiling(t.TotalMilliseconds)+1),clock,ct));http=new(handler,true);
     }
     private static SocketsHttpHandler ProductionHandler()=>new()
     { AllowAutoRedirect=false,UseProxy=false,UseCookies=false,ConnectTimeout=TimeSpan.FromSeconds(5),AutomaticDecompression=DecompressionMethods.None,ActivityHeadersPropagator=null };

@@ -38,7 +38,7 @@ public sealed partial class NavalPortfolioCoordinator
         internal Handle(NavalPortfolioCoordinator c,NavalAccountId a,NavalFleet f){_c=c;_a=a;_f=f;}
         public NavalRiskResult TryReserve(NavalEntryIntent intent)=>_c.Reserve(_a,_f,intent);
     }
-    private bool Fresh(NavalPortfolioState s)=>_ready&&s.ReconciledUtc.HasValue&&_clock.UtcNow>=s.ReconciledUtc&&_clock.UtcNow-s.ReconciledUtc<=TimeSpan.FromSeconds(30);
+    private bool Fresh(NavalPortfolioState s)=>_ready&&(!_broker||BrokerFresh())&&s.ReconciledUtc.HasValue&&_clock.UtcNow>=s.ReconciledUtc&&_clock.UtcNow-s.ReconciledUtc<=TimeSpan.FromSeconds(30);
     private static NavalRiskResult Result(NavalPortfolioState s,NavalMutationStatus status,string code,string? id=null)=>new(status,code,id,s.Revision);
     private NavalRiskResult Commit(EngineState envelope,NavalPortfolioState s,NavalMutationStatus status,string code,NavalPublicationCause cause,string? id=null)
     {
@@ -51,7 +51,7 @@ public sealed partial class NavalPortfolioCoordinator
             if(execution.StopEpoch==oldExecution.StopEpoch)envelope.NavalExecution=execution with{StopEpoch=checked(execution.StopEpoch+1)};
         }
         long old=envelope.DurableRevision;envelope.DurableRevision=checked(old+1);envelope.Naval=s with{Revision=envelope.DurableRevision};
-        if(_broker)envelope.NavalBroker=envelope.NavalBroker! with{Revisions=envelope.NavalBroker!.Revisions.Append(new NavalBrokerRevision(envelope.DurableRevision,cause.Code=="DISCONNECTED"?"DISCONNECTED":"BROKER_STOP")).ToArray()};
+        if(_broker)envelope.NavalBroker=envelope.NavalBroker! with{Revisions=envelope.NavalBroker!.Revisions.Append(new NavalBrokerRevision(envelope.DurableRevision,cause.Code=="DISCONNECTED"?"DISCONNECTED":s.Mode=="STOP"?"BROKER_STOP":"BROKER_OPERATION")).ToArray()};
         else envelope.NavalReadJournal=NavalReadJournal.Append(previous,envelope,cause,_clock.UtcNow,_definition);
         var result=_owner.TryCommit(old,envelope);
         if(result!=NavalCommitResult.Committed){_frozen=true;_ready=false;_started=false;_offlineExecutionSession?.Invalidate();return new(NavalMutationStatus.Stopped,result==NavalCommitResult.Conflict?"COMMIT_CONFLICT":"STORAGE_FROZEN",null,old);}
@@ -61,6 +61,7 @@ public sealed partial class NavalPortfolioCoordinator
     {
         _ready=false;_started=false;_offlineExecutionSession?.Invalidate();var s=e.Naval!;
         if(e.NavalExecution is {} execution)e.NavalExecution=execution with{StopEpoch=checked(execution.StopEpoch+1)};
+        if(e.NavalBroker?.Operational is {} brokerExecution)e.NavalBroker=e.NavalBroker with{Operational=brokerExecution with{StopEpoch=checked(brokerExecution.StopEpoch+1)}};
         return Commit(e,s with{Mode="STOP",Reason=reason,EmergencyLatch=s.EmergencyLatch||emergency,
             Conflicts=conflict==null?s.Conflicts:s.Conflicts.Append(conflict).ToArray()},NavalMutationStatus.Stopped,reason,
             new(NavalPublicationOperation.Safety,reason,_publicationEpoch));
@@ -73,8 +74,10 @@ public sealed partial class NavalPortfolioCoordinator
             if(_frozen)return Result(s,NavalMutationStatus.Stopped,"STORAGE_FROZEN");
             // Validate binding before touching either fleet's durable signal namespace.
             if(intent==null||!NavalCashRiskPolicy.Text(intent.CommandId)||!NavalCashRiskPolicy.Text(intent.SignalId)||!NavalCashRiskPolicy.Text(intent.Instrument))return Result(s,NavalMutationStatus.Refused,"MALFORMED_IDENTITY");
-            var signal=_definition.Signals.SingleOrDefault(x=>x.SignalId==intent.SignalId);
-            if(signal==null||signal.Account!=account||signal.Fleet!=fleet||signal.Instrument!=intent.Instrument)return Result(s,NavalMutationStatus.Refused,"SIGNAL_BINDING");
+            var brokerSignal=e.NavalBroker?.Operational?.Signals.SingleOrDefault(x=>x.Decision.StableId==intent.SignalId);
+            var signal=_broker?(brokerSignal==null?null:new NavalSignal(brokerSignal.Decision.StableId,e.NavalBroker!.Baseline.Binding.Account,brokerSignal.Decision.Fleet,
+                brokerSignal.Decision.Instrument,brokerSignal.Decision.ConfigIdentity,brokerSignal.Decision.EarliestExecutionUtc!.Value,brokerSignal.ExpiresUtc)):_definition.Signals.SingleOrDefault(x=>x.SignalId==intent.SignalId);
+            if(signal==null||(_broker&&brokerSignal?.Decision.Action!=NavalAction.EntrySignal)||signal.Account!=account||signal.Fleet!=fleet||signal.Instrument!=intent.Instrument)return Result(s,NavalMutationStatus.Refused,"SIGNAL_BINDING");
             var digest=NavalJson.Hash(new{account,fleet,intent,signal.RuleIdentity});
             var previous=s.Commands.SingleOrDefault(c=>c.CommandId==intent.CommandId);
             if(previous!=null)
@@ -136,7 +139,7 @@ public sealed partial class NavalPortfolioCoordinator
                 return new NavalFleetView(fleet,cashflow,reservations.Sum(r=>r.AllocatedCost),value,value+cashflow,Array.AsReadOnly(reservations),Array.AsReadOnly(fills));
             }).ToArray();
             return new(s.Revision,_started&&!_frozen?s.Mode:"STOP",_frozen?"STORAGE_FROZEN":!_ready?"RESTART_RECONCILE_REQUIRED":s.Reason,
-                fresh?"COHERENT_OFFLINE":"UNKNOWN",fresh&&!s.EmergencyLatch,accounts.Sum(a=>a.Cash),accounts.Sum(a=>a.Held),accounts.Sum(a=>a.Free),eq,
+                fresh?(_broker?"BROKER_RECONCILED_SCOPED":"COHERENT_OFFLINE"):"UNKNOWN",fresh&&!s.EmergencyLatch,accounts.Sum(a=>a.Cash),accounts.Sum(a=>a.Held),accounts.Sum(a=>a.Free),eq,
                 eq.HasValue?Math.Max(0,s.DayStartEquity*_definition.Limits.DailyPct/100-Math.Max(0,s.DayStartEquity-eq.Value)-s.Reservations.Sum(r=>r.RiskHold)):null,
                 eq.HasValue?Math.Max(0,s.PeakEquity*_definition.Limits.DrawdownPct/100-Math.Max(0,s.PeakEquity-eq.Value)-s.Reservations.Sum(r=>r.RiskHold)):null,
                 s.Reservations.Count(NavalCashRiskPolicy.Active),s.DailyLatch,s.DrawdownLatch,s.EmergencyLatch,Array.AsReadOnly(accounts),Array.AsReadOnly(s.Reservations.ToArray()),Array.AsReadOnly(fleets));
@@ -175,34 +178,9 @@ public sealed partial class NavalPortfolioCoordinator
                     if(accepted!=null){if(accepted.Digest!=digest)return StopCandidate(e,"FILL_CONFLICT",true,NavalJson.Serialize(r.Fills));continue;}
                     if(s.ReconciledUtc.HasValue&&f.TradeUtc<s.ReconciledUtc&&expected!=NavalEvidenceKind.Reconcile)
                         return StopCandidate(e,"LATE_FILL_RECONCILE_REQUIRED",false,Conflict(r));
-                    var position=candidate.Reservations.SingleOrDefault(x=>x.Id==f.ReservationId);
-                    if(position==null||position.Account!=f.Account||position.Intent.Instrument!=f.Instrument||f.Quantity<=0||f.Price<=0||f.Fee<0||
-                        !NavalCashRiskPolicy.Text(f.TradeId)||f.TradeUtc>r.CaptureUtc||(!f.Reduction&&position.TerminalCoverage))return StopCandidate(e,"UNOWNED_FILL",true,Conflict(r));
-                    var instrument=_definition.Catalog.Single(x=>x.Instrument==f.Instrument);var fees=_definition.Fees;
-                    bool inBase=f.Reduction?fees.ExitInBase:fees.EntryInBase;
-                    decimal rate=f.Reduction?fees.ExitRate:fees.EntryRate;
-                    if(f.FeeCurrency!=(inBase?instrument.BaseCurrency:instrument.QuoteCurrency)||f.Fee>checked(f.Quantity*(inBase?1:f.Price)*rate))return StopCandidate(e,"FEE_OVERRUN",true,NavalJson.Serialize(r.Fills));
-                    var cash=candidate.Accounts.Single(a=>a.Account==f.Account);NavalReservation changed;
-                    if(f.Reduction)
-                    {
-                        decimal removed=checked(f.Quantity+(inBase?f.Fee:0));
-                        if(removed>position.Inventory)return StopCandidate(e,"OVERSELL",true,NavalJson.Serialize(r.Fills));
-                        decimal cost=position.AllocatedCost*(position.Inventory-removed)/position.Inventory;
-                        changed=position with{Inventory=position.Inventory-removed,AllocatedCost=cost,ReductionUnsettled=true};
-                        cash=cash with{Cash=checked(cash.Cash+f.Quantity*f.Price-(inBase?0:f.Fee))};
-                    }
-                    else
-                    {
-                        if(f.Quantity>position.Pending)return StopCandidate(e,"ENTRY_OVERRUN",true,NavalJson.Serialize(r.Fills));
-                        decimal debit=checked(f.Quantity*f.Price+(inBase?0:f.Fee));
-                        if(debit>cash.Cash)return StopCandidate(e,"CASH_OVERRUN",true,NavalJson.Serialize(r.Fills));
-                        cash=cash with{Cash=cash.Cash-debit};
-                        changed=position with{Pending=position.Pending-f.Quantity,Filled=position.Filled+f.Quantity,
-                            Inventory=checked(position.Inventory+f.Quantity-(inBase?f.Fee:0)),AllocatedCost=checked(position.AllocatedCost+debit),Stage=NavalReservationStage.Confirmed};
-                    }
-                    candidate=candidate with{Accounts=candidate.Accounts.Select(a=>a.Account==cash.Account?cash:a).ToArray(),
-                        Reservations=candidate.Reservations.Select(p=>p.Id==changed.Id?changed:p).ToArray(),Fills=candidate.Fills.Append(new NavalAcceptedFill(fillKey,digest,f)).ToArray()};
-                    if(!f.Reduction&&f.Price>position.Intent.EntryPriceCeiling)candidate=candidate with{EmergencyLatch=true,Mode="STOP",Reason="EXECUTION_OVERRUN",Conflicts=candidate.Conflicts.Append(NavalJson.Serialize(f)).ToArray()};
+                    if(f.TradeUtc>r.CaptureUtc)return StopCandidate(e,"UNOWNED_FILL",true,Conflict(r));
+                    try{candidate=NavalCashRiskPolicy.PostFill(candidate,f,_definition);}
+                    catch(InvalidOperationException ex){return StopCandidate(e,ex.Message,true,Conflict(r));}
                 }
                 foreach(string id in r.TerminalIds)
                 {

@@ -78,6 +78,33 @@ internal static class NavalCashRiskPolicy
         decimal gross=checked(positions.Sum(r=>r.Pending*r.Intent.EntryPriceCeiling+r.Inventory*s.Marks[r.Intent.Instrument]));
         return equity<=0||gross>checked(equity*d.Limits.MaxLeverage);
     });
+    internal static NavalPortfolioState PostFill(NavalPortfolioState candidate,NavalFill f,NavalPortfolioDefinition definition)
+    {
+        var position=candidate.Reservations.SingleOrDefault(x=>x.Id==f.ReservationId);
+        if(position==null||position.Account!=f.Account||position.Intent.Instrument!=f.Instrument||f.Quantity<=0||f.Price<=0||f.Fee<0||!Text(f.TradeId)||(!f.Reduction&&position.TerminalCoverage))throw new InvalidOperationException("UNOWNED_FILL");
+        var instrument=definition.Catalog.Single(x=>x.Instrument==f.Instrument);var fees=definition.Fees;
+        bool inBase=f.Reduction?fees.ExitInBase:fees.EntryInBase;decimal rate=f.Reduction?fees.ExitRate:fees.EntryRate;
+        if(f.FeeCurrency!=(inBase?instrument.BaseCurrency:instrument.QuoteCurrency)||f.Fee>checked(f.Quantity*(inBase?1:f.Price)*rate))throw new InvalidOperationException("FEE_OVERRUN");
+        var cash=candidate.Accounts.Single(a=>a.Account==f.Account);NavalReservation changed;decimal gross=checked(f.Quantity*f.Price);
+        if(f.Reduction)
+        {
+            decimal removed=checked(f.Quantity+(inBase?f.Fee:0));if(removed>position.Inventory)throw new InvalidOperationException("OVERSELL");
+            decimal cost=position.AllocatedCost*(position.Inventory-removed)/position.Inventory;
+            changed=position with{Inventory=position.Inventory-removed,AllocatedCost=cost,ReductionUnsettled=true};
+            cash=cash with{Cash=checked(cash.Cash+gross-(inBase?0:f.Fee))};
+        }
+        else
+        {
+            if(f.Quantity>position.Pending)throw new InvalidOperationException("ENTRY_OVERRUN");
+            decimal debit=checked(gross+(inBase?0:f.Fee));if(debit>cash.Cash)throw new InvalidOperationException("CASH_OVERRUN");
+            cash=cash with{Cash=cash.Cash-debit};
+            changed=position with{Pending=position.Pending-f.Quantity,Filled=position.Filled+f.Quantity,Inventory=checked(position.Inventory+f.Quantity-(inBase?f.Fee:0)),AllocatedCost=checked(position.AllocatedCost+debit),Stage=NavalReservationStage.Confirmed};
+        }
+        candidate=candidate with{Accounts=candidate.Accounts.Select(a=>a.Account==cash.Account?cash:a).ToArray(),Reservations=candidate.Reservations.Select(p=>p.Id==changed.Id?changed:p).ToArray(),
+            Fills=candidate.Fills.Append(new NavalAcceptedFill(NavalCoreStateOwner.FillKey(f),NavalJson.Hash(f),f)).ToArray()};
+        if(!f.Reduction&&f.Price>position.Intent.EntryPriceCeiling)candidate=candidate with{EmergencyLatch=true,Mode="STOP",Reason="EXECUTION_OVERRUN",Conflicts=candidate.Conflicts.Append(NavalJson.Serialize(f)).ToArray()};
+        return candidate;
+    }
     internal static decimal Gross(NavalPortfolioState s)=>checked(s.Reservations.Sum(r=>r.Pending*r.Intent.EntryPriceCeiling+r.Inventory*(s.Marks.TryGetValue(r.Intent.Instrument,out var p)?p:r.Intent.EntryPriceCeiling)));
     internal static string? Admission(NavalPortfolioState s,NavalReservation candidate,NavalPortfolioDefinition d)
     {

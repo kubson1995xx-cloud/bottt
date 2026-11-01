@@ -1,0 +1,135 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using Apex.Adapters.Okx.Execution;
+using Apex.Core.Naval;
+namespace Apex.Desktop.Okx;
+
+// Host-callable single-account loop over the accepted account service and SAME durable owner.
+// This class is not constructed by default startup. Native/panel wiring is a separate delivery gate.
+internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,INavalBrokerTradingAuthority,IOkxSerializedDispatchFence
+{
+    private readonly OkxAccountConnectionService account;
+    private readonly NavalBrokerSession session;
+    private readonly TimeProvider clock;
+    private readonly OkxPublicMarketFeed feed;
+    private readonly OkxExecutionClient client;
+    private readonly SemaphoreSlim lane=new(1,1);
+    private readonly string? protection;
+    private readonly Dictionary<string,NavalBrokerQuote> quotes=new(StringComparer.Ordinal);
+    private volatile bool armed,disposed;
+    private string? current;
+    public Guid SessionId { get; }
+    public bool SourceCurrent=>!disposed&&account.IsConnected&&ReferenceEquals(account.BrokerSession,session)&&account.TradingSessionId==SessionId;
+    private long reconciledActivityVersion=-1;
+    public bool CanExecute=>SourceCurrent&&armed&&account.ActivityVersion==Interlocked.Read(ref reconciledActivityVersion);
+    public string? ProtectionProfile=>protection;
+    internal string Status=>disposed?"DISPOSED":!SourceCurrent?"DISCONNECTED_STOP":protection==null?"PRODUCTION_PROTECTION_PROFILE_UNAPPROVED":!armed?"EXECUTE_ARMING_REQUIRED":session.Coordinator.Snapshot().Reason;
+    private OkxOperationalTradingService(OkxAccountConnectionService account,TimeProvider clock,Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxFinalDispatchFence,OkxExecutionClient>? writes,HttpMessageHandler? market,string? protection)
+    {
+        this.account=account;this.clock=clock;this.protection=protection;session=account.BrokerSession??throw new InvalidOperationException("BROKER_ACCOUNT_REQUIRED");SessionId=account.TradingSessionId;
+        if(SessionId==Guid.Empty)throw new InvalidOperationException("FRESH_CONNECTION_REQUIRED");
+        feed=new(clock,market);var scope=account.ExecutionScope!;var provider=account.ExecutionSigningProvider();var fingerprint=session.ReadState().NavalBroker!.Baseline.Binding.CredentialFingerprint;
+        client=(writes??OkxExecutionClient.Create)(scope,provider,fingerprint,this);
+        account.RegisterTrading(this);session.BindTrading(this);
+    }
+    // No production profile is minted by a GET, fixture, enum or ordinary Operator option.
+    internal static OkxOperationalTradingService Create(OkxAccountConnectionService account)=>new(account,TimeProvider.System,null,null,null);
+    internal static OkxOperationalTradingService ForTests(OkxAccountConnectionService account,Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxFinalDispatchFence,OkxExecutionClient> writes,HttpMessageHandler market,TimeProvider clock,bool protocolProtection=true)
+        =>new(account,clock,writes,market,protocolProtection?"SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION":null);
+    internal bool Arm(OkxActivationRequest request,OkxActivationLease lease)=>armed=SourceCurrent&&account.ArmExecution(request,lease);
+    private NavalRiskResult Refuse(string code)=>new(NavalMutationStatus.Refused,code,null,session.Coordinator.Snapshot().DurableRevision);
+    private static IReadOnlyList<T> Observed<T>(OkxObservationRead<T> read)
+    {if(read.Status!=OkxObservationStatus.Observed)throw new InvalidDataException("BROKER_OBSERVATION_FAILED");return read.Rows;}
+    internal async Task<NavalRiskResult> ReconcileAsync(CancellationToken ct)
+    {
+        await lane.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if(!SourceCurrent)return Refuse("FRESH_CONNECTION_REQUIRED");
+            var reads=account.ObservationClient!;var context=account.ObservationContext!;var state=session.ReadState();var baseline=state.NavalBroker!.Baseline;
+            var a=Observed(await reads.ReadAccountAsync(context,ct)).Single();
+            if(a.Uid!=baseline.Binding.Account.AccountId||a.MainUid!=baseline.Binding.MainUid||a.AccountLevel!="1"||a.AutoLoan||a.EnableSpotBorrow||a.SpotBorrowAutoRepay||a.Permissions!="read_only,trade"||a.FeeType!=baseline.Observations.Account.FeeType||a.Ip!=baseline.Observations.Account.Ip||a.AccountType!="0"||a.SpotRoleType!="0")return session.Coordinator.Stop("BROKER_ACCOUNT_CHANGED");
+            var specs=Observed(await reads.ReadInstrumentsAsync(context,ct));
+            foreach(var i in baseline.Observations.Catalog)
+            {
+                var spec=specs.SingleOrDefault(s=>s.Instrument==i.Instrument);
+                if(spec==null||spec.State!="live"||spec.InstrumentType!="SPOT"||spec.BaseCurrency!=i.BaseCurrency||spec.CatalogQuote!=i.QuoteCurrency||!spec.TradeQuoteCurrencies.Contains(i.QuoteCurrency)||
+                    spec.LotSize.Value!=i.Quantum||spec.TickSize.Value!=i.TickSize||spec.MinimumSize.Value!=i.MinimumQuantity)return session.Coordinator.Stop("BROKER_SPEC_CHANGED");
+            }
+            return await CollectEconomicsAsync(ct).ConfigureAwait(false);
+        }
+        catch(Exception e) when(e is IOException or InvalidOperationException or ArgumentException or System.Text.Json.JsonException or HttpRequestException or OperationCanceledException)
+        {return session.Coordinator.Stop("BROKER_RECONCILIATION_INCOMPLETE");}
+        finally{lane.Release();}
+    }
+    internal NavalRiskResult Start()=>session.StartTrading();
+    internal async Task<NavalRiskResult> RunOnceAsync(NavalFleet fleet,string instrument,CancellationToken ct)
+    {
+        await lane.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if(!CanExecute||protection==null)return Refuse(protection==null?"PRODUCTION_PROTECTION_PROFILE_UNAPPROVED":"EXECUTE_ARMING_REQUIRED");
+            var state=session.ReadState();var baseline=state.NavalBroker!.Baseline;var definition=NavalBrokerValidation.Definition(baseline);
+            var spec=definition.Catalog.Single(i=>i.Instrument==instrument);var btcSpec=definition.Catalog.Single(i=>i.BaseCurrency=="BTC");
+            var series=await feed.ReadSeriesAsync(spec,ct).ConfigureAwait(false);var btc=spec==btcSpec?series:await feed.ReadSeriesAsync(btcSpec,ct).ConfigureAwait(false);
+            var cutoff=new DateTimeOffset(clock.GetUtcNow().UtcDateTime.Date,TimeSpan.Zero);var hasLong=state.Naval!.Reservations.Any(r=>r.Fleet==fleet&&r.Intent.Instrument==instrument&&r.Inventory>0);
+            var request=new NavalEvaluationRequest(fleet,series,btc,cutoff,hasLong);var decision=new NavalD1Evaluator().Evaluate(request);
+            if(decision.Action==NavalAction.ExitSignal)
+            {
+                var registered=account.RegisterConfirmedSignal(request);if(registered.Status is not (NavalMutationStatus.Applied or NavalMutationStatus.Duplicate))return registered;
+                return await ExitOwned(state.Naval!.Reservations.Single(r=>r.Fleet==fleet&&r.Intent.Instrument==instrument&&r.Inventory>0).Id,ct).ConfigureAwait(false);
+            }
+            if(decision.Action!=NavalAction.EntrySignal)return Refuse(decision.Reason);
+            var registration=account.RegisterConfirmedSignal(request);if(registration.Status is not (NavalMutationStatus.Applied or NavalMutationStatus.Duplicate))return registration;
+            state=session.ReadState();string command="d1-"+NavalJson.Hash(decision.StableId);
+            if(state.Naval!.Commands.Any(c=>c.SignalId==decision.StableId))return Refuse("SIGNAL_CONSUMED");
+            var quote=await feed.ReadQuoteAsync(spec,ct).ConfigureAwait(false);
+            if(quote.SourceUtc>clock.GetUtcNow()||clock.GetUtcNow()-quote.SourceUtc>=TimeSpan.FromSeconds(5))return Refuse("QUOTE_STALE");
+            var marked=session.UpdateQuote(quote);if(marked.Status!=NavalMutationStatus.Applied)return marked;state=session.ReadState();
+            decimal Ceiling(decimal p)=>decimal.Ceiling(p/spec.TickSize)*spec.TickSize;
+            decimal Floor(decimal p)=>decimal.Floor(p/spec.TickSize)*spec.TickSize;
+            var bars=series.Bars;var profile=NavalFleetProfiles.Get(fleet);if(bars.Count<=profile.ResearchAtrDays)return Refuse("ATR_HISTORY");
+            decimal atr=Enumerable.Range(bars.Count-profile.ResearchAtrDays,profile.ResearchAtrDays).Sum(n=>Math.Max(bars[n].High-bars[n].Low,Math.Max(Math.Abs(bars[n].High-bars[n-1].Close),Math.Abs(bars[n].Low-bars[n-1].Close))))/profile.ResearchAtrDays;
+            decimal price=Ceiling(quote.Ask),stop=Floor(price-profile.ResearchStopAtr*atr),tp=Ceiling(price+(price-stop)*profile.ResearchTakeProfitR);
+            if(stop<=0||stop>=price)return Refuse("INVALID_PROTECTION");
+            var unit=new NavalReservation{Intent=new(command,decision.StableId,instrument,1,price,stop,tp),Quantity=1,Pending=1};
+            var unitHolds=NavalCashRiskPolicy.Holds(unit,definition,state.Naval!.Marks);decimal equity=state.Naval.LiquidationEquity??0;
+            decimal capital=Math.Min(state.Naval.Accounts.Sum(a=>a.Cash)+state.Naval.Reservations.Sum(r=>r.AllocatedCost),equity);
+            decimal quantity=Math.Min(quote.AskQuantity,Math.Min(capital*definition.Limits.TradePct/100/unitHolds.RiskHold,state.Naval.Accounts.Single().Cash/NavalCashRiskPolicy.Held(unitHolds)));
+            quantity=decimal.Floor(quantity/spec.Quantum)*spec.Quantum;
+            var intent=new NavalEntryIntent(command,decision.StableId,instrument,quantity,price,stop,tp);
+            var reserved=session.Coordinator.ForFleet(baseline.Binding.Account,fleet).TryReserve(intent);if(reserved.Status!=NavalMutationStatus.Applied)return reserved;
+            var ids=session.ReserveIds(reserved.ReservationId!,command);if(ids.Result.Status!=NavalMutationStatus.Applied)return ids.Result;
+            var deadline=DateTimeOffset.FromUnixTimeMilliseconds(clock.GetUtcNow().AddSeconds(10).ToUnixTimeMilliseconds());
+            var prepared=OkxPreparedRequest.Submit(account.ExecutionScope!,instrument,"buy","fok",N(quantity),N(price),ids.Ids[0].ClientId,deadline,new(ids.Ids[1].ClientId,N(tp),N(stop)));
+            state=session.ReadState();var x=state.NavalBroker!.Operational!;string id="entry-"+command;
+            var durable=new NavalBrokerIntent(id,reserved.ReservationId!,NavalExecutionOperation.Submit,instrument,prepared.OriginalClientId,null,prepared.CopyBody(),prepared.Digest,deadline,SessionId,state.Naval!.Generation,state.Naval.Sequence,x.StopEpoch,state.DurableRevision+1,NavalExecutionStage.Prepared);
+            var stored=session.Prepare(durable);if(stored.Status!=NavalMutationStatus.Applied)return stored;
+            current=id;var outcome=await client.SubmitAsync(prepared,ct).ConfigureAwait(false);
+            var mapped=new NavalExecutionOutcome(outcome.Disposition==OkxWriteDisposition.Acknowledged?NavalDispatchDisposition.Acknowledged:outcome.Disposition==OkxWriteDisposition.ProvenNotSent?NavalDispatchDisposition.NotSent:NavalDispatchDisposition.Unknown,
+                outcome.OriginalClientId,outcome.OrderId,outcome.Disposition==OkxWriteDisposition.Acknowledged?"TRANSPORT_ACK":outcome.Disposition==OkxWriteDisposition.ProvenNotSent?"TRANSPORT_NOT_SENT":"TRANSPORT_UNKNOWN",outcome.Code,outcome.SCode,outcome.SubCode);
+            return session.Outcome(id,mapped);
+        }
+        catch(Exception e) when(e is IOException or InvalidOperationException or ArgumentException or OverflowException or System.Text.Json.JsonException or HttpRequestException or OperationCanceledException)
+        {return session.Coordinator.Stop("BROKER_LOOP_INCOMPLETE");}
+        finally{current=null;lane.Release();}
+    }
+    private static string N(decimal n)=>n.ToString("0.############################",CultureInfo.InvariantCulture);
+    public bool CanDispatch(OkxPreparedRequest request,DateTimeOffset now)=>false;
+    public IDisposable? TryEnterDispatch(OkxPreparedRequest request,DateTimeOffset now)=>current==null?null:session.EnterDispatch(current,request.Digest,now);
+    internal void Stop(){armed=false;if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("OPERATOR_STOP");}
+    private readonly object closing=new();private Task? disposal;
+    public ValueTask DisposeAsync(){lock(closing)return new(disposal??=DrainAsync());}
+    private async Task DrainAsync()
+    {
+        armed=false;disposed=true;if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("BROKER_TRADING_DISPOSED");
+        await client.DisposeAsync().ConfigureAwait(false);await lane.WaitAsync().ConfigureAwait(false);
+        try{feed.Dispose();account.UnregisterTrading(this);}finally{lane.Release();}
+    }
+}

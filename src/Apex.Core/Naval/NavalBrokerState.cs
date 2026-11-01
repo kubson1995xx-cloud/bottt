@@ -21,7 +21,13 @@ public sealed record NavalBrokerBaseline(string Digest,NavalBrokerBinding Bindin
     NavalBrokerObservationBatch Observations,string KeyScopeDigest,DateTimeOffset ApprovedUtc,long ApprovedTimestamp);
 public sealed record NavalBrokerRevision(long Revision,string Code);
 public sealed record NavalBrokerState(string Schema,string ExecutionSchema,string Namespace,ulong HighWater,
-    NavalBrokerBaseline Baseline,IReadOnlyList<NavalBrokerRevision> Revisions,string IntegrityDigest);
+    NavalBrokerBaseline Baseline,IReadOnlyList<NavalBrokerRevision> Revisions,string IntegrityDigest)
+{
+    // Absent in accepted clean broker-v2 files; first operational commit upgrades in place.
+    // Older readers refuse this extension rather than dropping it or resetting the allocation.
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public NavalBrokerOperationalState? Operational { get; init; }
+}
 internal interface INavalBrokerClock : INavalClock { long Timestamp { get; } long TimestampFrequency { get; } }
 internal sealed record NavalBaselineApprovalRequest(string Digest,NavalAccountId Account,decimal Cash,string Quote,
     string CatalogDigest,string FeeDigest,string KeyScopeDigest,string RootIdentity,Guid Session,DateTimeOffset ExpiresUtc);
@@ -50,10 +56,12 @@ internal static class NavalBrokerValidation
     internal static void Validate(Apex.Core.Engine.EngineState e,NavalPortfolioDefinition d)
     {
         var b=e.NavalBroker??throw Invalid();var s=e.Naval??throw Invalid();Definition(d,b.Baseline);
-        if(b.Schema!="naval-broker-v2"||b.ExecutionSchema!="naval-execution-broker-v2"||!Guid.TryParseExact(b.Namespace,"N",out _)||b.HighWater!=0||
-            b.IntegrityDigest!=Seal(b).IntegrityDigest||e.NavalExecution!=null||e.NavalReadJournal!=null||s.Mode!="STOP"||
-            b.Revisions.Count!=e.DurableRevision+1||b.Revisions.Where((r,n)=>r.Revision!=n||r.Code is not ("BASELINE_CREATED" or "DISCONNECTED" or "BROKER_STOP")).Any()||
-            s.Reservations.Count!=0||s.Commands.Count!=0||s.Fills.Count!=0||s.Receipts.Count!=0||s.Generation!=0||s.Sequence!=0||s.ReconciledUtc!=null||
+        NavalPortfolioCoordinator.ValidateBrokerOperational(e);
+        NavalBrokerExecutionValidation.Validate(e);
+        if(b.Schema!="naval-broker-v2"||b.ExecutionSchema!="naval-execution-broker-v2"||!Guid.TryParseExact(b.Namespace,"N",out _)||
+            b.IntegrityDigest!=Seal(b).IntegrityDigest||e.NavalExecution!=null||e.NavalReadJournal!=null||
+            b.Revisions.Count!=e.DurableRevision+1||b.Revisions.Where((r,n)=>r.Revision!=n||r.Code is not ("BASELINE_CREATED" or "DISCONNECTED" or "BROKER_STOP" or "BROKER_OPERATION")).Any()||
+            (b.Operational==null&&(b.HighWater!=0||s.Mode!="STOP"||s.Reservations.Count!=0||s.Commands.Count!=0||s.Fills.Count!=0||s.Receipts.Count!=0||s.Generation!=0||s.Sequence!=0||s.ReconciledUtc!=null))||
             b.Baseline.Digest!=Digest(b.Baseline.Binding,b.Baseline.Observations,b.Baseline.KeyScopeDigest)||
             ValidateBatch(b.Baseline.Binding,b.Baseline.Observations)!=b.Baseline.InitialCash)throw Invalid();
     }

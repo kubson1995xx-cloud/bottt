@@ -55,7 +55,8 @@ public sealed partial class NavalPortfolioCoordinator
     private string? _offlineExecutionEpoch;
     private NavalOfflineExecutionSession? _offlineExecutionSession;
     private readonly HashSet<string> _executionClaims=new(StringComparer.Ordinal);
-    private static bool ExecutionUnknown(EngineState e,string reservation)=>e.NavalExecution?.Intents.Any(i=>i.ReservationId==reservation&&i.Stage is NavalExecutionStage.Dispatching or NavalExecutionStage.SubmitUnknown)==true;
+    private static bool ExecutionUnknown(EngineState e,string reservation)=>e.NavalExecution?.Intents.Any(i=>i.ReservationId==reservation&&i.Stage is NavalExecutionStage.Dispatching or NavalExecutionStage.SubmitUnknown)==true||
+        e.NavalBroker?.Operational?.Intents.Any(i=>i.ReservationId==reservation&&!e.NavalBroker.Operational.SettledIntents.Contains(i.Id)&&i.Stage is NavalExecutionStage.Dispatching or NavalExecutionStage.SubmitUnknown)==true;
     private static bool ExecutionObligation(EngineState e,string reservation)=>e.NavalExecution?.Intents.Any(i=>i.ReservationId==reservation&&i.Stage is NavalExecutionStage.Dispatching or NavalExecutionStage.SubmitUnknown or NavalExecutionStage.Accepted)==true;
     private bool OfflineWorkflowSupported(EngineState e,NavalExecutionIntent i)
     {

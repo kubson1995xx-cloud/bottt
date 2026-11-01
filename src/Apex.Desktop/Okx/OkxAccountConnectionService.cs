@@ -42,10 +42,28 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     private NavalBrokerSession? session;
     private NavalBrokerBinding? brokerBinding;
     private NavalBrokerObservationBatch? original;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<OkxStreamObservation> activity=new();
+    private long activityVersion;
+    internal long ActivityVersion=>Interlocked.Read(ref activityVersion);
+    internal OkxStreamObservation[] ReadActivity()=>activity.ToArray();
+    internal void AcknowledgeActivity(long sequence){while(activity.TryPeek(out var p)&&p.Sequence<=sequence)activity.TryDequeue(out _);}
+    private bool openingExisting;
     private volatile bool connected,disposed;
     private string status="NOT_CONNECTED";
     internal string Status=>status;
+    internal NavalRiskResult RegisterConfirmedSignal(NavalEvaluationRequest request)=>session?.Coordinator.RegisterBrokerSignal(request)??new(NavalMutationStatus.Refused,"BROKER_REQUIRED",null,0);
+    private OkxOperationalTradingService? trading;
+    internal void RegisterTrading(OkxOperationalTradingService service){if(trading!=null)throw new InvalidOperationException("ONE_TRADING_LOOP_PER_ACCOUNT");trading=service;}
+    internal void UnregisterTrading(OkxOperationalTradingService service){if(ReferenceEquals(trading,service))trading=null;}
     internal bool IsConnected=>connected;
+    internal NavalBrokerSession? BrokerSession=>session;
+    internal OkxExecutionObservationClient? ObservationClient=>reads;
+    internal OkxObservationContext? ObservationContext=>context;
+    internal OkxExecutionScope? ExecutionScope=>scope;
+    internal Guid TradingSessionId=>context?.ConnectionId??Guid.Empty;
+    internal IOkxSigningMaterialProvider ExecutionSigningProvider()=>new SigningProvider(this,brokerBinding!.CredentialFingerprint);
+    internal bool ArmExecution(OkxActivationRequest request,OkxActivationLease lease)=>connected&&!disposed&&session!=null&&request.Purpose==OkxActivationPurpose.Execute&&
+        request.Session==TradingSessionId&&request.Binding==binding&&request.CredentialFingerprint==brokerBinding!.CredentialFingerprint&&runtime.AuthorizeConnection(this,request,lease);
     internal NavalPortfolioCoordinator? Coordinator=>session?.Coordinator;
     public DateTimeOffset UtcNow=>clock.GetUtcNow();
     public long Timestamp=>clock.GetTimestamp();
@@ -72,9 +90,22 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
             scope=new(binding.Account.Environment==NavalEnvironment.OkxDemo?"Demo":"Live",binding.Account.AccountId,binding.MainUid,binding.Account.QuoteCurrency,binding.CredentialBindingId);
             var provider=new SigningProvider(this,request.CredentialFingerprint);
             reads=readFactory(scope,provider,request.CredentialFingerprint,this);stream=streamFactory(scope,provider,request.CredentialFingerprint,this);
+            openingExisting=File.Exists(Path.Combine(OkxConfiguration.Paths(root,binding).Authority,NavalBrokerValidation.Marker));
             pumping=Pump();
             using var linked=CancellationTokenSource.CreateLinkedTokenSource(cancellation,connection.Token);
             await paired.Task.WaitAsync(TimeSpan.FromSeconds(20),linked.Token).ConfigureAwait(false);
+            if(openingExisting)
+            {
+                var read=await reads.ReadAccountAsync(context,linked.Token).ConfigureAwait(false);
+                if(read.Status!=OkxObservationStatus.Observed||read.Rows.Count!=1)throw new InvalidDataException("EXISTING_ACCOUNT_UNPROVEN");
+                var actual=read.Rows[0];var keyInspection=await approval.InspectAsync(binding,request.CredentialFingerprint,linked.Token).ConfigureAwait(false);
+                if(actual.Uid!=binding.Account.AccountId||actual.MainUid!=binding.MainUid||actual.AccountLevel!="1"||actual.AccountType!="0"||actual.SpotRoleType!="0"||actual.AutoLoan||actual.EnableSpotBorrow||actual.SpotBorrowAutoRepay||actual.Permissions!="read_only,trade"||
+                    keyInspection==null||keyInspection.Fingerprint!=request.CredentialFingerprint||keyInspection.Policy!="okx-dedicated-cash-no-funding-v1"||string.IsNullOrWhiteSpace(keyInspection.Evidence)||keyInspection.Ip!=actual.Ip||!connected)throw new InvalidDataException("EXISTING_ACCOUNT_SCOPE_UNPROVEN");
+                store=storeFactory();brokerBinding=new(binding.Account,binding.MainUid,binding.ScopeId,binding.ConfigDigest,binding.CredentialBindingId,request.CredentialFingerprint,binding.SafetyVersion,store.StorageIdentity);
+                session=NavalBrokerSession.OpenExisting(store,brokerBinding,this);openingExisting=false;
+                if(!connected){session.Dispose();session=null;throw new InvalidOperationException("OBSERVATION_GAP");}
+                status="CONNECTED_STOP_RECONCILIATION_REQUIRED";return true;
+            }
             var observations=await OkxBrokerObservationMapper.CollectAsync(reads,context,binding,clock,stream.ReadState,linked.Token).ConfigureAwait(false);
             original=observations;
             if(!connected)throw new InvalidOperationException("OBSERVATION_GAP");
@@ -105,7 +136,12 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
             await foreach(var item in stream!.ObserveAsync(context!,connection!.Token).ConfigureAwait(false))
             {
                 if(item.Kind==OkxStreamObservationKind.Buffering)paired.TrySetResult();
-                if(item.Kind is OkxStreamObservationKind.OrdersUpdate or OkxStreamObservationKind.AlgoUpdate)OnGap(scope!,context!,item.Epoch,"ActivityChanged");
+                if(item.Kind is OkxStreamObservationKind.OrdersUpdate or OkxStreamObservationKind.AlgoUpdate)
+                {
+                    if(session==null&&!openingExisting){OnGap(scope!,context!,item.Epoch,"BaselineActivityChanged");continue;}
+                    activity.Enqueue(item);Interlocked.Increment(ref activityVersion);
+                    if(activity.Count>512)OnGap(scope!,context!,item.Epoch,"ActivityBufferOverflow");
+                }
             }
         }
         finally{if(connected)OnGap(scope!,context!,Guid.Empty,"Closed");}
@@ -158,6 +194,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     {
         // Revoke before waiting for the serialized owner lane or adapter drains.
         connected=false;bootstrap?.Revoke();runtime.Activation.Revoke();connection?.Cancel();
+        var loop=trading;if(loop!=null)await loop.DisposeAsync().ConfigureAwait(false);
         await serial.WaitAsync().ConfigureAwait(false);
         try
         {

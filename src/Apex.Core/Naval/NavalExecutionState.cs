@@ -205,7 +205,7 @@ internal static class NavalExecutionValidation
             (o.OrderId==null||Match(o.OrderId,"[0-9]{1,32}"))&&(i.OrderId==null||o.OrderId==i.OrderId)&&
             (o.Disposition!=NavalDispatchDisposition.Acknowledged||o.OrderId!=null&&o.Code=="0"&&o.SCode=="0"&&o.SubCode==null)&&
             o.Reason==(o.Disposition==NavalDispatchDisposition.Acknowledged?"TRANSPORT_ACK":o.Disposition==NavalDispatchDisposition.NotSent?"TRANSPORT_NOT_SENT":"TRANSPORT_UNKNOWN")&&new[]{o.Code,o.SCode,o.SubCode}.All(c=>c==null||c=="0"||Match(c,"[1-9][0-9]{4,7}"));
-    private static void ValidateStage(NavalExecutionIntent i,long revision)
+    internal static void ValidateStage(NavalExecutionIntent i,long revision)
     {
         if(i.DispatchRevision is {} attempt&&(attempt!=checked(i.PreparedRevision+1)||attempt>revision))throw Invalid();
         switch(i.Stage)
@@ -250,7 +250,7 @@ internal static class NavalExecutionValidation
             if(!candidate.Naval!.Reservations.Any(n=>n.Id==r.Id&&n.Intent==r.Intent&&n.Account==r.Account&&n.Fleet==r.Fleet))throw Invalid();
         // Full validation additionally proves the complete consecutive history and high-water, including newly appended counters.
     }
-    private static void ValidateBody(NavalExecutionIntent i,IReadOnlyDictionary<string,NavalReservedClientId> ids,HashSet<string> usedPlacements)
+    internal static void ValidateBody(NavalExecutionIntent i,IReadOnlyDictionary<string,NavalReservedClientId> ids,HashSet<string> usedPlacements)
     {
         using var doc=JsonDocument.Parse(i.Body);var e=doc.RootElement;
         if(i.Operation==NavalExecutionOperation.CancelProtection)
