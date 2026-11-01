@@ -76,6 +76,9 @@ public sealed class WindowsUiRepairTests
         await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"inventory-edge"));string sid=await b.NewPage();
         var records=new List<object>();
         try{
+            using(var inputs=JsonDocument.Parse(File.ReadAllBytes(Path.Combine(h.PackageRoot,"Weryfikacja","source-inputs.json"))))foreach(string name in new[]{"okx-controls.js","okx-controls.css"}){
+                using var response=await h.Send("/"+name);Assert.Equal(System.Net.HttpStatusCode.OK,response.StatusCode);byte[] payload=await response.Content.ReadAsByteArrayAsync();string hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)).ToLowerInvariant();string path="src/Apex.Desktop/Okx/"+name;var expected=inputs.RootElement.GetProperty("files").EnumerateArray().Single(f=>f.GetProperty("path").GetString()==path);Assert.Equal(expected.GetProperty("sha256").GetString(),hash);records.Add(new{embeddedAsset=name,sha256=hash,bytes=payload.Length,status=200});
+            }
             // Owned nonsecret metadata fixture ONLY: zero key envelope, private connection or trade.
             await h.StopAsync();string config=Path.Combine(h.DataRoot,"apex.config.json");var c=System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(config))!;
             c["OkxNaval"]=System.Text.Json.Nodes.JsonNode.Parse("{\"Schema\":\"okx-naval-config-v1\",\"Scopes\":[{\"ScopeId\":\"ui-demo\",\"Environment\":\"OkxDemo\",\"Region\":\"EEA\",\"ExpectedUid\":\"123456\",\"ExpectedMainUid\":\"123456\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential\",\"SafetyVersion\":\"okx-cash-v1\"},{\"ScopeId\":\"ui-demo-two\",\"Environment\":\"Live\",\"Region\":\"EEA\",\"ExpectedUid\":\"234567\",\"ExpectedMainUid\":\"234567\",\"QuoteCurrency\":\"EUR\",\"CredentialBindingId\":\"no-credential-two\",\"SafetyVersion\":\"okx-cash-v1\"}]}");
