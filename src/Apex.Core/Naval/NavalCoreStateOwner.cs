@@ -18,12 +18,15 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
     private readonly IKeyValueStore _store;
     private readonly NavalPortfolioDefinition _definition;
     private readonly FileStream _lease;
+    private readonly bool _broker;
+    private string Key=>_broker?NavalBrokerValidation.StateKey:StateKey;
     private EngineState _state=new();
     private bool _faulted, _disposed;
     internal NavalCoreStateOwner(string directory,IKeyValueStore store,NavalPortfolioDefinition definition)
     {
         NavalCashRiskPolicy.ValidateDefinition(definition);_store=store;_definition=definition;
         directory=Path.GetFullPath(directory);Directory.CreateDirectory(directory);
+        if(File.Exists(Path.Combine(directory,NavalBrokerValidation.Marker))||File.Exists(Path.Combine(directory,"naval_authority_broker_v2.json")))throw NavalBrokerValidation.Invalid();
         // FileShare.None plus the OS byte lock protects cooperating processes and separate coordinators.
         _lease=new FileStream(Path.Combine(directory,".naval-owner.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
         try
@@ -43,6 +46,7 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
             else
             {
                 using var doc=JsonDocument.Parse(raw);
+                if(doc.RootElement.EnumerateObject().Any(p=>p.Name.Equals("NavalBroker",StringComparison.OrdinalIgnoreCase)&&p.Value.ValueKind!=JsonValueKind.Null))throw NavalBrokerValidation.Invalid();
                 bool execution=doc.RootElement.EnumerateObject().Any(p=>string.Equals(p.Name,"NavalExecution",StringComparison.OrdinalIgnoreCase)&&p.Value.ValueKind!=JsonValueKind.Null);
                 try
                 {
@@ -60,6 +64,46 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
     }
     private static void RequireProperties(JsonElement e,Type t)
     {foreach(var p in t.GetProperties())if(!e.TryGetProperty(p.Name,out _))throw new InvalidDataException("Missing required "+p.Name);}
+    internal static NavalCoreStateOwner CreateBroker(INavalBrokerStore store,NavalBrokerBootstrap bootstrap,NavalBaselineCandidate candidate,NavalBaselineApproval approval)
+    {
+        var baseline=bootstrap.Consume(candidate,approval,store);var owner=new NavalCoreStateOwner(store,baseline.Binding,baseline);
+        try{bootstrap.VerifyPersistence();return owner;}catch{owner.Dispose();throw;}
+    }
+    internal static NavalCoreStateOwner OpenBroker(INavalBrokerStore store,NavalBrokerBinding binding)=>new(store,binding,null);
+    private NavalCoreStateOwner(INavalBrokerStore store,NavalBrokerBinding binding,NavalBrokerBaseline? baseline)
+    {
+        _broker=true;_store=store;store.Admit(baseline!=null);
+        if(binding.StorageBindingDigest!=store.StorageIdentity)throw NavalBrokerValidation.Invalid();
+        _lease=new FileStream(Path.Combine(store.DirectoryPath,".naval-owner.lock"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);
+        try
+        {
+            if(OperatingSystem.IsMacOS())throw new PlatformNotSupportedException();
+            _lease.Lock(0,1);store.Admit(baseline!=null);
+            string marker=Path.Combine(store.DirectoryPath,NavalBrokerValidation.Marker);string? raw=store.Get(Key);
+            if(baseline!=null)
+            {
+                if(raw!=null||File.Exists(marker))throw NavalBrokerValidation.Invalid();
+                _definition=NavalBrokerValidation.Definition(baseline);
+                var financial=new NavalPortfolioState{Schema="naval-cash-risk-broker-v2",Id=_definition.Id,ConfigDigest=_definition.Digest,
+                    Accounts=new[]{new NavalCashAccount(binding.Account,baseline.InitialCash,baseline.InitialCash)}};
+                var metadata=NavalBrokerValidation.Seal(new("naval-broker-v2","naval-execution-broker-v2",Guid.NewGuid().ToString("N"),0,baseline,new[]{new NavalBrokerRevision(0,"BASELINE_CREATED")},""));
+                _state=new EngineState{Naval=Seal(financial),NavalBroker=metadata};Validate(_state);
+                using(var m=new FileStream(marker,FileMode.CreateNew,FileAccess.Write,FileShare.None))
+                {var bytes=System.Text.Encoding.UTF8.GetBytes(NavalJson.Hash(new{binding,baseline.Digest}));m.Write(bytes);m.Flush(true);}
+                store.Set(Key,NavalJson.Serialize(_state));store.Flush();
+            }
+            else
+            {
+                if(raw==null||!File.Exists(marker))throw NavalBrokerValidation.Invalid();
+                using var doc=JsonDocument.Parse(raw);NavalBrokerRaw.Require(doc.RootElement);
+                _state=JsonSerializer.Deserialize<EngineState>(raw,NavalJson.Options)??throw NavalBrokerValidation.Invalid();
+                var b=_state.NavalBroker?.Baseline??throw NavalBrokerValidation.Invalid();
+                if(b.Binding!=binding||File.ReadAllText(marker)!=NavalJson.Hash(new{binding,Digest=b.Digest}))throw NavalBrokerValidation.Invalid();
+                _definition=NavalBrokerValidation.Definition(b);Validate(_state);
+            }
+        }
+        catch{_lease.Dispose();throw;}
+    }
     public EngineState Read(){lock(this){if(_disposed)throw new ObjectDisposedException(nameof(NavalCoreStateOwner));return NavalJson.Clone(_state);}}
     public NavalCommitResult TryCommit(long expectedRevision,EngineState candidate)
     {
@@ -74,8 +118,15 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
                 candidate.Naval=Seal(candidate.Naval??throw new InvalidDataException("Missing Naval state"));
                 if(candidate.NavalExecution is {} execution)candidate.NavalExecution=NavalExecutionValidation.Seal(execution,candidate.DurableRevision);
                 NavalExecutionValidation.ValidateTransition(_state,candidate);
-                NavalReadJournal.ValidateTransition(_state,candidate);
-                Validate(candidate);_store.Set(StateKey,NavalJson.Serialize(candidate));_store.Flush();_state=candidate;return NavalCommitResult.Committed;
+                if(_broker)
+                {
+                    if(NavalJson.Serialize(candidate.NavalBroker?.Baseline)!=NavalJson.Serialize(_state.NavalBroker!.Baseline)||
+                        candidate.NavalBroker!.Namespace!=_state.NavalBroker.Namespace||candidate.NavalBroker.Revisions.Count!=_state.NavalBroker.Revisions.Count+1||
+                        !_state.NavalBroker.Revisions.SequenceEqual(candidate.NavalBroker.Revisions.Take(_state.NavalBroker.Revisions.Count)))throw NavalBrokerValidation.Invalid();
+                    candidate.NavalBroker=NavalBrokerValidation.Seal(candidate.NavalBroker);
+                }
+                else NavalReadJournal.ValidateTransition(_state,candidate);
+                Validate(candidate);_store.Set(Key,NavalJson.Serialize(candidate));_store.Flush();_state=candidate;return NavalCommitResult.Committed;
             }
             catch{_faulted=true;return NavalCommitResult.Faulted;}
         }
@@ -83,13 +134,14 @@ internal sealed class NavalCoreStateOwner : INavalStateOwner, IDisposable
     private static NavalPortfolioState Seal(NavalPortfolioState s)=>s with{StateDigest=NavalJson.Hash(s with{StateDigest=""})};
     private void Validate(EngineState envelope)
     {
-        NavalCashRiskPolicy.ValidateDefinition(_definition);
+        if(_broker)NavalBrokerValidation.Validate(envelope,_definition);
+        else {if(envelope.NavalBroker!=null)throw NavalBrokerValidation.Invalid();NavalCashRiskPolicy.ValidateDefinition(_definition);}
         var s=envelope.Naval??throw new InvalidDataException("Unconfigured authority");
         if(s.StateDigest!=Seal(s).StateDigest)throw new InvalidDataException("Naval state integrity digest mismatch");
         NavalExecutionValidation.Validate(envelope,_definition);
-        var c=NavalJson.Clone(envelope);c.Naval=null;c.NavalReadJournal=null;c.NavalExecution=null;c.DurableRevision=0;c.SavedUtc=default;
+        var c=NavalJson.Clone(envelope);c.Naval=null;c.NavalReadJournal=null;c.NavalExecution=null;c.NavalBroker=null;c.DurableRevision=0;c.SavedUtc=default;
         if(NavalJson.Serialize(c)!=NavalJson.Serialize(new EngineState()))throw new InvalidDataException("CFD-populated envelope is not a Naval scope");
-        if(s.Schema!="naval-cash-risk-v1"||s.Id!=_definition.Id||s.ConfigDigest!=_definition.Digest||s.Revision!=envelope.DurableRevision||s.Generation<0||s.Sequence<0||
+        if(s.Schema!=(_broker?"naval-cash-risk-broker-v2":"naval-cash-risk-v1")||s.Id!=_definition.Id||s.ConfigDigest!=_definition.Digest||s.Revision!=envelope.DurableRevision||s.Generation<0||s.Sequence<0||
             (s.Mode!="STOP"&&s.Mode!="RUNNING"))throw new InvalidDataException("Naval schema/config/scope/revision mismatch");
         if(s.Accounts.Count!=_definition.Members.Count||s.Accounts.Select(a=>a.Account).Distinct().Count()!=s.Accounts.Count)throw new InvalidDataException("Membership changed");
         foreach(var a in s.Accounts)

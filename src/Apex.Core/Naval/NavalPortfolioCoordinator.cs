@@ -10,6 +10,7 @@ public sealed partial class NavalPortfolioCoordinator
     private readonly NavalPortfolioDefinition _definition;
     private readonly INavalClock _clock;
     private readonly long _restartGeneration;
+    private readonly bool _broker;
     private bool _ready, _started, _frozen;
     private readonly string _publicationEpoch=Guid.NewGuid().ToString("N");
     internal Guid OwnerToken { get; }=Guid.NewGuid();
@@ -19,6 +20,12 @@ public sealed partial class NavalPortfolioCoordinator
         lock(owner){var s=owner.Read().Naval??throw new InvalidOperationException("Unconfigured Naval scope");
             if(s.ConfigDigest!=definition.Digest||s.Id!=definition.Id)throw new InvalidOperationException("Wrong Naval scope");
             _restartGeneration=checked(s.Generation+1);}
+    }
+    internal NavalPortfolioCoordinator(INavalStateOwner owner,NavalPortfolioDefinition definition,INavalClock clock,NavalBrokerBaseline baseline)
+    {
+        _owner=owner;_definition=definition;_clock=clock;_broker=true;
+        NavalBrokerValidation.Definition(definition,baseline);NavalBrokerValidation.Validate(owner.Read(),definition);
+        _restartGeneration=checked(owner.Read().Naval!.Generation+1);
     }
     public INavalFleetRisk ForFleet(NavalAccountId account,NavalFleet fleet)
     {
@@ -44,7 +51,8 @@ public sealed partial class NavalPortfolioCoordinator
             if(execution.StopEpoch==oldExecution.StopEpoch)envelope.NavalExecution=execution with{StopEpoch=checked(execution.StopEpoch+1)};
         }
         long old=envelope.DurableRevision;envelope.DurableRevision=checked(old+1);envelope.Naval=s with{Revision=envelope.DurableRevision};
-        envelope.NavalReadJournal=NavalReadJournal.Append(previous,envelope,cause,_clock.UtcNow,_definition);
+        if(_broker)envelope.NavalBroker=envelope.NavalBroker! with{Revisions=envelope.NavalBroker!.Revisions.Append(new NavalBrokerRevision(envelope.DurableRevision,cause.Code=="DISCONNECTED"?"DISCONNECTED":"BROKER_STOP")).ToArray()};
+        else envelope.NavalReadJournal=NavalReadJournal.Append(previous,envelope,cause,_clock.UtcNow,_definition);
         var result=_owner.TryCommit(old,envelope);
         if(result!=NavalCommitResult.Committed){_frozen=true;_ready=false;_started=false;_offlineExecutionSession?.Invalidate();return new(NavalMutationStatus.Stopped,result==NavalCommitResult.Conflict?"COMMIT_CONFLICT":"STORAGE_FROZEN",null,old);}
         return new(status,code,id,envelope.DurableRevision);
@@ -107,7 +115,7 @@ public sealed partial class NavalPortfolioCoordinator
     }
     public NavalReadPublication? ReadPublication()
     {
-        lock(_owner){return NavalReadJournal.Publication(_owner.Read());}
+        lock(_owner){return _broker?null:NavalReadJournal.Publication(_owner.Read());}
     }
     public NavalPortfolioView Snapshot()
     {
@@ -144,6 +152,7 @@ public sealed partial class NavalPortfolioCoordinator
         lock(_owner)
         {
             var e=_owner.Read();var s=e.Naval!;
+            if(_broker)return Result(s,NavalMutationStatus.Refused,"BROKER_OFFLINE_EVIDENCE_DENIED");
             if(_frozen)return Result(s,NavalMutationStatus.Stopped,"STORAGE_FROZEN");
             if(r==null||r.OwnerToken!=OwnerToken||r.Portfolio!=_definition.Id||r.Kind!=expected||!NavalCashRiskPolicy.Text(r.ReceiptId))return Result(s,NavalMutationStatus.Refused,"EVIDENCE_AUTHORITY_KIND");
             string key=r.Generation+":"+r.ReceiptId;var old=s.Receipts.SingleOrDefault(x=>x.Key==key);
@@ -234,6 +243,7 @@ public sealed partial class NavalPortfolioCoordinator
     internal NavalRiskResult Start(NavalStartPermit permit)
     {
         lock(_owner){var e=_owner.Read();var s=e.Naval!;
+            if(_broker)return Result(s,NavalMutationStatus.Refused,"BROKER_EXPLICIT_START_UNAVAILABLE");
             if(_frozen)return Result(s,NavalMutationStatus.Stopped,"STORAGE_FROZEN");
             if(permit==null||permit.OwnerToken!=OwnerToken||permit.Revision!=s.Revision||permit.Generation!=s.Generation||!permit.ExplicitOfflineIntent||!Fresh(s)||
                 s.DailyLatch||s.DrawdownLatch||s.EmergencyLatch||s.Reservations.Any(p=>p.Stage==NavalReservationStage.Uncertain||ExecutionUnknown(e,p.Id))||s.LiquidationEquity<=0||

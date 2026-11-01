@@ -24,6 +24,8 @@ internal sealed class OkxExecutionCredentialLease : IDisposable
     internal ReadOnlySpan<byte> ApiKey { get { ThrowDisposed(); return key; } }
     internal ReadOnlySpan<byte> Secret { get { ThrowDisposed(); return secret; } }
     internal ReadOnlySpan<byte> Passphrase { get { ThrowDisposed(); return passphrase; } }
+    internal Apex.Adapters.Okx.Execution.OkxSigningMaterial OpenSigningMaterial(Apex.Adapters.Okx.Execution.OkxExecutionScope scope)
+    {ThrowDisposed();return new(scope,Provenance,key,secret,passphrase);}
     internal OkxExecutionCredentialLease(OkxScopeBinding binding, string provenance, byte[] key, byte[] secret, byte[] passphrase)
     {
         this.key = key; this.secret = secret; this.passphrase = passphrase;

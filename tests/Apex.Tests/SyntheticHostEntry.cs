@@ -15,6 +15,7 @@ internal static class SyntheticHostEntry
 {
     public static Task<int> Main(string[] args)
     {
+        if(args.Length>0&&args[0]=="--okx-baseline-crash")return OkxOperationalAccountTests.CrashBaseline(args);
         if(args.Length>0&&args[0]=="--okx-d-crash")return DispatchCrashFixture(args);
         if(args.Length>0&&args[0]=="--okx-p-crash")return Task.FromResult(CrashFixture(args));
         return Apex.Desktop.Program.Run(args, trustedSyntheticComposition: true);
