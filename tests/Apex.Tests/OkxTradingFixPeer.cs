@@ -13,10 +13,11 @@ using Xunit;
 namespace Apex.Tests;
 
 // Bounded extension fixture for ETH history isolation and two real reservation lifecycles.
-// Original reviewer-consumed TradingPeer and TradingEconomicsFixture stay byte-identical.
+// Multi-position synthetic peer. Attachment and generated numeric IDs are
+// deliberately distinct; immutable original reviewer fixtures live in evidence.
 internal sealed class TradingFixPeer(OperationalPeer owner) : HttpMessageHandler
 {
-    internal string Instrument="BTC-USDC",OrderId="777",AlgoId="888",ExitOrderId="778";
+    internal string Instrument="BTC-USDC",OrderId="777",AttachmentId="888",AlgoId="889",ExitOrderId="778";
     internal string Client="",Attachment="",ExitClient="";
     internal decimal Size;
     internal int Posts,BtcHistoryCalls,OwnHistoryCalls;

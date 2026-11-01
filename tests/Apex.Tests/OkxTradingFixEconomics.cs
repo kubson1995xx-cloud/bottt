@@ -9,7 +9,7 @@ using Apex.Core.Engine;
 namespace Apex.Tests;
 internal sealed class TradingFixEconomics(OperationalPeer f,TradingFixPeer peer)
 {
-    internal sealed record Position(string Instrument,string Parent,string Algo,string Child,string Client,string Attachment,decimal Size,decimal Stop,decimal Take,string Time)
+    internal sealed record Position(string Instrument,string Parent,string AttachmentId,string Algo,string Child,string Client,string Attachment,decimal Size,decimal Stop,decimal Take,string Time)
     {internal bool Triggered;}
     internal readonly List<Position> Positions=new();
     private static string N(decimal n)=>n.ToString("0.############################",CultureInfo.InvariantCulture);
@@ -21,7 +21,7 @@ internal sealed class TradingFixEconomics(OperationalPeer f,TradingFixPeer peer)
     internal Position Add()
     {
         var r=JsonSerializer.Deserialize<EngineState>(File.ReadAllText(f.Target))!.Naval!.Reservations.Last();
-        var p=new Position(peer.Instrument,peer.OrderId,peer.AlgoId,peer.ExitOrderId,peer.Client,peer.Attachment,peer.Size,r.Intent.StopPrice,r.Intent.TakeProfitPrice,f.Clock.GetUtcNow().ToUnixTimeMilliseconds().ToString());Positions.Add(p);return p;
+        var p=new Position(peer.Instrument,peer.OrderId,peer.AttachmentId,peer.AlgoId,peer.ExitOrderId,peer.Client,peer.Attachment,peer.Size,r.Intent.StopPrice,r.Intent.TakeProfitPrice,f.Clock.GetUtcNow().ToUnixTimeMilliseconds().ToString());Positions.Add(p);return p;
     }
     internal void Mutate(string path,JsonNode body)
     {
@@ -38,7 +38,8 @@ internal sealed class TradingFixEconomics(OperationalPeer f,TradingFixPeer peer)
                 if(kind=="order")
                 {
                     row["cTime"]=p.Time;row["uTime"]=p.Time;row["state"]="filled";row["side"]=sell?"sell":"buy";row["sz"]=N(p.Size);row["accFillSz"]=N(p.Size);row["fillSz"]=N(p.Size);foreach(string key in new[]{"fillPx","avgPx","px"})row[key]=sell?"120":"110";
-                    row["tradeQuoteCcy"]="USDC";row["ordType"]="fok";row["tgtCcy"]="base_ccy";row["attachAlgoOrds"]=sell?new JsonArray():new JsonArray(new JsonObject{["attachAlgoId"]=p.Algo,["attachAlgoClOrdId"]=p.Attachment,["failCode"]=""});
+                    row["tradeQuoteCcy"]="USDC";row["ordType"]="fok";row["tgtCcy"]="base_ccy";row["attachAlgoOrds"]=sell?new JsonArray():new JsonArray(new JsonObject{["attachAlgoId"]=p.AttachmentId,["attachAlgoClOrdId"]=p.Attachment,["failCode"]=""});
+                    if(sell){row["algoId"]=p.Algo;row["algoClOrdId"]=p.Attachment;}
                 }
                 else
                 {
@@ -52,7 +53,7 @@ internal sealed class TradingFixEconomics(OperationalPeer f,TradingFixPeer peer)
         }
         if(path=="/api/v5/trade/order-algo")
         {
-            var p=Positions.Single(p=>f.Paths.Last().Contains("algoId="+p.Algo,StringComparison.Ordinal));var row=Oracle("stream-algo-schema.json","detail");row["instId"]=p.Instrument;row["algoId"]=p.Algo;row["algoClOrdId"]=p.Attachment;row["side"]="sell";row["ordType"]="oco";row["tradeQuoteCcy"]="USDC";row["sz"]=N(p.Size);row["slTriggerPx"]=N(p.Stop);row["tpTriggerPx"]=N(p.Take);row["cTime"]=p.Time;row["uTime"]=p.Time;
+            var p=Positions.Single(p=>f.Paths.Last().Contains("algoClOrdId="+p.Attachment,StringComparison.Ordinal));var row=Oracle("stream-algo-schema.json","detail");row["instId"]=p.Instrument;row["algoId"]=p.Algo;row["algoClOrdId"]=p.Attachment;row["side"]="sell";row["ordType"]="oco";row["tradeQuoteCcy"]="USDC";row["sz"]=N(p.Size);row["slTriggerPx"]=N(p.Stop);row["tpTriggerPx"]=N(p.Take);row["cTime"]=p.Time;row["uTime"]=p.Time;
             row["state"]=p.Triggered?"effective":p.Algo==peer.AlgoId&&peer.ProtectionCanceled?"canceled":"live";row["ordIdList"]=p.Triggered?new JsonArray(p.Child):new JsonArray();body["data"]=new JsonArray(row);
         }
         if(path=="/api/v5/account/balance")

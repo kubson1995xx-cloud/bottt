@@ -33,7 +33,7 @@ public sealed class OkxOperationalTradingFixTests
         var dir=new DirectoryInfo(AppContext.BaseDirectory);while(dir!=null&&!Directory.Exists(Path.Combine(dir.FullName,"tests/Apex.Adapters.Okx.Tests/Fixtures")))dir=dir.Parent;
         var oracle=JsonNode.Parse(File.ReadAllText(Path.Combine(dir!.FullName,"tests/Apex.Adapters.Okx.Tests/Fixtures/ExecutionObservations/stream-algo-schema.json")))!;
         var frame=oracle["endpoints"]!["orders"]!["control"]!.DeepClone();frame["arg"]!["uid"]=f.Binding.Account.AccountId;frame["arg"]!["instId"]="BTC-USDC";
-        var row=frame["data"]![0]!;row["instId"]="BTC-USDC";row["ordId"]=foreign?"779":"778";row["clOrdId"]="";row["algoId"]="888";row["tradeQuoteCcy"]="USDC";
+        var row=frame["data"]![0]!;row["instId"]="BTC-USDC";row["ordId"]=foreign?"779":"778";row["clOrdId"]="";row["algoId"]=peer.GeneratedAlgoId;row["tradeQuoteCcy"]="USDC";
         string N(decimal n)=>n.ToString("0.############################",System.Globalization.CultureInfo.InvariantCulture);
         foreach(string key in new[]{"sz","accFillSz","fillSz"})row[key]=N(peer.Size);foreach(string key in new[]{"px","avgPx","fillPx"})row[key]="120";foreach(string key in new[]{"fee","fillFee"})row[key]=N(-peer.Size*.12m);
         row["feeCcy"]="USDC";row["fillFeeCcy"]="USDC";row["tradeId"]="902";row["ordType"]="fok";
@@ -75,10 +75,10 @@ public sealed class OkxOperationalTradingFixTests
         Assert.Equal(NavalMutationStatus.Applied,(await loop.RunOnceAsync(NavalFleet.Alpha,"BTC-USDC",default)).Status);var economics=new TradingFixEconomics(f,peer);var old=economics.Add();f.Mutate=economics.Mutate;await Reconciled(f,loop);
         old.Triggered=true;await Reconciled(f,loop);var ended=State(f).Naval!.Reservations.Single();Assert.Equal(NavalReservationStage.Terminal,ended.Stage);Assert.Equal(0,ended.Inventory);Assert.False(ended.ReductionUnsettled);
         f.Clock.Advance(TimeSpan.FromDays(1),true,true);await Reconciled(f,loop);Assert.Equal(NavalMutationStatus.Applied,loop.Start().Status);
-        peer.OrderId="1777";peer.AlgoId="1888";peer.ExitOrderId="1778";
+        peer.OrderId="1777";peer.AttachmentId="1888";peer.AlgoId="1889";peer.ExitOrderId="1778";
         var entered=await loop.RunOnceAsync(NavalFleet.Alpha,"BTC-USDC",default);Assert.True(entered.Status==NavalMutationStatus.Applied,entered.Code);var later=economics.Add();Assert.NotEqual(old.Client,later.Client);await Reconciled(f,loop);
         Assert.Equal(2,State(f).Naval!.Reservations.Count);var result=await loop.ExitAsync(State(f).Naval!.Reservations.Last().Id,default);
-        Assert.True(peer.ProtectionCanceled);Assert.True(result.Status==NavalMutationStatus.Applied,result.Code);Assert.Equal(4,peer.Posts);Assert.NotEmpty(peer.ExitClient);Assert.Single(peer.Mutations,m=>m.StartsWith("/api/v5/trade/cancel-algos:",StringComparison.Ordinal));Assert.Contains("1888",peer.Mutations[2]);
-        var state=State(f);Assert.Contains(state.NavalBroker!.Operational!.Protection,p=>p.AlgoId=="888"&&p.State=="effective");Assert.Contains(state.NavalBroker.Operational.Protection,p=>p.AlgoId=="1888"&&p.State=="canceled");Assert.Equal(NavalReservationStage.Terminal,state.Naval!.Reservations.First().Stage);
+        Assert.True(peer.ProtectionCanceled);Assert.True(result.Status==NavalMutationStatus.Applied,result.Code);Assert.Equal(4,peer.Posts);Assert.NotEmpty(peer.ExitClient);Assert.Single(peer.Mutations,m=>m.StartsWith("/api/v5/trade/cancel-algos:",StringComparison.Ordinal));Assert.Contains("1889",peer.Mutations[2]);
+        var state=State(f);Assert.Contains(state.NavalBroker!.Operational!.Protection,p=>p.AttachmentId=="888"&&p.AlgoId=="889"&&p.State=="effective");Assert.Contains(state.NavalBroker.Operational.Protection,p=>p.AttachmentId=="1888"&&p.AlgoId=="1889"&&p.State=="canceled");Assert.Equal(NavalReservationStage.Terminal,state.Naval!.Reservations.First().Stage);
     }
 }
