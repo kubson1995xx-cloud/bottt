@@ -38,9 +38,25 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(scope);ArgumentNullException.ThrowIfNull(provider);ArgumentNullException.ThrowIfNull(fence);ArgumentNullException.ThrowIfNull(clock);
         if(!Grammar.Match(expectedFingerprint,"[0-9a-f]{64}"))throw new ArgumentException("InvalidObservationBinding");
         this.scope=scope;this.clock=clock;this.provider=provider;fingerprint=expectedFingerprint;this.fence=fence;
-        // Task.Delay truncates fractional milliseconds and can wake before both quota clocks.
-        // Round the production wait upward; never weaken the existing post-wait admission check.
-        this.delay=delay??((t,ct)=>Task.Delay(TimeSpan.FromMilliseconds(Math.Ceiling(t.TotalMilliseconds)+1),clock,ct));http=new(handler,true);
+        // Native timers can return early (observed on Windows despite upward rounding).
+        // Wait until BOTH original quota clocks are satisfied; caller retains its unchanged
+        // independent deadline/fence and custom-delay early-return rejection.
+        this.delay=delay??WaitForQuota;http=new(handler,true);
+    }
+    private async Task WaitForQuota(TimeSpan requested,CancellationToken ct)
+    {
+        var startUtc=clock.GetUtcNow();long start=clock.GetTimestamp();
+        var lastUtc=startUtc;long last=start;
+        while(true)
+        {
+            var utc=clock.GetUtcNow();long mono=clock.GetTimestamp();
+            if(utc<lastUtc||mono<last)throw new OperationCanceledException(ct);
+            lastUtc=utc;last=mono;
+            var remaining=requested-(utc-startUtc);var monoRemaining=requested-clock.GetElapsedTime(start,mono);
+            if(monoRemaining>remaining)remaining=monoRemaining;
+            if(remaining<=TimeSpan.Zero)return;
+            await Task.Delay(TimeSpan.FromMilliseconds(Math.Ceiling(remaining.TotalMilliseconds)+1),clock,ct).ConfigureAwait(false);
+        }
     }
     private static SocketsHttpHandler ProductionHandler()=>new()
     { AllowAutoRedirect=false,UseProxy=false,UseCookies=false,ConnectTimeout=TimeSpan.FromSeconds(5),AutomaticDecompression=DecompressionMethods.None,ActivityHeadersPropagator=null };

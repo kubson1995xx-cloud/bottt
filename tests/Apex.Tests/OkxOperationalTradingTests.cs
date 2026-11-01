@@ -182,16 +182,8 @@ public sealed class OkxOperationalTradingTests
         f.Clock.UseSystemUtc=true;
         // Both generations use real clocks: process-lifetime per-account quotas cannot be
         // reset by switching from the older peer's artificially advanced clock to System.
-        var waits=new System.Collections.Concurrent.ConcurrentQueue<object>();
-        async Task ActualProductionDelay(TimeSpan requested,System.Threading.CancellationToken ct)
-        {
-            var before=DateTimeOffset.UtcNow;long mono=TimeProvider.System.GetTimestamp();
-            await Task.Delay(TimeSpan.FromMilliseconds(Math.Ceiling(requested.TotalMilliseconds)+1),TimeProvider.System,ct).ConfigureAwait(false);
-            var after=DateTimeOffset.UtcNow;var elapsed=TimeProvider.System.GetElapsedTime(mono);
-            waits.Enqueue(new{requestedMilliseconds=requested.TotalMilliseconds,wallMilliseconds=(after-before).TotalMilliseconds,monotonicMilliseconds=elapsed.TotalMilliseconds,before,after});
-        }
         OkxAccountConnectionService Service()=>OkxAccountConnectionService.ForTests(f.Runtime,f.Root,f.Binding,f,TimeProvider.System,
-            (s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxExecutionObservationClient.ForTests(f,TimeProvider.System,s,p,h,x,ActualProductionDelay),
+            (s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxExecutionObservationClient.ForTests(f,TimeProvider.System,s,p,h,x),
             (s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxObservationStream.ForTests((uri,ct)=>{var socket=new OperationalSocket(uri);f.Sockets.Add(socket);return Task.FromResult<System.Net.WebSockets.WebSocket>(socket);},TimeProvider.System,s,p,h,x));
         await using var initial=Service();var observe=await f.Runtime.Activation.RequestAsync(f.Request,default);
         string caught="";
@@ -205,7 +197,7 @@ public sealed class OkxOperationalTradingTests
                 var bootstrap=typeof(OkxAccountConnectionService).GetField("bootstrap",flags)!.GetValue(initial);
                 var now=DateTimeOffset.UtcNow;
                 caught=System.Text.Json.JsonSerializer.Serialize(new{code=ev.Exception.Message,utc=now,peerUtc=f.Clock.GetUtcNow(),observation?.CaptureUtc,observation?.ServerUtc,
-                    balanceUtc=observation?.Balances[0].SourceUtc,lastUtc=bootstrap?.GetType().GetField("lastUtc",flags)?.GetValue(bootstrap),closed=bootstrap?.GetType().GetField("closed",flags)?.GetValue(bootstrap),waits=waits.TakeLast(6).ToArray()});
+                    balanceUtc=observation?.Balances[0].SourceUtc,lastUtc=bootstrap?.GetType().GetField("lastUtc",flags)?.GetValue(bootstrap),closed=bootstrap?.GetType().GetField("closed",flags)?.GetValue(bootstrap)});
             }
             catch{/* Diagnostic cannot alter the production decision. */}
         };
@@ -221,7 +213,7 @@ public sealed class OkxOperationalTradingTests
             var quoteMap=(System.Collections.Generic.Dictionary<string,NavalBrokerQuote>)typeof(OkxOperationalTradingService).GetField("quotes",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(loop)!;
             var now=DateTimeOffset.UtcNow;var state=initial.BrokerSession!.ReadState();
             return System.Text.Json.JsonSerializer.Serialize(new{phase,result.Code,result.Status,utc=now,peerUtc=f.Clock.GetUtcNow(),snapshot=initial.Coordinator!.Snapshot().Reason,lastBookSource=peer.LastBookSourceUtc,lastBookFuture=peer.LastBookSourceUtc>now,
-                obligations=state.NavalBroker!.Operational?.Obligations,caught,waits=waits.TakeLast(12).ToArray(),quotes=quoteMap.Values.Select(q=>new{q.SourceUtc,q.ReceivedUtc,sourceAfterReceipt=q.SourceUtc>q.ReceivedUtc,ageMilliseconds=(now-q.SourceUtc).TotalMilliseconds}),reads=f.Paths.Count,posts=peer.Posts});
+                obligations=state.NavalBroker!.Operational?.Obligations,caught,quotes=quoteMap.Values.Select(q=>new{q.SourceUtc,q.ReceivedUtc,sourceAfterReceipt=q.SourceUtc>q.ReceivedUtc,ageMilliseconds=(now-q.SourceUtc).TotalMilliseconds}),reads=f.Paths.Count,posts=peer.Posts});
         }
         var initialReconcile=await loop.ReconcileAsync(default);Assert.True(initialReconcile.Status==NavalMutationStatus.Applied,Predicate("initial-reconcile",initialReconcile));
         var initialStart=loop.Start();Assert.True(initialStart.Status==NavalMutationStatus.Applied,Predicate("initial-start",initialStart));
