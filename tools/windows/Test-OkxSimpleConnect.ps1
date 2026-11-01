@@ -7,7 +7,15 @@ $sdk=Join-Path $e 'sdk';New-Item -ItemType Directory -Path $sdk|Out-Null
 [IO.File]::WriteAllText((Join-Path $sdk 'global.json'),'{"sdk":{"version":"8.0.427","rollForward":"disable"}}')
 $os=Get-CimInstance Win32_OperatingSystem
 @{source=(& git -C $repo rev-parse HEAD);phase=$Phase;os=$os.Caption;version=$os.Version}|ConvertTo-Json|Set-Content (Join-Path $e 'identity.json') -Encoding UTF8
-$inputs=@();foreach($base in @('src','tests','tools','frontend/naval')){foreach($f in Get-ChildItem (Join-Path $repo $base) -Recurse -File){if($f.FullName -notmatch '[\\/](?:bin|obj|node_modules|dist)[\\/]'){$inputs+=@{path=$f.FullName.Substring($repo.Length+1);sha256=(Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}}};$inputs|ConvertTo-Json -Depth 4|Set-Content (Join-Path $e 'inputs.json') -Encoding UTF8
+$inputs=@()
+foreach($base in @('src','tests','tools','frontend/naval')) {
+ foreach($f in Get-ChildItem (Join-Path $repo $base) -Recurse -File) {
+  if($f.FullName -notmatch '[\\/](?:bin|obj|node_modules|dist)[\\/]') {
+   $inputs+=@{path=$f.FullName.Substring($repo.Length+1);sha256=(Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+  }
+ }
+}
+$inputs|ConvertTo-Json -Depth 4|Set-Content (Join-Path $e 'inputs.json') -Encoding UTF8
 $dotnet=(Get-Command dotnet).Source
 Push-Location $sdk
 try {

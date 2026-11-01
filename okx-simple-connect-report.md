@@ -23,5 +23,7 @@
 5. Parent independent review and explicit external boundaries.
 
 ## Checkpoints
+- Commit `43928e4`, run `41360547249`: wrapper PARSER ERROR (missing brace), not behavioral RED. No artifact uploaded; exact failed Actions log retained remotely. Fixed only wrapper and redispatching unchanged native product. Portable discovery contract skeleton produced 8 intended behavioral failures (`DISCOVERY_NOT_IMPLEMENTED`), exact source map/runtime/TRX retained at `/home/ubuntu/apex-deliveries/okx-simple-connect/evidence/portable-red`.
+- Microsoft Crawl4AI reads: CredUIPromptForWindowsCredentialsW, CredUnPackAuthenticationBufferW and LogonUserW. Supported protected blobs require `CRED_PACK_PROTECTED_CREDENTIALS` (4) to decrypt same-logon credentials; old code used 0. LogonUser UPN requires NULL domain, not pointer to an empty string. Neither mechanism establishes the cause of the user's 1326; password/PIN/provider/account/domain remain distinguishable unknowns. Preserve secure desktop, actual LogonUser and same SID/session; no fallback approval.
 - ENTRY: repository/base verified; no product edits or tests yet. Next unmet gate: source/authentication diagnosis and endpoint oracle.
 - Commit `735ff1c`: native behavioral RED fixture and source/binary retention lane. Push readback pending after next lane correction. Dispatch of new workflow returned GitHub HTTP404 (not registered on default branch); no CI executed. Corrected by adding isolated modes to existing authorized Windows workflow. Next gate remains genuine native RED; no product change yet.
