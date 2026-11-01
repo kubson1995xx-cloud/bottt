@@ -104,7 +104,7 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
     {
         context??=new(Guid.Empty,Guid.Empty);
         var startUtc=clock.GetUtcNow();var startMono=clock.GetTimestamp();var lastUtc=startUtc;var lastMono=startMono;
-        bool held=false,laneHeld=false,detailHeld=false;Lane? lane=null;OkxExecutionQuota.Lane? detail=null;byte[]? buffer=null;string? digest=null;
+        bool held=false,laneHeld=false,detailHeld=false,bootstrapHeld=false;Lane? lane=null;OkxExecutionQuota.Lane? detail=null;byte[]? buffer=null;string? digest=null;
         // Timer bounds real asynchronous waits; UTC and independent monotonic checks also bound scripted/provider work.
         using var timeout=new CancellationTokenSource(Budget,clock);
         using var linked=CancellationTokenSource.CreateLinkedTokenSource(caller,closing.Token,timeout.Token);
@@ -128,6 +128,7 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
             if(!valid || context.ConnectionId==Guid.Empty || context.CaptureId==Guid.Empty)return Result("InvalidObservationRequest");
             string? denied=Check();if(denied is not null)return Result(denied);
             await sendLock.WaitAsync(ct).ConfigureAwait(false);held=true;
+            if(isPrivate){await OkxEnrollmentDiscoveryClient.EnterOrdinaryAsync(ct).ConfigureAwait(false);bootstrapHeld=true;}
             denied=Check();if(denied is not null)return Result(denied);
             lane=isPrivate?PrivateLanes.GetOrAdd(scope.Environment+":"+scope.Uid,_=>new()):PublicLane;
             await lane.Gate.WaitAsync(ct).ConfigureAwait(false);laneHeld=true;
@@ -219,7 +220,7 @@ public sealed class OkxExecutionObservationClient : IAsyncDisposable
         finally
         {
             if(buffer is not null)CryptographicOperations.ZeroMemory(buffer);
-            if(detailHeld)detail!.Gate.Release();if(laneHeld)lane!.Gate.Release();if(held)sendLock.Release();
+            if(detailHeld)detail!.Gate.Release();if(laneHeld)lane!.Gate.Release();if(bootstrapHeld)OkxEnrollmentDiscoveryClient.ExitOrdinary();if(held)sendLock.Release();
         }
     }
     private async ValueTask<OkxSigningMaterial?> OpenMaterial(CancellationToken ct)

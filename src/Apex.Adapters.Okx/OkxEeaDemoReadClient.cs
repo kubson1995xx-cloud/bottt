@@ -86,10 +86,11 @@ public sealed class OkxEeaDemoReadClient : IAsyncDisposable
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30), Clock);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(caller, timeout.Token);
         var ct = linked.Token;
-        bool locked = false;
+        bool locked = false, enrollmentHeld=false;
         try
         {
             await operations.WaitAsync(ct).ConfigureAwait(false); locked = true;
+            if(priv){await Execution.OkxEnrollmentDiscoveryClient.EnterOrdinaryAsync(ct).ConfigureAwait(false);enrollmentHeld=true;}
             if (priv)
             {
                 if (secrets is null || scope is null) return Fail<T>(endpoint, "CredentialsUnavailable", true, start);
@@ -109,7 +110,7 @@ public sealed class OkxEeaDemoReadClient : IAsyncDisposable
             return resultRead;
         }
         catch (OperationCanceledException) { caller.ThrowIfCancellationRequested(); return Fail<T>(endpoint, "Timeout", priv, start); }
-        finally { if (locked) operations.Release(); }
+        finally { if(enrollmentHeld)Execution.OkxEnrollmentDiscoveryClient.ExitOrdinary();if (locked) operations.Release(); }
     }
     private async Task<string?> EnsureReady(DateTimeOffset start, CancellationToken ct)
     {

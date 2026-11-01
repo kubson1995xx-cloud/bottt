@@ -28,6 +28,38 @@ public sealed class WindowsOkxSimpleConnectTests
         }
         finally{stop.Cancel();await pending;}
     }
+    [Fact,Trait("Gate","SimpleConnectSource")]
+    public async Task Additive_dpapi_store_empty_account_restart_duplicate_and_no_activation()
+    {
+        string root=WindowsTestHost.NewRoot();using(var admitted=Apex.Desktop.Services.WindowsPrivateData.Open(root,AppContext.BaseDirectory)){}
+        byte[][] values=Enumerable.Range(0,3).Select(_=>Encoding.ASCII.GetBytes(Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)))).ToArray();
+        try
+        {
+            var config=new Apex.Desktop.Services.ConfigStore(root);byte[] before=File.ReadAllBytes(config.Path_);
+            var observed=new Apex.Adapters.Okx.Execution.OkxEnrollmentObservation("123456","123456","Demo","DemoTradingApi",Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(values[0])).ToLowerInvariant(),DateTimeOffset.UtcNow,System.Collections.Immutable.ImmutableArray<Apex.Adapters.Okx.Execution.OkxExecutionBalanceDetailDto>.Empty,System.Collections.Immutable.ImmutableArray<Apex.Adapters.Okx.Execution.OkxExecutionInstrumentDto>.Empty);
+            var store=new WindowsOkxReadStore(root);var account=store.Save(observed,values);using(var opened=store.Open(account.ScopeId)){Assert.Equal(account,opened.Account);Assert.True(values.Select((v,i)=>v.AsSpan().SequenceEqual(opened.Values[i])).All(v=>v),"DPAPI roundtrip mismatch; values withheld");}
+            Assert.True(before.AsSpan().SequenceEqual(File.ReadAllBytes(config.Path_)),"Existing config rewritten");
+            var inventory=WindowsTestHost.Inventory(root);Assert.Throws<InvalidDataException>(()=>store.Save(observed,values));WindowsTestHost.SameInventory(inventory,root);
+            await using var runtime=OkxNavalRuntime.Compose(root,OkxConfiguration.Bind(config.Config.OkxNaval));await using var control=new OkxOperatorControl(runtime,config);
+            string status=System.Text.Json.JsonSerializer.Serialize(control.ReadStatus());Assert.Contains("SAVED_DISCONNECTED_RECONNECT_REQUIRED",status);Assert.Contains("\"armed\":false",status);Assert.Contains("\"quote\":null",status);
+            foreach(string action in new[]{"arm","start","connect","baseline","recover"})Assert.Equal("READ_ONLY_NO_ACTIVATION",await control.ExecuteAsync(account.ScopeId,action,Guid.NewGuid().ToString("N"),default));
+            Assert.Empty(runtime.Bindings);Assert.False(Directory.Exists(Path.Combine(root,"okx")));Assert.Single(new WindowsOkxReadStore(root).List());
+            foreach(var secret in values)foreach(var file in Directory.GetFiles(root,"*",SearchOption.AllDirectories))Assert.False(File.ReadAllBytes(file).AsSpan().IndexOf(secret)>=0,"Plaintext persisted; value withheld");
+            WindowsTestHost.Evidence("simple-connect-empty-store",new{emptyAccountVisible=true,quoteUnknown=true,legacyConfigByteIdentical=true,duplicatePreserved=true,restartDisconnected=true,activationDenied=true,networkCalled=false,fullProtectedPositive=false});
+        }
+        finally{foreach(var v in values)System.Security.Cryptography.CryptographicOperations.ZeroMemory(v);Directory.Delete(root,true);}
+    }
+    [Fact,Trait("Gate","SimpleConnectSource")]
+    public async Task Async_native_form_refusal_stays_open_and_cancel_revokes_pending_work()
+    {
+        using var stop=new CancellationTokenSource(TimeSpan.FromSeconds(20));var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var ended=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pending=WindowsOkxSimpleConnect.FormAsync(stop.Token,async(values,ct)=>{entered.SetResult();try{await Task.Delay(Timeout.InfiniteTimeSpan,ct);return null;}finally{ended.SetResult();}});
+        try
+        {
+            var w=await WindowsNativeUi.Window(Environment.ProcessId,"APEX — lokalny klucz OKX");for(int i=100;i<103;i++)WindowsNativeUi.Text(w,i,"owned-synthetic-not-broker");WindowsNativeUi.Click(w,1);await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));WindowsNativeUi.Cancel(w);var result=await pending.WaitAsync(TimeSpan.FromSeconds(5));Assert.Null(result.Values);Assert.True(ended.Task.IsCompleted);
+        }
+        finally{stop.Cancel();await pending;}
+    }
     [DllImport("user32.dll")]private static extern IntPtr GetDlgItem(IntPtr w,int id);
     [DllImport("user32.dll")]private static extern bool IsWindowEnabled(IntPtr w);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)]private static extern int GetWindowTextW(IntPtr w,StringBuilder text,int count);

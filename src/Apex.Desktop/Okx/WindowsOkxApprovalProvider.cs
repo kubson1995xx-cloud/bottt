@@ -76,9 +76,14 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
             if(ct.IsCancellationRequested)return new(false,"APPROVAL_CANCELLED");
             if(Environment.TickCount64-start>=120000)return new(false,"APPROVAL_EXPIRED");
             uint us=(uint)user.Length,ds=(uint)domain.Length,ps=(uint)password.Length;
-            if(!CredUnPackAuthenticationBufferW(0,packed,packedSize,user,ref us,domain,ref ds,password,ref ps))return new(false,"APPROVAL_UNPACK_UNSUPPORTED_METHOD",(uint)Marshal.GetLastWin32Error());
+            // Documented same-logon protected credential decryption. No PIN to
+            // password conversion or generic/nonsecure fallback is attempted.
+            if(!CredUnPackAuthenticationBufferW(4,packed,packedSize,user,ref us,domain,ref ds,password,ref ps))return new(false,"APPROVAL_UNPACK_UNSUPPORTED_METHOD",(uint)Marshal.GetLastWin32Error());
             u=GCHandle.Alloc(user,GCHandleType.Pinned);d=GCHandle.Alloc(domain,GCHandleType.Pinned);p=GCHandle.Alloc(password,GCHandleType.Pinned);
-            if(!LogonUserW(u.AddrOfPinnedObject(),d.AddrOfPinnedObject(),p.AddrOfPinnedObject(),2,0,out var token))return new(false,"APPROVAL_AUTHENTICATION_REFUSED",(uint)Marshal.GetLastWin32Error());
+            // UPN names require NULL domain. Preserve an explicit local/domain/
+            // MicrosoftAccount provider domain exactly; do not guess or retry it.
+            bool upn=Array.IndexOf(user,'@')>=0&&domain[0]=='\0';
+            if(!LogonUserW(u.AddrOfPinnedObject(),upn?IntPtr.Zero:d.AddrOfPinnedObject(),p.AddrOfPinnedObject(),2,0,out var token))return new(false,"APPROVAL_AUTHENTICATION_REFUSED",(uint)Marshal.GetLastWin32Error());
             using(token)
             using(var identity=new WindowsIdentity(token.DangerousGetHandle()))
             using(var current=WindowsIdentity.GetCurrent())

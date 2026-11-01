@@ -131,6 +131,17 @@ internal sealed class WindowsOkxCredentialStore : IOkxExecutionSecretProvider
         // Native directory identity prevents copied blobs surviving root recreation.
         return SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { Schema = OkxCredentialEnvelope.Schema, Root = opened.Path.ToUpperInvariant(), identity.VolumeSerial, identity.IndexHigh, identity.IndexLow, Binding = binding }));
     }
+    internal static byte[] ReadStorePurpose(string root,string name)
+    {
+        using var opened=WindowsPathSecurity.Open(root);
+        if(!opened.IsDirectory||!GetFileInformationByHandle(opened.Handle,out var identity))throw Invalid();
+        return SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new{Schema="okx-observation-only-v1",Root=opened.Path.ToUpperInvariant(),identity.VolumeSerial,identity.IndexHigh,identity.IndexLow,Name=name}));
+    }
+    internal static void ValidateReadFile(WindowsPathSecurity.NativeObject opened)
+    {
+        WindowsPathSecurity.Validate(opened,true);
+        if(opened.IsDirectory||!GetFileInformationByHandle(opened.Handle,out var info)||info.Links!=1)throw Invalid();
+    }
     [StructLayout(LayoutKind.Sequential)] private struct DataBlob { internal int Length; internal IntPtr Data; }
     [DllImport("crypt32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CryptProtectData(ref DataBlob input, IntPtr description, ref DataBlob entropy, IntPtr reserved, IntPtr prompt, uint flags, out DataBlob output);
@@ -139,7 +150,7 @@ internal sealed class WindowsOkxCredentialStore : IOkxExecutionSecretProvider
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr data);
     [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle file, out WindowsPathSecurity.FileInformation info);
-    private static byte[] Crypt(byte[] bytes, byte[] purpose, bool protect)
+    internal static byte[] Crypt(byte[] bytes, byte[] purpose, bool protect)
     {
         var input = new DataBlob { Length = bytes.Length, Data = Marshal.AllocHGlobal(bytes.Length) };
         DataBlob entropy = default, output = default;
