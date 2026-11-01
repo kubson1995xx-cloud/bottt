@@ -5,7 +5,7 @@ on:
       mode:
         description: 'full-delivery packages; task1-source/task2-source/task3-source/task4-source validate only the named source prerequisite'
         type: choice
-        options: [okx-simple-connect-red, okx-simple-connect-green, okx-simple-connect-delivery, okx-enrollment-remaining, okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
+        options: [okx-simple-connect-wait, okx-simple-connect-red, okx-simple-connect-green, okx-simple-connect-delivery, okx-enrollment-remaining, okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
         default: full-delivery
       ui_run_id:
         description: 'Immutable UI candidate artifact run for test-only acceptance'
@@ -63,6 +63,13 @@ jobs:
           run-id: 41338154933
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/simple-connect-prior
+      - uses: actions/download-artifact@v4
+        if: inputs.mode == 'okx-simple-connect-wait'
+        with:
+          name: OKX-Simple-Connect-41363122200
+          run-id: 41363122200
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/okx-connect-retained
       - name: Scoped native connect gate
         shell: powershell
         env:

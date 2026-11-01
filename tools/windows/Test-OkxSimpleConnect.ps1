@@ -1,5 +1,5 @@
 #requires -Version 5.1
-param([ValidateSet('red','green','delivery')][string]$Phase='green')
+param([ValidateSet('red','green','delivery','wait')][string]$Phase='green')
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $e=Join-Path $env:RUNNER_TEMP 'okx-simple-connect';New-Item -ItemType Directory -Path $e|Out-Null
@@ -31,6 +31,25 @@ if($Phase -eq 'delivery') {
 Push-Location $sdk
 try {
  if ((& $dotnet --version) -cne '8.0.427'){throw 'SDK pin failed'}
+ if($Phase -eq 'wait') {
+  & git -C $repo diff --quiet aebc08f89b5c2e694a8765a0feebdf867c5ef5a5 -- src frontend tests
+  if($LASTEXITCODE -ne 0){throw 'Retained runtime/test source delta refused'}
+  $retained=Join-Path $env:RUNNER_TEMP 'okx-connect-retained'
+  $zip=Join-Path $retained 'APEX-NAVAL-COMMAND-Windows-x64.zip'
+  $extract=Join-Path $env:RUNNER_TEMP 'okx-connect-wait-package'
+  & python (Join-Path $repo 'tests/package/safe_extract.py') $zip $extract (Join-Path $e 'retained-package-readback.json') 'e7b805f009dd21b0e5c126b6ed508902d75aee4ca9bce2bc02760c243b44a68c'
+  if($LASTEXITCODE -ne 0){throw 'Retained ZIP pin/CRC/layout refused'}
+  & (Join-Path $extract 'Sprawdz-Pakiet.ps1') -Pakiet $extract
+  $dll=Join-Path $retained 'okx-simple-connect/host-runtime/Apex.Tests.dll'
+  if(-not(Test-Path -LiteralPath $dll)){throw 'Exact retained test DLL missing; no rebuild/fallback'}
+  $binaryMap=@(Get-ChildItem (Split-Path $dll) -File -Recurse|ForEach-Object{@{path=$_.FullName.Substring($retained.Length+1);sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}})
+  $binaryMap|ConvertTo-Json -Depth 4|Set-Content (Join-Path $e 'retained-binaries-before.json') -Encoding UTF8
+  & $dotnet test $dll --filter 'FullyQualifiedName~OkxNativeWaitTests' --logger 'trx;LogFileName=retained-native-wait.trx' --results-directory $e
+  $code=$LASTEXITCODE
+  @{testExit=$code;scope='Exact retained production/test DLLs in an isolated test process; original integrated 92/93 failure remains retained, not relabelled';zipSha256=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();runtimeRebuilt=$false}|ConvertTo-Json|Set-Content (Join-Path $e 'retained-wait-summary.json') -Encoding UTF8
+  if($code -ne 0){throw 'Retained exact native wait regression still failed'}
+  return
+ }
  & $dotnet build (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release *> (Join-Path $e 'build.log');if($LASTEXITCODE -ne 0){throw 'Native build failed'}
  Copy-Item (Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0') (Join-Path $e 'native-runtime') -Recurse
  & $dotnet test (Join-Path $e 'native-runtime/Apex.Windows.Tests.dll') --filter 'Gate=SimpleConnectSource' --logger 'trx;LogFileName=native.trx' --results-directory $e
