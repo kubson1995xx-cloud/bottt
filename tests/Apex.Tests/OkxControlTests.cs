@@ -19,7 +19,7 @@ public sealed class OkxControlTests
         using var doc=JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("STOP",doc.RootElement.GetProperty("mode").GetString());
         Assert.False(doc.RootElement.GetProperty("productionProfileApproved").GetBoolean());
-        Assert.Equal("PRODUCTION_PROTECTION_PROFILE_UNAPPROVED",doc.RootElement.GetProperty("productionBlocker").GetString());
+        Assert.Equal("ACCOUNT_CONFIGURATION_REQUIRED",doc.RootElement.GetProperty("productionBlocker").GetString());
         Assert.Empty(doc.RootElement.GetProperty("accounts").EnumerateArray());
         Assert.DoesNotContain("fingerprint",doc.RootElement.GetRawText(),StringComparison.OrdinalIgnoreCase);
         Assert.Equal(HttpStatusCode.Forbidden,(await h.Send("/api/naval/okx/status","read")).StatusCode);

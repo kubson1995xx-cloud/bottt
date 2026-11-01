@@ -22,8 +22,10 @@ internal sealed class TradingPeer(OperationalPeer owner) : HttpMessageHandler
     internal string Client="",Attachment="";
     internal bool Unknown;
     internal bool ProtectionCanceled;
+    internal bool FailBookAfterCancel,UnknownSell,UnknownCancel;
     internal bool ExitSignal;
     internal string ExitClient="";
+    internal string ExitOrderId="778";
     internal Action? BeforeResponse=null;
     internal TaskCompletionSource? HoldResponse;
     internal readonly TaskCompletionSource Invoked=new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -44,13 +46,15 @@ internal sealed class TradingPeer(OperationalPeer owner) : HttpMessageHandler
             if(path=="/api/v5/trade/cancel-algos")
             {
                 Assert.Equal("888",row[0].GetProperty("algoId").GetString());Assert.Equal(Attachment,row[0].GetProperty("algoClOrdId").GetString());ProtectionCanceled=true;Posts++;
+                if(UnknownCancel)return Reply("{\"code\":\"50011\",\"msg\":\"synthetic uncertain cancel\",\"data\":[]}");
                 return Reply("{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"888\",\"algoClOrdId\":\""+Attachment+"\",\"sCode\":\"0\",\"sMsg\":\"\"}]}");
             }
             if(row.GetProperty("side").GetString()=="sell")
             {
                 Assert.True(ProtectionCanceled);Assert.Equal(Size,decimal.Parse(row.GetProperty("sz").GetString()!,System.Globalization.CultureInfo.InvariantCulture));Assert.False(row.TryGetProperty("attachAlgoOrds",out _));
                 ExitClient=row.GetProperty("clOrdId").GetString()!;Posts++;
-                return Reply(JsonSerializer.Serialize(new{code="0",msg="",data=new[]{new{ordId="778",clOrdId=ExitClient,ts=owner.Clock.GetUtcNow().ToUnixTimeMilliseconds().ToString(),sCode="0",sMsg=""}}}));
+                if(UnknownSell)return Reply("{\"code\":\"50011\",\"msg\":\"synthetic uncertain sell\",\"data\":[]}");
+                return Reply(JsonSerializer.Serialize(new{code="0",msg="",data=new[]{new{ordId=ExitOrderId,clOrdId=ExitClient,ts=owner.Clock.GetUtcNow().ToUnixTimeMilliseconds().ToString(),sCode="0",sMsg=""}}}));
             }
             Assert.Equal("cash",row.GetProperty("tdMode").GetString());Assert.Equal("buy",row.GetProperty("side").GetString());Assert.Equal("fok",row.GetProperty("ordType").GetString());
             Size=decimal.Parse(row.GetProperty("sz").GetString()!,System.Globalization.CultureInfo.InvariantCulture);Client=row.GetProperty("clOrdId").GetString()!;
@@ -67,6 +71,7 @@ internal sealed class TradingPeer(OperationalPeer owner) : HttpMessageHandler
             return Reply(JsonSerializer.Serialize(new{code="0",msg="",data=rows}));
         }
         Assert.Equal("/api/v5/market/books",path);
+        if(FailBookAfterCancel&&ProtectionCanceled)throw new HttpRequestException("synthetic unavailable book");
         LastBookSourceUtc=DateTimeOffset.FromUnixTimeMilliseconds(owner.Clock.GetUtcNow().ToUnixTimeMilliseconds());
         return Reply("{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"asks\":[[\"110\",\"100\",\"0\",\"1\"]],\"bids\":[[\"109.99\",\"100\",\"0\",\"1\"]],\"ts\":\""+LastBookSourceUtc.Value.ToUnixTimeMilliseconds()+"\",\"seqId\":1}]}");
     }

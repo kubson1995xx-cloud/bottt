@@ -70,6 +70,7 @@ internal static class TradingEconomicsFixture
                 var state=System.Text.Json.JsonSerializer.Deserialize<Apex.Core.Engine.EngineState>(File.ReadAllText(f.Target))!;var reservation=state.Naval!.Reservations.Single();
                 var algo=algoOracle["endpoints"]!["detail"]!["control"]!["data"]![0]!.DeepClone();
                 algo["instId"]="BTC-USDC";algo["algoId"]="888";algo["algoClOrdId"]=peer.Attachment;algo["side"]="sell";algo["ordType"]="oco";algo["tradeQuoteCcy"]="USDC";
+                algo["slOrdPx"]="-1";algo["tpOrdPx"]="-1";algo["slTriggerPxType"]="last";algo["tpTriggerPxType"]="last";
                 algo["sz"]=N(quantity-(baseFee?fee:0));algo["slTriggerPx"]=N(reservation.Intent.StopPrice);algo["tpTriggerPx"]=N(reservation.Intent.TakeProfitPrice);algo["cTime"]=now;algo["uTime"]=now;
                 body["data"]=new JsonArray(algo);
             }

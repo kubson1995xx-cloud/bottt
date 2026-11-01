@@ -61,8 +61,13 @@ internal static class NavalBrokerExecutionValidation
         foreach(string settled in x.SettledIntents)
         {
             var i=x.Intents.SingleOrDefault(i=>i.Id==settled);var r=s.Reservations.SingleOrDefault(r=>r.Id==i?.ReservationId);
-            if(i==null||i.DispatchRevision==null||i.Reduction||r==null||!r.TerminalCoverage||s.Fills.Where(f=>f.Fill.ReservationId==r.Id&&!f.Fill.Reduction).Sum(f=>f.Fill.Quantity)!=r.Quantity||
-                !x.Orders.Any(o=>o.Instrument==i.Instrument&&o.ClientId==i.ClientId&&o.State=="filled"&&o.Accumulated==r.Quantity&&o.Quantity==r.Quantity))throw NavalBrokerValidation.Invalid();
+            if(i==null||i.DispatchRevision==null||r==null||!r.TerminalCoverage)throw NavalBrokerValidation.Invalid();
+            if(i.Operation==NavalExecutionOperation.CancelProtection)
+            {if(!x.Protection.Any(p=>NavalBrokerSettlement.CanceledProtection(i,p)))throw NavalBrokerValidation.Invalid();continue;}
+            if(i.Reduction)
+            {if(!x.Orders.Any(o=>NavalBrokerSettlement.ZeroFillCanceled(i,o,x.FillEvidence)||NavalBrokerSettlement.FilledReduction(i,o,x.FillEvidence,x.Bills)))throw NavalBrokerValidation.Invalid();}
+            else if(!x.Orders.Any(o=>NavalBrokerSettlement.ZeroFillCanceled(i,o,x.FillEvidence))&&(s.Fills.Where(f=>f.Fill.ReservationId==r.Id&&!f.Fill.Reduction).Sum(f=>f.Fill.Quantity)!=r.Quantity||
+                !x.Orders.Any(o=>o.Instrument==i.Instrument&&o.ClientId==i.ClientId&&o.State=="filled"&&o.Accumulated==r.Quantity&&o.Quantity==r.Quantity)))throw NavalBrokerValidation.Invalid();
         }
     }
     internal static void Transition(EngineState old,EngineState next)

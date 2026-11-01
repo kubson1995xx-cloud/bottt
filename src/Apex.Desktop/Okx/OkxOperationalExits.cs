@@ -42,15 +42,17 @@ internal sealed partial class OkxOperationalTradingService
     {
         await lane.WaitAsync(ct).ConfigureAwait(false);
         try{return await ExitOwned(reservationId,ct).ConfigureAwait(false);}
+        catch(Exception error) when(error is System.IO.IOException or System.Net.Http.HttpRequestException or InvalidOperationException or ArgumentException or System.Text.Json.JsonException or OverflowException or OperationCanceledException)
+        {return session.Coordinator.Stop("EXIT_INCOMPLETE_UNPROTECTED_RESIDUAL_CHECK_OBLIGATIONS");}
         finally{current=null;lane.Release();}
     }
     private async Task<NavalRiskResult> ExitOwned(string reservationId,CancellationToken ct)
     {
-        if(!CanExecute||protection==null)return Refuse("EXECUTE_PROTECTION_APPROVAL_REQUIRED");
+        if(!CanExecute)return Refuse("EXECUTE_ARMING_REQUIRED");
         var state=session.ReadState();var r=state.Naval!.Reservations.SingleOrDefault(r=>r.Id==reservationId);
         if(r==null||r.Inventory<=0)return Refuse("EXACT_OWNED_INVENTORY_REQUIRED");
         var x=state.NavalBroker!.Operational!;
-        if(x.Intents.Any(i=>i.ReservationId==r.Id&&i.Reduction))return Refuse("ORIGINAL_EXIT_ALREADY_PREPARED_NO_RETRY");
+        if(x.Intents.Any(i=>i.ReservationId==r.Id&&i.Reduction&&i.Stage!=NavalExecutionStage.NotSent&&!x.SettledIntents.Contains(i.Id)))return Refuse("ORIGINAL_EXIT_ALREADY_PREPARED_NO_RETRY");
         var requested=session.RequestExit(reservationId);if(requested.Status==NavalMutationStatus.Refused)return requested;
         foreach(var p in NavalBrokerProtectionOwnership.Competing(state,r).Where(p=>p.State=="live"&&NavalBrokerProtectionOwnership.Reservation(x,p)==r.Id))
         {
@@ -60,12 +62,19 @@ internal sealed partial class OkxOperationalTradingService
         }
         // Cancellation ACK is never used as cancellation, inventory or fee proof.
         await CollectEconomicsAsync(ct).ConfigureAwait(false);state=session.ReadState();x=state.NavalBroker!.Operational!;r=state.Naval!.Reservations.Single(r=>r.Id==reservationId);
-        if(x.Obligations.Any(o=>!o.StartsWith("PROTECTION_GAP:",StringComparison.Ordinal))||NavalBrokerProtectionOwnership.Competing(state,r).Any(p=>p.State!="canceled"))return Refuse("EXIT_COMPETING_OR_UNKNOWN_OBLIGATIONS");
+        if(x.Obligations.Any(o=>!o.StartsWith("PROTECTION_GAP:",StringComparison.Ordinal))||NavalBrokerProtectionOwnership.Competing(state,r).Any(p=>!NavalBrokerProtectionOwnership.Settled(p)))return Refuse("EXIT_COMPETING_OR_UNKNOWN_OBLIGATIONS");
         var definition=NavalBrokerValidation.Definition(state.NavalBroker.Baseline);var spec=definition.Catalog.Single(i=>i.Instrument==r.Intent.Instrument);var quote=await feed.ReadQuoteAsync(spec,ct).ConfigureAwait(false);
         decimal quantity=decimal.Floor(r.Inventory/(definition.Fees.ExitInBase?1+definition.Fees.ExitRate:1)/spec.Quantum)*spec.Quantum;
         if(quantity<spec.MinimumQuantity)return Refuse("OWNED_DUST_RETAINED");
-        string command="exit-"+r.Id;var ids=session.ReserveIds(r.Id,command,true);if(ids.Result.Status is not (NavalMutationStatus.Applied or NavalMutationStatus.Duplicate))return ids.Result;
+        int preceding=x.Intents.Count(i=>i.ReservationId==r.Id&&i.Reduction);
+        string command="exit-"+r.Id+(preceding==0?"":"-recovery-"+preceding.ToString(System.Globalization.CultureInfo.InvariantCulture));var ids=session.ReserveIds(r.Id,command,true);if(ids.Result.Status is not (NavalMutationStatus.Applied or NavalMutationStatus.Duplicate))return ids.Result;
         decimal price=decimal.Floor(quote.Bid/spec.TickSize)*spec.TickSize;
+        var marked=session.UpdateQuote(quote);if(marked.Status!=NavalMutationStatus.Applied)return marked;
+        if(Conditional)
+        {
+            await RefreshLimitReferences(spec,quote,ct).ConfigureAwait(false);
+            if(!WithinPrivateMaxima(spec.Instrument,quantity,price,false))return Refuse("PRIVATE_MAXIMUM_OR_UNIT_UNPROVEN");
+        }
         var request=OkxPreparedRequest.Submit(account.ExecutionScope!,spec.Instrument,"sell","fok",N(quantity),N(price),ids.Ids[0].ClientId,Deadline());
         return await DispatchMutation(command,r.Id,request,true,ct).ConfigureAwait(false);
     }

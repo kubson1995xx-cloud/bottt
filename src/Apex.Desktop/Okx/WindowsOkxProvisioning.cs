@@ -13,7 +13,7 @@ internal static class WindowsOkxProvisioning
     internal static async Task<OkxScopeBinding?> CreateAsync(ConfigStore config,CancellationToken ct)
     {
         if(!OperatingSystem.IsWindows())throw new InvalidOperationException("NATIVE_WINDOWS_REQUIRED");
-        var metadata=await WindowsOkxDialog.ShowAsync("APEX — konfiguracja OKX","Nowy dedykowany rachunek cash SPOT ≤1x. Bez połączenia i bez START. LIVE domyślnie wyłączony. Istniejących zakresów nie nadpisujemy.",new[]{
+        var metadata=await WindowsOkxDialog.ShowAsync("APEX — konfiguracja OKX","Dedykowany cash SPOT ≤1x, bez pożyczek, feeType=1: opłaty tylko w quote. Warunkowe TP/SL po fill może zawieść; po anulowaniu i nieudanej sprzedaży może pozostać niechroniona reszta bez limitu czasu. STOP nie likwiduje. Bez połączenia/START; LIVE domyślnie OFF. Istniejących zakresów nie nadpisujemy.",new[]{
             new OkxNativeField("Środowisko: wpisz dokładnie DEMO albo LIVE (brak domyślnego)"),new OkxNativeField("Nazwa zakresu (litery ASCII, cyfry, - lub _)"),
             new OkxNativeField("UID głównego rachunku (bez subkonta)"),new OkxNativeField("Rzeczywista waluta kwotowana (np. EUR; bez przeliczania USDT)")},ct).ConfigureAwait(false);
         if(metadata==null)return null;

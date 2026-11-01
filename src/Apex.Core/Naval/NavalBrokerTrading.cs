@@ -68,7 +68,7 @@ public sealed partial class NavalPortfolioCoordinator
         lock(_owner)
         {
             var e=_owner.Read();var s=e.Naval!;var b=e.NavalBroker!;var x=b.Operational??new();
-            if(!BrokerSource(session)||_brokerAuthority?.CanExecute!=true||_brokerAuthority.ProtectionProfile==null||!BrokerFresh()||!s.Reservations.Any(r=>r.Id==reservation&&r.Inventory>0))return Result(s,NavalMutationStatus.Refused,"EXACT_OWNED_EXIT_REQUIRED");
+            if(!BrokerSource(session)||_brokerAuthority?.CanExecute!=true||!BrokerFresh()||!s.Reservations.Any(r=>r.Id==reservation&&r.Inventory>0))return Result(s,NavalMutationStatus.Refused,"EXACT_OWNED_EXIT_REQUIRED");
             if(x.ExitRequested.Contains(reservation))return Result(s,NavalMutationStatus.Duplicate,"EXIT_ALREADY_REQUESTED",reservation);
             e.NavalBroker=b with{Operational=x with{ExitRequested=x.ExitRequested.Append(reservation).ToArray()}};
             return StopCandidate(e,"EXACT_OWNED_EXIT_REQUESTED");

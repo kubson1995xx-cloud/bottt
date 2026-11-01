@@ -16,6 +16,7 @@ internal sealed class OkxPublicMarketFeed : IDisposable
 {
     private readonly HttpClient http;
     private readonly TimeProvider clock;
+    private readonly Dictionary<string,DateTimeOffset> quoteSources=new(StringComparer.Ordinal);
     internal OkxPublicMarketFeed(TimeProvider clock,HttpMessageHandler? handler=null)
     {
         this.clock=clock;http=new(handler??new SocketsHttpHandler{AllowAutoRedirect=false,UseProxy=false,UseCookies=false},handler==null){BaseAddress=new Uri("https://eea.okx.com"),Timeout=TimeSpan.FromSeconds(10)};
@@ -49,6 +50,8 @@ internal sealed class OkxPublicMarketFeed : IDisposable
         var data=doc.RootElement.GetProperty("data");if(data.GetArrayLength()!=1)throw new InvalidDataException("PUBLIC_BOOK_CARDINALITY");var row=data[0];
         var ask=row.GetProperty("asks");var bid=row.GetProperty("bids");if(ask.GetArrayLength()!=1||bid.GetArrayLength()!=1||ask[0].GetArrayLength()!=4||bid[0].GetArrayLength()!=4)throw new InvalidDataException("PUBLIC_BOOK_DEPTH");
         var source=DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(row.GetProperty("ts").GetString()!,CultureInfo.InvariantCulture));
+        if(quoteSources.TryGetValue(i.Instrument,out var previous)&&source<previous)throw new InvalidDataException("QUOTE_SOURCE_REGRESSION");
+        quoteSources[i.Instrument]=source;
         return new(i.Instrument,N(bid[0][0]),N(ask[0][0]),N(ask[0][1]),source,clock.GetUtcNow(),clock.GetTimestamp());
     }
     internal async Task<NavalSeries> ReadSeriesAsync(NavalInstrument i,CancellationToken ct)

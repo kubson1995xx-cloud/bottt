@@ -20,11 +20,12 @@ public sealed partial class NavalPortfolioCoordinator
             var spec=_definition.Catalog.Single(z=>z.Instrument==i.Instrument);decimal max=decimal.Floor(r.Inventory/(_definition.Fees.ExitInBase?1+_definition.Fees.ExitRate:1)/spec.Quantum)*spec.Quantum;
             return x.ExitRequested.Contains(r.Id)&&r.TerminalCoverage&&!r.ReductionUnsettled&&r.Inventory>0&&p.GetProperty("side").GetString()=="sell"&&N(p,"sz")>0&&N(p,"sz")<=max&&N(p,"sz")%spec.Quantum==0&&
                 !p.TryGetProperty("attachAlgoOrds",out _)&&x.Obligations.All(o=>o.StartsWith("PROTECTION_GAP:",StringComparison.Ordinal))&&
-                NavalBrokerProtectionOwnership.Competing(e,r).All(p=>p.State=="canceled")&&
-                !x.Intents.Any(z=>z.Id!=i.Id&&z.ReservationId==r.Id&&z.Reduction&&z.Stage!=NavalExecutionStage.NotSent)&&
+                NavalBrokerProtectionOwnership.Competing(e,r).All(NavalBrokerProtectionOwnership.Settled)&&
+                !x.Intents.Any(z=>z.Id!=i.Id&&z.ReservationId==r.Id&&z.Reduction&&z.Stage!=NavalExecutionStage.NotSent&&!x.SettledIntents.Contains(z.Id))&&
                 x.Orders.Where(z=>z.Instrument==i.Instrument).GroupBy(z=>z.OrderId).All(g=>g.Last().State is "filled" or "canceled");
         }
         if(x.ExitRequested.Any(id=>e.Naval!.Reservations.Any(z=>z.Id==id&&NavalCashRiskPolicy.Active(z))))return false;
+        if(x.Intents.Any(z=>z.Id!=i.Id&&z.Operation==NavalExecutionOperation.Submit&&!z.Reduction&&z.Stage!=NavalExecutionStage.NotSent&&!x.SettledIntents.Contains(z.Id)))return false;
         if(x.Intents.Any(z=>z.Id!=i.Id&&z.ReservationId==r.Id&&z.Operation==NavalExecutionOperation.Submit&&!z.Reduction&&z.Stage!=NavalExecutionStage.NotSent))return false;
         return _brokerAuthority?.ProtectionProfile!=null&&p.GetProperty("side").GetString()=="buy"&&N(p,"sz")==r.Quantity&&N(p,"px")==r.Intent.EntryPriceCeiling&&
             _brokerQuotes.TryGetValue(i.Instrument,out var q)&&q.Ask<=r.Intent.EntryPriceCeiling&&q.AskQuantity>=r.Quantity&&p.TryGetProperty("attachAlgoOrds",out var a)&&a.GetArrayLength()==1&&
@@ -35,6 +36,7 @@ public sealed partial class NavalPortfolioCoordinator
 // A completed protective child is history, not a later reservation's cancellation target.
 internal static class NavalBrokerProtectionOwnership
 {
+    internal static bool Settled(NavalBrokerProtection p)=>p.State is "canceled" or "order_failed"&&p.ChildOrderIds.Count==0;
     internal static string? Reservation(NavalBrokerOperationalState x,NavalBrokerProtection p)
     {
         var owners=x.Intents.Where(i=>i.Operation==NavalExecutionOperation.Submit&&!i.Reduction&&i.DispatchRevision!=null&&i.Instrument==p.Instrument&&

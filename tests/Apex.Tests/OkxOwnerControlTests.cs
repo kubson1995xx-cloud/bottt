@@ -46,7 +46,7 @@ public sealed class OkxOwnerControlTests
         Assert.Equal("BASELINE_APPROVAL_REQUIRED",await control.ExecuteAsync(f.Binding.ScopeId,"connect","connect-1",default));
         f.Clock.Advance(TimeSpan.FromSeconds(31)); // User waits before the separate native baseline action.
         Assert.Equal("CONNECTED_STOP",await control.ExecuteAsync(f.Binding.ScopeId,"baseline","baseline-1",default));
-        Assert.Equal("PRODUCTION_PROTECTION_PROFILE_UNAPPROVED",await control.ExecuteAsync(f.Binding.ScopeId,"start","start-1",default));
+        Assert.Equal("BROKER_START_NOT_PERMITTED",await control.ExecuteAsync(f.Binding.ScopeId,"start","start-1",default));
         using(var status=JsonDocument.Parse(JsonSerializer.Serialize(control.ReadStatus())))
         {
             var a=status.RootElement.GetProperty("accounts")[0];Assert.False(a.GetProperty("ready").GetBoolean());

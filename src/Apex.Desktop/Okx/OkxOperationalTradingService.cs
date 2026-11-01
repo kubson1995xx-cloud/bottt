@@ -29,7 +29,8 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
     private long reconciledActivityVersion=-1;
     public bool CanExecute=>SourceCurrent&&armed&&account.ActivityVersion==Interlocked.Read(ref reconciledActivityVersion);
     public string? ProtectionProfile=>protection;
-    internal string Status=>disposed?"DISPOSED":!SourceCurrent?"DISCONNECTED_STOP":protection==null?"PRODUCTION_PROTECTION_PROFILE_UNAPPROVED":!armed?"EXECUTE_ARMING_REQUIRED":session.Coordinator.Snapshot().Reason;
+    private bool EntryObservationPending=>session.ReadState().NavalBroker!.Operational is {} x&&x.Intents.Any(i=>i.Operation==NavalExecutionOperation.Submit&&!i.Reduction&&i.Stage!=NavalExecutionStage.NotSent&&!x.SettledIntents.Contains(i.Id));
+    internal string Status=>disposed?"DISPOSED":!SourceCurrent?"DISCONNECTED_STOP":protection==null?OkxConditionalCashSpotPolicy.Refusal:!armed?"EXECUTE_ARMING_REQUIRED":session.Coordinator.Snapshot().Mode=="RUNNING"&&EntryObservationPending?"ENTRY_OBSERVATION_PENDING":session.Coordinator.Snapshot().Reason;
     private OkxOperationalTradingService(OkxAccountConnectionService account,TimeProvider clock,Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxFinalDispatchFence,OkxExecutionClient>? writes,HttpMessageHandler? market,string? protection)
     {
         this.account=account;this.clock=clock;this.protection=protection;session=account.BrokerSession??throw new InvalidOperationException("BROKER_ACCOUNT_REQUIRED");SessionId=account.TradingSessionId;
@@ -38,8 +39,14 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
         client=(writes??OkxExecutionClient.Create)(scope,provider,fingerprint,this);
         account.RegisterTrading(this);session.BindTrading(this);
     }
-    // No production profile is minted by a GET, fixture, enum or ordinary Operator option.
-    internal static OkxOperationalTradingService Create(OkxAccountConnectionService account)=>new(account,TimeProvider.System,null,null,null);
+    // The optional internal wire/clock seam changes transport only; production policy is
+    // always issued by the same release-coded evaluator, never supplied by a fixture.
+    internal static OkxOperationalTradingService Create(OkxAccountConnectionService account,TimeProvider? clock=null,
+        Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxFinalDispatchFence,OkxExecutionClient>? writes=null,HttpMessageHandler? market=null)
+    {
+        var baseline=account.BrokerSession?.ReadState().NavalBroker!.Baseline??throw new InvalidOperationException("BROKER_ACCOUNT_REQUIRED");
+        return new(account,clock??TimeProvider.System,writes,market,OkxConditionalCashSpotPolicy.Admit(baseline)==null?null:OkxConditionalCashSpotPolicy.Id);
+    }
     internal static OkxOperationalTradingService ForTests(OkxAccountConnectionService account,Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxFinalDispatchFence,OkxExecutionClient> writes,HttpMessageHandler market,TimeProvider clock,bool protocolProtection=true)
         =>new(account,clock,writes,market,protocolProtection?"SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION":null);
     private long armingEpoch;
@@ -66,11 +73,18 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
             var a=Observed(await reads.ReadAccountAsync(context,ct)).Single();
             if(a.Uid!=baseline.Binding.Account.AccountId||a.MainUid!=baseline.Binding.MainUid||a.AccountLevel!="1"||a.AutoLoan||a.EnableSpotBorrow||a.SpotBorrowAutoRepay||a.Permissions!="read_only,trade"||a.FeeType!=baseline.Observations.Account.FeeType||a.Ip!=baseline.Observations.Account.Ip||a.AccountType!="0"||a.SpotRoleType!="0")return session.Coordinator.Stop("BROKER_ACCOUNT_CHANGED");
             var specs=Observed(await reads.ReadInstrumentsAsync(context,ct));
+            privateSpecs.Clear();specUtc=clock.GetUtcNow();specTimestamp=clock.GetTimestamp();
             foreach(var i in baseline.Observations.Catalog)
             {
                 var spec=specs.SingleOrDefault(s=>s.Instrument==i.Instrument);
                 if(spec==null||spec.State!="live"||spec.InstrumentType!="SPOT"||spec.BaseCurrency!=i.BaseCurrency||spec.CatalogQuote!=i.QuoteCurrency||!spec.TradeQuoteCurrencies.Contains(i.QuoteCurrency)||
                     spec.LotSize.Value!=i.Quantum||spec.TickSize.Value!=i.TickSize||spec.MinimumSize.Value!=i.MinimumQuantity)return session.Coordinator.Stop("BROKER_SPEC_CHANGED");
+                privateSpecs.Add(i.Instrument,spec);
+                if(Conditional)
+                {
+                    var fee=Observed(await reads.ReadFeesAsync(i.Instrument,context,ct)).Single();
+                    if(spec.GroupId==null||!fee.Groups.TryGetValue(spec.GroupId,out var group)||group.Taker.Value!=-baseline.Observations.Fees.EntryRate||group.Maker.Value is not <=0||fee.Timestamp.Utc==null||fee.Timestamp.Utc>clock.GetUtcNow()||clock.GetUtcNow()-fee.Timestamp.Utc>=TimeSpan.FromSeconds(30))return session.Coordinator.Stop("BROKER_FEES_CHANGED");
+                }
             }
             return await CollectEconomicsAsync(ct).ConfigureAwait(false);
         }
@@ -85,6 +99,8 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
         try
         {
             if(!CanExecute||protection==null)return Refuse(protection==null?"PRODUCTION_PROTECTION_PROFILE_UNAPPROVED":"EXECUTE_ARMING_REQUIRED");
+            if(session.Coordinator.Snapshot().Mode!="RUNNING")return Refuse("EXPLICIT_START_REQUIRED");
+            if(EntryObservationPending)return Refuse("ENTRY_OBSERVATION_PENDING");
             var state=session.ReadState();var baseline=state.NavalBroker!.Baseline;var definition=NavalBrokerValidation.Definition(baseline);
             var spec=definition.Catalog.Single(i=>i.Instrument==instrument);
             var series=await feed.ReadSeriesAsync(spec,ct).ConfigureAwait(false);
@@ -119,6 +135,11 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
             decimal capital=Math.Min(state.Naval.Accounts.Sum(a=>a.Cash)+state.Naval.Reservations.Sum(r=>r.AllocatedCost),equity);
             decimal quantity=Math.Min(quote.AskQuantity,Math.Min(capital*definition.Limits.TradePct/100/unitHolds.RiskHold,state.Naval.Accounts.Single().Cash/NavalCashRiskPolicy.Held(unitHolds)));
             quantity=decimal.Floor(quantity/spec.Quantum)*spec.Quantum;
+            if(Conditional)
+            {
+                await RefreshLimitReferences(spec,quote,ct).ConfigureAwait(false);
+                if(!WithinPrivateMaxima(instrument,quantity,Math.Max(price,tp),true))return Refuse("PRIVATE_MAXIMUM_OR_UNIT_UNPROVEN");
+            }
             var intent=new NavalEntryIntent(command,decision.StableId,instrument,quantity,price,stop,tp);
             var reserved=session.Coordinator.ForFleet(baseline.Binding.Account,fleet).TryReserve(intent);if(reserved.Status!=NavalMutationStatus.Applied)return reserved;
             var ids=session.ReserveIds(reserved.ReservationId!,command);if(ids.Result.Status!=NavalMutationStatus.Applied)return ids.Result;
@@ -138,7 +159,7 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
     }
     private static string N(decimal n)=>n.ToString("0.############################",CultureInfo.InvariantCulture);
     public bool CanDispatch(OkxPreparedRequest request,DateTimeOffset now)=>false;
-    public IDisposable? TryEnterDispatch(OkxPreparedRequest request,DateTimeOffset now)=>current==null?null:session.EnterDispatch(current,request.Digest,now);
+    public IDisposable? TryEnterDispatch(OkxPreparedRequest request,DateTimeOffset now)=>current==null||!PreparedAdmission(request)?null:session.EnterDispatch(current,request.Digest,now);
     internal void Stop(){RevokeArming();if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("OPERATOR_STOP");}
     private readonly object closing=new();private Task? disposal;
     public ValueTask DisposeAsync(){lock(closing)return new(disposal??=DrainAsync());}

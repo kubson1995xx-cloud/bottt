@@ -6,15 +6,17 @@ using System.Threading.Tasks;
 using Apex.Core.Naval;
 namespace Apex.Desktop.Okx;
 internal sealed record OkxOperationalTradingStatus(string Mode,string Code,bool Connected,bool Armed,bool ProductionProfileApproved,bool Ready,
-    long Revision,decimal Cash,decimal Held,IReadOnlyList<string> Instruments,IReadOnlyList<string> Obligations);
+    long Revision,decimal Cash,decimal Held,IReadOnlyList<string> Instruments,IReadOnlyList<string> Obligations,IReadOnlyList<OkxOwnedInventory>? Inventory=null);
+internal sealed record OkxOwnedInventory(string ReservationId,string Instrument,decimal Quantity,string State,bool ReductionUnsettled);
 internal sealed partial class OkxOperationalTradingService
 {
     internal OkxOperationalTradingStatus ReadStatus()
     {
         if(!ReferenceEquals(account.BrokerSession,session))return new("STOP","FRESH_CONNECTION_REQUIRED",false,false,false,false,0,0,0,Array.Empty<string>(),new[]{"OWNER_NOT_OPEN"});
         var state=session.ReadState();var view=session.Coordinator.Snapshot();var b=state.NavalBroker!;
-        return new(view.Mode,Status,SourceCurrent,armed,protection!=null&&protection!="SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION",view.Ready&&CanExecute&&protection!=null&&protection!="SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION",
-            state.DurableRevision,view.Cash,view.Held,b.Baseline.Observations.Catalog.Select(i=>i.Instrument).ToArray(),b.Operational?.Obligations??Array.Empty<string>());
+        return new(view.Mode,Status,SourceCurrent,armed,protection!=null&&protection!="SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION",view.Ready&&CanExecute&&!EntryObservationPending&&protection!=null&&protection!="SYNTHETIC-PROTOCOL-ONLY-NOT-PRODUCTION",
+            state.DurableRevision,view.Cash,view.Held,b.Baseline.Observations.Catalog.Select(i=>i.Instrument).ToArray(),b.Operational?.Obligations??Array.Empty<string>(),
+            state.Naval!.Reservations.Where(r=>r.Inventory>0).Select(r=>new OkxOwnedInventory(r.Id,r.Intent.Instrument,r.Inventory,r.Stage.ToString(),r.ReductionUnsettled)).ToArray());
     }
     internal void EmergencyStop(){RevokeArming();session.EmergencyStop();}
     // Explicit host-owned lifetime; no task/network/secret access is started by construction/startup.

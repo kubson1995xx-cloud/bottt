@@ -13,7 +13,7 @@ namespace Apex.Desktop.Okx;
 // Construction is passive: no credentials, network, account owner or timer is opened here.
 internal sealed class OkxOperatorControl : IAsyncDisposable
 {
-    internal const string ProductionBlocker="PRODUCTION_PROTECTION_PROFILE_UNAPPROVED";
+    internal const string ProductionBlocker="ACCOUNT_CONFIGURATION_REQUIRED";
     private readonly OkxNavalRuntime runtime;
     private readonly ConfigStore config;
     private readonly SemaphoreSlim actionLane=new(1,1);
@@ -33,9 +33,9 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
         internal Task? Loop;
     }
     internal OkxOperatorControl(OkxNavalRuntime runtime,ConfigStore config){this.runtime=runtime;this.config=config;}
-    internal object ReadStatus()=>new {mode="STOP",productionProfileApproved=false,productionBlocker=ProductionBlocker,
+    internal object ReadStatus()=>new {mode=entries.Values.Any(e=>e.Trading?.ReadStatus().Mode=="RUNNING")?"RUNNING":"STOP",productionProfileApproved=entries.Values.Any(e=>e.Trading?.ReadStatus().ProductionProfileApproved==true),productionBlocker=entries.Count==0?ProductionBlocker:null,conditionalPolicyAvailable=true,
         nativeAvailable=OperatingSystem.IsWindows()&&Environment.UserInteractive,lastResult=last,
-        requirements=new[]{"Przejrzany profil ochrony FOK + net-base-fee SL/TP","Brak luki po anulowaniu ochrony przed sprzedażą","Udowodniona finalność opłat/rozliczenia","Prywatne DEMO wymaga osobnej zgody i lokalnego testu"},
+        requirements=new[]{"Dedykowany cash SPOT ≤1x, bez pożyczek, feeType=1 (opłaty wyłącznie w quote)","FOK z żądanym TP i SL; ochrona warunkowa po fill, możliwy brak ochrony i niechroniona reszta po anulowaniu", "Osobne uzbrojenie i START; STOP nie oznacza sprzedaży", "Katalog prywatny, świeże referencje USD/USDT do limitów; prywatny test DEMO pozostaje lokalnym działaniem użytkownika"},
         accounts=runtime.Bindings.Select(b=>
         {
             entries.TryGetValue(b.ScopeId,out var entry);var trading=entry?.Trading?.ReadStatus();
@@ -43,14 +43,14 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 connected=entry?.Account.IsConnected??false,mode=trading?.Mode??"STOP",code=trading?.Code??entry?.Account.Status??"NOT_CONNECTED",
                 armed=trading?.Armed??false,ready=trading?.Ready??false,revision=trading?.Revision,
                 cash=trading?.Cash.ToString(CultureInfo.InvariantCulture),held=trading?.Held.ToString(CultureInfo.InvariantCulture),
-                obligations=trading?.Obligations,obligationsKnown=trading!=null,observations=entry?.Account.ReadAccountStatus()};
+                obligations=trading?.Obligations,inventory=trading?.Inventory,conditionalPolicy=trading?.ProductionProfileApproved??false,obligationsKnown=trading!=null,observations=entry?.Account.ReadAccountStatus()};
         }).ToArray()};
     internal bool Known(string scope)=>runtime.Bindings.Any(b=>b.ScopeId==scope);
     private bool Register(string scope,string id)
     {
         lock(sync){if(disposed||commands.Count>=512||!commands.Add(scope+":"+id))return false;return true;}
     }
-    internal async Task<string> ExecuteAsync(string scope,string action,string commandId,CancellationToken ct)
+    internal async Task<string> ExecuteAsync(string scope,string action,string commandId,CancellationToken ct,string? reservationId=null)
     {
         // STOP/revocation is never queued behind a native dialog, connection or scheduler.
         if(action is "stop" or "emergency" or "disconnect")
@@ -109,9 +109,10 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 var request=new OkxActivationRequest(binding,runtime.CredentialFingerprint(binding),current.Account.TradingSessionId,epoch,OkxActivationPurpose.Execute,DateTimeOffset.UtcNow.AddSeconds(120));
                 var permission=await runtime.Activation.RequestAsync(request,linked.Token).ConfigureAwait(false);
                 if(permission==null)return last="EXECUTE_CANCELLED_OR_EXPIRED";
-                return last=current.Trading.Arm(request,permission)?"EXECUTE_ARMED_START_SEPARATE_PROFILE_STILL_REQUIRED":"EXECUTE_REFUSED";
+                return last=current.Trading.Arm(request,permission)?"EXECUTE_ARMED_START_SEPARATE_CONDITIONAL_RISK":"EXECUTE_REFUSED";
             }
             if(action=="start")return last=current.Trading.Start().Code;
+            if(action=="recover")return last=reservationId==null?"EXACT_RESERVATION_REQUIRED":(await current.Trading.ExitAsync(reservationId,linked.Token).ConfigureAwait(false)).Code;
             return last="ACTION_DENIED";
         }
         catch(OperationCanceledException){return last="LOCAL_ACTION_CANCELLED";}

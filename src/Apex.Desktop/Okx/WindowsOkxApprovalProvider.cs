@@ -24,7 +24,7 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
         // A direct/fake internal request must not solicit OS credentials without an enrolled exact key.
         if(ct.IsCancellationRequested||activationAdmitted?.Invoke(r)!=true)return ValueTask.FromResult(false);
         return new(ConfirmAsync(
-            $"{r.Purpose} | {Scope(r.Binding)}\nKonfiguracja {r.Binding.ConfigDigest}\nSesja {r.Session} / generacja {r.Generation}\nWażne do {r.ExpiresUtc:O}. To nie jest START ani dowód ochrony brokera.",ct));
+            $"{r.Purpose} | {Scope(r.Binding)}\nKonfiguracja {r.Binding.ConfigDigest}\nSesja {r.Session} / generacja {r.Generation}\nWażne do {r.ExpiresUtc:O}. To nie jest START ani dowód ochrony brokera.\nExecute zezwala na wykonanie strategii po osobnym START oraz jawne redukcje. TP/SL po fill może zawieść; po anulowaniu i nieudanej/Unknown sprzedaży może pozostać niechroniona reszta bez limitu czasu. STOP nie likwiduje. LIVE wymaga tej osobnej zgody dla dokładnego rachunku/sesji.",ct));
     }
     internal static string Scope(OkxScopeBinding b)=>$"OKX EEA {b.Account.Environment} | UID {b.Account.AccountId} | {b.Account.QuoteCurrency} | zakres {b.ScopeId}";
     internal static Task<bool> ConfirmAsync(string message,CancellationToken ct)

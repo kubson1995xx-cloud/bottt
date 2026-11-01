@@ -41,17 +41,28 @@ internal sealed partial class OkxOperationalTradingService
         {
             var parent=x.Intents.SingleOrDefault(i=>i.Instrument==o.InstId&&i.ClientId==o.ClOrdId&&i.DispatchRevision!=null&&(i.Outcome?.OrderId==null||i.Outcome.OrderId==o.OrdId));
             if(parent==null)continue; // Classify only after the parent's observed algo→child links are resolved.
+            if(!parent.Reduction&&o.AccFillSz.Value>0&&o.AttachAlgoOrds is not {Length: >0})problems.Add("PROTECTION_UNKNOWN:"+parent.Id);
             if(o.AttachAlgoOrds is {} attachments)
-            foreach(var a in attachments.Where(a=>!string.IsNullOrEmpty(a.AttachAlgoId)))
+            foreach(var a in attachments)
             {
                 if(!x.IdAllocations.SelectMany(a=>a.Ids).Any(id=>id.ReservationId==parent.ReservationId&&id.Role==NavalClientIdRole.ProtectionAlgo&&id.ClientId==a.AttachAlgoClOrdId))
                 {problems.Add("UNOWNED_ATTACHMENT:"+o.PayloadDigest);continue;}
+                if(a.FailCode is not (null or "" or "0")&&string.IsNullOrEmpty(a.AttachAlgoId))
+                {
+                    // Explicit failed placement with exact original attachment and NO generated
+                    // algo. This is unsafe inventory, not active protection or an invented algo ID.
+                    algos.Add(new(o.InstId,o.OrdId,a.AttachAlgoClOrdId!,"","order_failed",null,null,null,Array.Empty<string>(),o.PayloadDigest));continue;
+                }
+                if(a.FailCode is not (null or "" or "0")){problems.Add("PROTECTION_PLACEMENT_CONFLICT:"+parent.Id);continue;}
+                if(string.IsNullOrEmpty(a.AttachAlgoId)){problems.Add("PROTECTION_UNKNOWN:"+parent.Id);continue;}
                 var detail=await reads.ReadAlgoAsync(new(a.AttachAlgoId,a.AttachAlgoClOrdId),context,ct).ConfigureAwait(false);
                 if(detail.Status!=OkxObservationStatus.Observed){problems.Add("PROTECTION_UNKNOWN:"+parent.Id);continue;}
                 evidence.Add(Surface(detail));
                 foreach(var p in detail.Rows)
                 {
-                    if(p.InstId!=o.InstId||p.AlgoId!=a.AttachAlgoId||p.AlgoClOrdId!=a.AttachAlgoClOrdId||p.Side!="sell"||p.TdMode!="cash"||p.TradeQuoteCcy!=b.Baseline.Binding.Account.QuoteCurrency||p.FailCode is not (null or "" or "0"))
+                    if(p.InstId!=o.InstId||p.AlgoId!=a.AttachAlgoId||p.AlgoClOrdId!=a.AttachAlgoClOrdId||p.Side!="sell"||p.TdMode!="cash"||p.TradeQuoteCcy!=b.Baseline.Binding.Account.QuoteCurrency||
+                        p.FailCode is not (null or "" or "0")&&!(p.State=="order_failed"&&p.OrdIdList is not {Length: >0})||
+                        Conditional&&p.State=="live"&&(p.OrdType!="oco"||p.TpOrdPx.Value!=-1||p.SlOrdPx.Value!=-1||p.TpTriggerPxType!="last"||p.SlTriggerPxType!="last"))
                     {problems.Add("PROTECTION_IDENTITY_CONFLICT:"+p.PayloadDigest);continue;}
                     algos.Add(new(p.InstId,o.OrdId,a.AttachAlgoClOrdId!,p.AlgoId,p.State,p.Sz.Value,p.SlTriggerPx.Value,p.TpTriggerPx.Value,p.OrdIdList?.ToArray()??Array.Empty<string>(),p.PayloadDigest));
                 }
@@ -88,7 +99,14 @@ internal sealed partial class OkxOperationalTradingService
         if(balance.Status!=OkxObservationStatus.Observed)problems.Add("BALANCE_UNKNOWN");
         else foreach(var d in balance.Rows.Single().Details)balances.Add(new(d.Currency,d.Cash.Value,d.Available.Value,d.Equity.Value,d.Frozen.Value,d.OrderFrozen.Value,d.Liability.Value,d.Interest.Value,d.CrossLiability.Value,d.IsolatedLiability.Value,d.StrategyEquity.Value,d.FixedBalance.Value,d.UTime.Utc));
         if(balance.ResponseDigest!=null)evidence.Add(Surface(balance));
-        quotes.Clear();foreach(var i in b.Baseline.Observations.Catalog)quotes.Add(i.Instrument,await feed.ReadQuoteAsync(i,ct).ConfigureAwait(false));
+        // A public-feed outage must not discard already observed cancellation/fills. Retain
+        // original source times, publish unsafe coverage, and never rejuvenate an old quote.
+        foreach(var i in b.Baseline.Observations.Catalog)
+        {
+            try{quotes[i.Instrument]=await feed.ReadQuoteAsync(i,ct).ConfigureAwait(false);}
+            catch(Exception error) when(error is System.IO.IOException or System.Net.Http.HttpRequestException or InvalidOperationException or ArgumentException or System.Text.Json.JsonException or OperationCanceledException)
+            {problems.Add("QUOTE_UNAVAILABLE:"+i.Instrument);}
+        }
         var raw=fills.GroupBy(f=>(f.InstId,f.TradeId,f.PayloadDigest)).Select(g=>g.First()).Select(f=>new NavalBrokerRawFill(f.InstId,f.OrdId,f.ClOrdId,f.TradeId,f.BillId,f.Side??"",f.FillSz.Value,f.FillPx.Value,f.Fee.Value,f.FeeCcy,f.TradeQuoteCcy,f.FillTime.Utc,f.PayloadDigest)).ToArray();
         var billRows=bills.GroupBy(v=>(v.BillId,v.PayloadDigest)).Select(g=>g.First()).Select(v=>new NavalBrokerRawBill(v.BillId,v.InstId,v.OrdId,v.ClOrdId,v.TradeId,v.Type,v.Ccy,v.Fee.Value,v.BalChg.Value,v.Ts.Utc,v.PayloadDigest)).ToArray();
         var proofs=uniqueOrders.Select(o=>

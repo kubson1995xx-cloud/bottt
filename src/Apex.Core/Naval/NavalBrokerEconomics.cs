@@ -79,7 +79,8 @@ public sealed partial class NavalPortfolioCoordinator
                 bool corroborated=owned.All(f=>pass.Bills.Any(v=>v.Type=="2"&&v.TradeId==f.TradeId&&v.Instrument==f.Instrument&&v.OrderId==f.OrderId&&v.ClientId==f.ClientId&&v.Currency==f.FeeCurrency&&v.SignedFee==f.SignedFee));
                 bool terminal=order!=null&&order.State=="filled"&&order.Quantity==r.Quantity&&order.Accumulated==r.Quantity&&gross==r.Quantity&&owned.Length>0&&
                     order.SignedFee==owned.Sum(f=>f.SignedFee)&&owned.All(f=>f.SignedFee!=null&&f.FeeCurrency==order.FeeCurrency)&&corroborated;
-                if(!terminal||_brokerAuthority?.ProtectionProfile==null)obligations.Add("ENTRY_FEE_FINALITY_UNPROVEN:"+i.Id);
+                bool zeroCanceled=order!=null&&NavalBrokerSettlement.ZeroFillCanceled(i,order,raw);
+                if(!zeroCanceled&&(!terminal||_brokerAuthority?.ProtectionProfile==null))obligations.Add("ENTRY_FEE_FINALITY_UNPROVEN:"+i.Id);
                 // An attached request alone never establishes an observed live stop/take-profit.
                 bool protectedNow=order?.AlgoId!=null&&protection.Any(p=>p.Instrument==i.Instrument&&p.ParentOrderId==order.OrderId&&p.AlgoId==order.AlgoId&&
                     p.AttachmentClientId==order.AttachmentClientId&&p.State=="live"&&p.Quantity==r.Inventory&&p.Stop==r.Intent.StopPrice&&p.TakeProfit==r.Intent.TakeProfitPrice);
@@ -99,6 +100,19 @@ public sealed partial class NavalPortfolioCoordinator
             var clock=(INavalBrokerClock)_clock;bool fresh=clock.UtcNow>=pass.CaptureUtc&&clock.UtcNow-pass.CaptureUtc<TimeSpan.FromSeconds(30)&&clock.Timestamp>=pass.CaptureTimestamp&&
                 (decimal)(clock.Timestamp-pass.CaptureTimestamp)/clock.TimestampFrequency<30&&pass.Quotes.Count==_definition.Catalog.Count&&pass.Quotes.Values.All(ValidQuote);
             if(!pass.CollectionClosed||!fresh)obligations.Add("BROKER_COVERAGE_INCOMPLETE");
+            // A cash FOK sell that conclusively canceled with zero fills is NOT a sale.
+            // Retain the inventory/holds and permit a later explicit operation with a fresh
+            // ID only after closed history, original order, fees and exact balances agree.
+            if(pass.CollectionClosed&&fresh&&balancesMatch&&!conflict)
+            foreach(var i in x.Intents.Where(i=>i.Operation==NavalExecutionOperation.CancelProtection&&i.DispatchRevision!=null))
+                if(pass.Protection.Any(p=>NavalBrokerSettlement.CanceledProtection(i,p)))settledIntents.Add(i.Id);
+            if(pass.CollectionClosed&&fresh&&balancesMatch&&!conflict&&obligations.All(o=>o.StartsWith("PROTECTION_GAP:",StringComparison.Ordinal)))
+            foreach(var i in x.Intents.Where(i=>i.Operation==NavalExecutionOperation.Submit&&i.DispatchRevision!=null))
+            {
+                bool zero=orders.Any(o=>NavalBrokerSettlement.ZeroFillCanceled(i,o,raw));
+                if(zero||orders.Any(o=>NavalBrokerSettlement.FilledReduction(i,o,raw,bills)))settledIntents.Add(i.Id);
+                if(zero&&!i.Reduction)candidate=candidate with{Reservations=candidate.Reservations.Select(r=>r.Id==i.ReservationId?r with{Pending=0,TerminalCoverage=true,Stage=NavalReservationStage.Terminal}:r).ToArray()};
+            }
             foreach(var reservation in candidate.Reservations.Where(r=>r.ReductionUnsettled))
             {
                 var sells=candidate.Fills.Where(p=>p.Fill.ReservationId==reservation.Id&&p.Fill.Reduction).Select(p=>p.Fill).ToArray();
@@ -117,7 +131,7 @@ public sealed partial class NavalPortfolioCoordinator
             if(pass.Quotes.Count==_definition.Catalog.Count)candidate=candidate with{Marks=pass.Quotes.ToDictionary(p=>p.Key,p=>p.Value.Bid)};
             candidate=NavalCashRiskPolicy.Refresh(candidate,_definition,clock.UtcNow,obligations.Count==0);
             e.NavalBroker=b with{Operational=x with{SettledIntents=settledIntents.ToArray(),FillEvidence=raw,Bills=bills,Orders=retainedOrders,Protection=knownProtection,Obligations=obligations.OrderBy(p=>p,StringComparer.Ordinal).ToArray(),Evidence=pass.Evidence.ToArray()}};
-            candidate=candidate with{Reservations=candidate.Reservations.Select(r=>x.Intents.Any(i=>i.ReservationId==r.Id&&i.Stage==NavalExecutionStage.SubmitUnknown&&!settledIntents.Contains(i.Id))?r with{Stage=NavalReservationStage.Uncertain}:r).ToArray()};
+            candidate=candidate with{Reservations=candidate.Reservations.Select(r=>x.Intents.Any(i=>i.ReservationId==r.Id&&i.Stage==NavalExecutionStage.SubmitUnknown&&!settledIntents.Contains(i.Id))?r with{Stage=NavalReservationStage.Uncertain}:r.Stage==NavalReservationStage.Uncertain&&r.TerminalCoverage?r with{Stage=r.Inventory>0?NavalReservationStage.Confirmed:NavalReservationStage.Terminal}:r).ToArray()};
             e.Naval=candidate;
             if(obligations.Count>0)return StopCandidate(e,obligations.First(),conflict);
             candidate=candidate with{Generation=Math.Max(_restartGeneration,candidate.Generation),Sequence=checked(candidate.Sequence+1),ReconciledUtc=pass.CaptureUtc,Reason="BROKER_RECONCILED"};
