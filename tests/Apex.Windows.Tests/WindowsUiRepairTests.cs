@@ -133,7 +133,14 @@ public sealed class WindowsUiRepairTests
                     var controls=await b.Evaluate(sid,"Array.from(document.querySelectorAll('main button,main summary,main [role=button]')).map((e,i)=>{e.setAttribute('data-ui-probe',String(i));return {id:i,label:(e.getAttribute('aria-label')||e.textContent).trim(),disabled:!!e.disabled};})");
                     foreach(var item in controls.EnumerateArray().Reverse()){
                         string selector="[data-ui-probe='"+item.GetProperty("id").GetInt32()+"']";
-                        Assert.True((await b.Evaluate(sid,"document.querySelector("+J(selector)+")!==null")).GetBoolean(),"Inventory control lost before its pointer action: "+route+" "+item.GetProperty("label").GetString());
+                        if(!(await b.Evaluate(sid,"document.querySelector("+J(selector)+")!==null")).GetBoolean()){
+                            // Asset selection remounts ReservationPage by its real React key.
+                            // Reacquire the same semantic control; never count a lost ordinal.
+                            int occurrence=controls.EnumerateArray().TakeWhile(c=>c.GetProperty("id").GetInt32()!=item.GetProperty("id").GetInt32()).Count(c=>c.GetProperty("label").GetString()==item.GetProperty("label").GetString());
+                            var reacquired=await b.Evaluate(sid,"(()=>{let a=Array.from(document.querySelectorAll('main button,main summary,main [role=button]')).filter(e=>(e.getAttribute('aria-label')||e.textContent).trim()==="+J(item.GetProperty("label").GetString()!)+"),e=a["+occurrence+"];if(e)e.setAttribute('data-ui-probe',"+J(item.GetProperty("id").GetInt32().ToString())+");return !!e;})()");
+                            records.Add(new{viewport,route,item,reacquired=reacquired.GetBoolean(),reason="React asset-key remount; same label and duplicate occurrence"});
+                            Assert.True(reacquired.GetBoolean(),"Inventory semantic control no longer exists: "+route+" "+item.GetProperty("label").GetString());
+                        }
                         var hit=await Hit(b,sid,selector);records.Add(new{viewport,route,item,probe=hit});if(!hit.GetProperty("visible").GetBoolean()||hit.GetProperty("width").GetDouble()==0||hit.GetProperty("height").GetDouble()==0){records.Add(new{viewport,route,item,result="not rendered (optional capability / closed details)"});continue;}
                         if(!hit.GetProperty("hit").GetBoolean())await Screenshot(b,sid,viewport+"-"+route+"-failed-hit");
                         Assert.True(hit.GetProperty("hit").GetBoolean(),"View control occluded: "+route+" "+item.GetProperty("label").GetString());await Pointer(b,sid,hit);await Task.Delay(40);

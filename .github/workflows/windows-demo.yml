@@ -5,7 +5,7 @@ on:
       mode:
         description: 'full-delivery packages; task1-source/task2-source/task3-source/task4-source validate only the named source prerequisite'
         type: choice
-        options: [okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
+        options: [okx-enrollment-remaining, okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
         default: full-delivery
       ui_run_id:
         description: 'Immutable UI candidate artifact run for test-only acceptance'
@@ -71,7 +71,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   uiRepairAcceptance:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'ui-repair-acceptance' && github.ref == 'refs/heads/feature/apex-naval-command'
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'ui-repair-acceptance' || inputs.mode == 'okx-enrollment-remaining') && github.ref == 'refs/heads/feature/apex-naval-command'
     runs-on: windows-latest
     timeout-minutes: 20
     permissions:
@@ -98,7 +98,8 @@ jobs:
         shell: powershell
         env:
           UI_ZIP_SHA256: ${{ inputs.ui_zip_sha256 }}
-        run: ./tools/windows/Test-UiRepairAcceptance.ps1 -Download "$env:RUNNER_TEMP/ui-candidate-input" -Original "$env:RUNNER_TEMP/ui-original-input" -ZipSha256 $env:UI_ZIP_SHA256
+          ENROLLMENT_REMAINING: ${{ inputs.mode == 'okx-enrollment-remaining' }}
+        run: ./tools/windows/Test-UiRepairAcceptance.ps1 -Download "$env:RUNNER_TEMP/ui-candidate-input" -Original "$env:RUNNER_TEMP/ui-original-input" -ZipSha256 $env:UI_ZIP_SHA256 -ResumeRemaining:($env:ENROLLMENT_REMAINING -eq 'true')
       - uses: actions/upload-artifact@v4
         if: always()
         with:
