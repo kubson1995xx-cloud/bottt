@@ -51,6 +51,11 @@ try {
     if ($Gate -eq 'credentials') { $filter='FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxNativeCredentialTests' }
     if ($Gate -eq 'broker-store') { $filter='FullyQualifiedName~OkxNativeBrokerStoreTests' }
     if ($Gate -eq 'native-controls') { $filter='FullyQualifiedName~OkxNativeControlTests' }
+    if ($Gate -eq 'native-controls') {
+        $runtime=Join-Path $evidence 'runtime'; New-Item -ItemType Directory -Path $runtime | Out-Null
+        Copy-Item -LiteralPath (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') -Destination (Join-Path $runtime 'tests') -Recurse
+        Copy-Item -LiteralPath (Join-Path $repo 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $runtime 'host') -Recurse
+    }
     $code=0
     if ($Gate -ne 'windows-setup') {
         Save-Map 'test-inputs.json' 'Before tests: compiled test bytes' @('tests/Apex.Tests/bin/Release/net8.0/Apex.Tests.dll','tests/Apex.Tests/bin/Release/net8.0/ApexDesktop.dll')

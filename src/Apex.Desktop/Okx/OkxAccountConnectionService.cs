@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -41,6 +42,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     private NavalBaselineCandidate? candidate;
     private NavalBrokerSession? session;
     private NavalBrokerBinding? brokerBinding;
+    private string keyScopeDigest="";
     private NavalBrokerObservationBatch? original;
     private readonly System.Collections.Concurrent.ConcurrentQueue<OkxStreamObservation> activity=new();
     private long activityVersion;
@@ -55,6 +57,8 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     private OkxOperationalTradingService? trading;
     internal void RegisterTrading(OkxOperationalTradingService service){if(trading!=null)throw new InvalidOperationException("ONE_TRADING_LOOP_PER_ACCOUNT");trading=service;}
     internal void UnregisterTrading(OkxOperationalTradingService service){if(ReferenceEquals(trading,service))trading=null;}
+    internal OkxScopeBinding Binding=>binding;
+    internal bool IsDisposed=>disposed;
     internal bool IsConnected=>connected;
     internal NavalBrokerSession? BrokerSession=>session;
     internal OkxExecutionObservationClient? ObservationClient=>reads;
@@ -72,7 +76,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxObservationReadFence,OkxExecutionObservationClient> reads,
         Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxObservationStreamFence,OkxObservationStream> streams,Func<OkxNavalStore> storeFactory)
     {this.runtime=runtime;this.root=root;this.binding=binding;this.approval=approval;this.clock=clock;readFactory=reads;streamFactory=streams;this.storeFactory=storeFactory;runtime.RegisterAccountService(this,root,binding);}
-    internal static OkxAccountConnectionService Create(OkxNavalRuntime runtime,string root,OkxScopeBinding binding)=>new(runtime,root,binding,new UnavailableOkxBaselineProvider(),TimeProvider.System,
+    internal static OkxAccountConnectionService Create(OkxNavalRuntime runtime,string root,OkxScopeBinding binding)=>new(runtime,root,binding,new WindowsOkxApprovalProvider(),TimeProvider.System,
         OkxExecutionObservationClient.Create,OkxObservationStream.Create,()=>OkxNavalStore.OpenNative(root,binding));
     internal static OkxAccountConnectionService ForTests(OkxNavalRuntime runtime,string root,OkxScopeBinding binding,IOkxProtectedBaselineProvider approval,TimeProvider clock,
         Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxObservationReadFence,OkxExecutionObservationClient> reads,
@@ -122,7 +126,8 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
             // Existing state is never interpreted as a candidate for a new allocation.
             if(File.Exists(Path.Combine(store.DirectoryPath,NavalBrokerValidation.Marker)))
             {session=NavalBrokerSession.OpenExisting(store,brokerBinding,this);status="CONNECTED_STOP";return true;}
-            candidate=bootstrap.ConsiderBaseline(observations,NavalJson.Hash(inspection));
+            keyScopeDigest=NavalJson.Hash(inspection);
+            candidate=bootstrap.ConsiderBaseline(observations,keyScopeDigest);
             status="BASELINE_APPROVAL_REQUIRED";return true;
         }
         catch(Exception ex) when(SafeFailure(ex))
@@ -189,6 +194,14 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         }
         catch(Exception ex) when(SafeFailure(ex)){status="REOPEN_REFUSED_PRESERVED";store?.Dispose();store=null;return false;}
         finally{serial.Release();}
+    }
+    internal void RevokePermissions(){bootstrap?.Revoke();runtime.Activation.Revoke();trading?.Stop();session?.Disconnect();}
+    internal object ReadAccountStatus()
+    {
+        var observed=original;
+        return new { authenticated=observed!=null&&connected,uid=observed?.Account.Uid,mainUid=observed?.Account.MainUid,
+            quote=binding.Account.QuoteCurrency,cash=observed?.Balances.FirstOrDefault()?.Cash?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            instruments=observed?.Catalog.Select(i=>i.Instrument).ToArray()??Array.Empty<string>(),baselineApprovalRequired=status=="BASELINE_APPROVAL_REQUIRED" };
     }
     internal async ValueTask DisconnectAsync()
     {

@@ -225,6 +225,7 @@ jobs:
             ${{ runner.temp }}/apex-okx-task1-source-${{ github.run_id }}-${{ github.run_attempt }}/*.json
             ${{ runner.temp }}/apex-okx-task1-source-${{ github.run_id }}-${{ github.run_attempt }}/*.log
             ${{ runner.temp }}/apex-okx-task1-source-${{ github.run_id }}-${{ github.run_attempt }}/*.trx
+            ${{ runner.temp }}/apex-okx-task1-source-${{ github.run_id }}-${{ github.run_attempt }}/runtime/**
             ${{ runner.temp }}/apex-okx-task1-source-${{ github.run_id }}-${{ github.run_attempt }}/sdk-selection/global.json
           if-no-files-found: error
           retention-days: 30

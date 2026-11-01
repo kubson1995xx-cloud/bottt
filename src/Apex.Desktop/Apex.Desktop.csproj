@@ -15,6 +15,7 @@
     <ProjectReference Include="..\Apex.Adapters.Okx\Apex.Adapters.Okx.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Okx/okx-controls.js" />
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

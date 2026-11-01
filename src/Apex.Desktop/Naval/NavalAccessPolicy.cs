@@ -178,7 +178,9 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
         }
         if (ctx.Request.Path.StartsWithSegments("/api/naval"))
         {
-            if (!naval) { await Error(ctx, 404); return false; }
+            bool control = Apex.Desktop.Okx.OkxControlEndpoints.IsPath(path);
+            if (!naval && !control) { await Error(ctx, 404); return false; }
+            if (control) return true; // Same verified Operator; endpoint enforces JSON, CSRF and closed commands.
             if (!HttpMethods.IsGet(ctx.Request.Method)) { ctx.Response.Headers["Allow"] = "GET"; await Error(ctx, 405); return false; }
         }
         return true;

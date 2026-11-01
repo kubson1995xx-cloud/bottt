@@ -13,7 +13,7 @@ public sealed class OkxNativeControlTests
     public async Task Production_provisioning_opens_native_only_form_and_cancel_preserves_config()
     {
         if(!OperatingSystem.IsWindows())return;
-        await using var h=new NavalProductionHost();await h.Start();
+        await using var h=new NavalProductionHost();h.Client.Timeout=TimeSpan.FromSeconds(15);await h.Start();
         string before=System.IO.File.ReadAllText(System.IO.Path.Combine(h.DirectoryPath,"apex.config.json"));
         using var req=h.Request("/api/naval/okx/configure","operator","POST");
         req.Headers.Add("X-Apex-Local","1"); req.Content=new StringContent("{\"commandId\":\"native-cancel\"}",Encoding.UTF8,"application/json");

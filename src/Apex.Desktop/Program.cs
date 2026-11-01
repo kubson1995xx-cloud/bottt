@@ -140,6 +140,7 @@ namespace Apex.Desktop
             BridgeServer? bridge = null;
             WebApplication? app = null;
             OkxNavalRuntime? okx = null;
+            OkxOperatorControl? okxControl = null;
             CancellationTokenRegistration stopping = default;
             void StopBackground()
             {
@@ -152,6 +153,7 @@ namespace Apex.Desktop
                 okx = OkxNavalRuntime.Compose(dataDir, okxBindings);
                 startupObserver?.Invoke("okx", okx);
                 await okx.StartAsync(cts.Token);
+                okxControl = new OkxOperatorControl(okx, config);
                 var log = new AppLog(Path.Combine(dataDir, "logi"));
                 var news = new NewsCalendar();
                 newsService = new NewsService(news, config, log);
@@ -234,6 +236,7 @@ namespace Apex.Desktop
                     { ctx.Response.Redirect("/naval/"); return; }
                     string html = await File.ReadAllTextAsync(indexPath);
                     html = html.Replace("__APEX_TOKEN__", naval == null ? token : "");
+                    if (naval != null) html = html.Replace("</body>", "<script src=\"/okx-controls.js\" defer></script></body>");
                     ctx.Response.ContentType = "text/html; charset=utf-8";
                     ctx.Response.Headers["Cache-Control"] = "no-store";
                     await ctx.Response.WriteAsync(html);
@@ -244,6 +247,7 @@ namespace Apex.Desktop
                 if (naval != null)
                 {
                     NavalReadEndpoints.MapNavalReadEndpoints(app, new NavalReadService(new NavalPublicationReader(naval.PublicationPath, naval.Scope), naval.Scope), naval.Access);
+                    OkxControlEndpoints.Map(app, okxControl);
                     NavalFrontendEndpoints.MapNavalFrontendEndpoints(app);
                 }
 
@@ -385,7 +389,11 @@ namespace Apex.Desktop
                                 finally
                                 {
                                     try { stopping.Dispose(); }
-                                    finally { if (okx != null) await okx.DisposeAsync(); }
+                                    finally
+                                    {
+                                        try { if (okxControl != null) await okxControl.DisposeAsync(); }
+                                        finally { if (okx != null) await okx.DisposeAsync(); }
+                                    }
                                 }
                             }
                         }

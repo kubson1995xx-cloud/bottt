@@ -14,7 +14,7 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     private readonly string dataRoot;
     private readonly List<OkxAccountConnectionService> accountServices=new();
     private bool disposed;
-    internal IReadOnlyList<OkxScopeBinding> Bindings { get; }
+    internal IReadOnlyList<OkxScopeBinding> Bindings { get; private set; }
     internal OkxActivationPolicy Activation { get; }
     internal string Mode=>"STOP";
     internal string Reason=>Bindings.Count==0?"NOT_CONFIGURED":"ACTIVATION_REQUIRED";
@@ -25,7 +25,7 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
         if(copy.Select(b=>b.Account.Environment).Distinct().Count()!=copy.Length||copy.Select(b=>b.ScopeId).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=copy.Length)throw new System.IO.InvalidDataException("OKX_SCOPE_INVALID");
         Bindings=Array.AsReadOnly(copy);this.secrets=new(secrets);Activation=new(activation,()=>DateTimeOffset.UtcNow);
     }
-    internal static OkxNavalRuntime Compose(string admittedDataRoot,IReadOnlyList<OkxScopeBinding> bindings)=>new(admittedDataRoot,bindings,()=>new WindowsOkxCredentialStore(admittedDataRoot),new UnavailableOkxActivationProvider());
+    internal static OkxNavalRuntime Compose(string admittedDataRoot,IReadOnlyList<OkxScopeBinding> bindings)=>new(admittedDataRoot,bindings,()=>new WindowsOkxCredentialStore(admittedDataRoot),new WindowsOkxApprovalProvider());
     internal static OkxNavalRuntime Compose(string admittedDataRoot,IReadOnlyList<OkxScopeBinding> bindings,IOkxExecutionSecretProvider secrets,IOkxProtectedActivationProvider activation)=>new(admittedDataRoot,bindings,()=>secrets,activation);
     internal static OkxNavalExecutionDispatcher ComposeOfflineExecutionForTests(Apex.Core.Naval.NavalExecutionTransactions transactions,
         Func<Apex.Adapters.Okx.Execution.IOkxSerializedDispatchFence,Apex.Adapters.Okx.Execution.OkxExecutionClient> offlineClientFactory)=>new(transactions,offlineClientFactory);
@@ -35,7 +35,32 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     {
         lock(sync){if(disposed||root!=dataRoot||!Bindings.Contains(binding))throw new InvalidOperationException("OKX_CONNECTION_SCOPE_DENIED");accountServices.Add(service);}
     }
-    internal OkxAccountConnectionService AccountService(string scopeId)=>OkxAccountConnectionService.Create(this,dataRoot,Bindings.Single(b=>b.ScopeId==scopeId));
+    internal void AddProvisionedBinding(OkxScopeBinding binding)
+    {
+        OkxConfiguration.ValidateBinding(binding);
+        lock(sync)
+        {
+            if(disposed||accountServices.Any(s=>s.IsConnected)||Bindings.Any(b=>b.ScopeId.Equals(binding.ScopeId,StringComparison.OrdinalIgnoreCase)||b.Account.Environment==binding.Account.Environment))throw new InvalidOperationException("OKX_SCOPE_CHANGE_DENIED");
+            Bindings=Array.AsReadOnly(Bindings.Append(binding).ToArray());Activation.Revoke();
+        }
+    }
+    internal string CredentialFingerprint(OkxScopeBinding binding)
+    {
+        lock(sync)
+        {
+            if(disposed||!Bindings.Contains(binding))throw new InvalidOperationException("OKX_CONNECTION_REVOKED");
+            using var lease=secrets.Value.Open(binding,OkxConfiguration.Paths(dataRoot,binding));return lease.Fingerprint;
+        }
+    }
+    internal OkxAccountConnectionService AccountService(string scopeId)
+    {
+        lock(sync)
+        {
+            if(disposed)throw new ObjectDisposedException(nameof(OkxNavalRuntime));
+            var binding=Bindings.Single(b=>b.ScopeId==scopeId);
+            return accountServices.LastOrDefault(s=>s.Binding==binding&&!s.IsDisposed)??OkxAccountConnectionService.Create(this,dataRoot,binding);
+        }
+    }
     internal bool AuthorizeConnection(OkxAccountConnectionService service,OkxActivationRequest request,OkxActivationLease lease)
     {
         lock(sync)
