@@ -35,4 +35,15 @@
 - Minimalna poprawka tylko w autoryzowanym jobie delivery: checkout `fetch-depth: 0`, żeby realnie porównać wymagany historyczny source. Produkt pozostaje `68181a2`.
 - Dodatkowy porównawczy probe `same-wire/` wykonany poza repo: ten sam plik Program.cs i te same account.json/balance.json dla zachowanych oryginalnych DLL i finalnych DLL, z kompilacyjną adaptacją wyłącznie starej/nowej sygnatury factory. Oryginał exit1: `UnsafeAccountConfig`, config GET1/balance0. Nowy exit0: `OBSERVED_READ_ONLY_STOP`, config1/balance1, cash100/available90. W obu prawdziwy HMAC i GET-only = true. JSON konta/salda ma identyczne hashe między lane; publiczny czas jest celowo bieżący. Retained-runtime i pre-run map w obu lane. To zamyka różnicę fixture pierwszego RED, nie zastępuje jego TRX.
 
+
+## Checkpoint — poprawiony delivery uruchomiony
+- Narzędziowy commit `448e4847815ea03be2d0977a3fd8fb2710907276`, remote zgodny. Różnica `68181a2..448e484` w src/frontend/tests jest pusta.
+- Manualny run `41357155189` IN PROGRESS na `448e484`, po naprawie checkout. Zachowane poprzednie failure i same-wire RED/GREEN; żadnego product rerun nie przypisano naprawie produktu.
+
+
+## Checkpoint — drugi setup FAIL i dokładna naprawa reuse
+- Run `41357155189` FAILURE przed buildem: pin/CRC/manifest starego ZIP przeszły, guard zmian odmówił `tests/Apex.Tests/OkxNativeControlTests.cs`. To wcześniej zaakceptowana zmiana testu `NATIVE_CANCELLED` → `METADATA_USER_CANCELLED` z `3f0d731`, nie nowa zmiana produktu. Zachowano pełny log i mały rzeczywisty artifact evidence; nie ma testowego TRX ani nowego ZIP.
+- Porównanie wszystkich 31 zmienionych wejść względem `d1f928e` wykazało dokładnie ten jeden brak allowlisty. Rozszerzono tylko tę konkretną nazwę testu w builderze; żadnego katalogowego wildcard ani dopuszczenia engine delta.
+- `unchanged-boundary-reuse.json`: 31 istotnych runtime/test wejść accepted reader/adapter/admission/activation/secure approval zachowuje dokładne bajty lub jawny checkout CRLF starego ZIP `919ac...`; związano 3 stare dowody protected-timeoutu przez SHA. Historyczny runtime proof, nie nowy secure-positive.
+
 - Nadal zewnętrzne i niezweryfikowane: prawdziwe pozytywne zatwierdzenie Windows → produkcyjny formularz sekretów → zapis/restart oraz prywatny odczyt DEMO uruchomiony lokalnie przez użytkownika. Nie będą zastąpione atrapą.
