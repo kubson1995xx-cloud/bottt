@@ -134,7 +134,7 @@ internal sealed class WindowsTestHost : IAsyncDisposable
     internal async Task CancelOkxConfigurationAsync()
     {
         IntPtr modal=IntPtr.Zero;
-        await Until(()=>{EnumWindows((w,_)=>{GetWindowThreadProcessId(w,out uint pid);var title=new StringBuilder(256);GetWindowText(w,title,256);if(pid==Pid&&title.ToString()=="APEX — konfiguracja OKX")modal=w;return true;},IntPtr.Zero);return Task.FromResult(modal!=IntPtr.Zero);},"Extracted OKX native configuration form was not observed");
+        await Until(()=>{EnumWindows((w,_)=>{GetWindowThreadProcessId(w,out uint pid);var title=new StringBuilder(256);GetWindowText(w,title,256);if(pid==Pid&&title.ToString()=="APEX — lokalny klucz OKX")modal=w;return true;},IntPtr.Zero);return Task.FromResult(modal!=IntPtr.Zero);},"Extracted OKX single native connection form was not observed");
         SendMessage(modal,0x111,new IntPtr(2),IntPtr.Zero);
         Evidence("okx-native-cancel",new{nativeFormObserved=true,cancelSent=true,noSecretsEntered=true,noScreenshot=true});
     }
