@@ -26,6 +26,16 @@ public sealed class OkxControlTests
         Assert.Equal(HttpStatusCode.Unauthorized,(await h.Send("/api/naval/okx/status")).StatusCode);
     }
     [Fact]
+    public async Task Configured_scope_without_open_owner_reports_unknown_not_empty_commitments()
+    {
+        await using var h=new NavalProductionHost();
+        h.Configuration["OkxNaval"]=System.Text.Json.Nodes.JsonNode.Parse(OkxCompositionFixture.ValidConfig(Apex.Core.Naval.NavalEnvironment.OkxDemo));
+        await h.Start();using var response=await h.Send("/api/naval/okx/status","operator");
+        Assert.Equal(HttpStatusCode.OK,response.StatusCode);using var d=JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var a=d.RootElement.GetProperty("accounts")[0];Assert.Equal(JsonValueKind.Null,a.GetProperty("cash").ValueKind);
+        Assert.Equal(JsonValueKind.Null,a.GetProperty("obligations").ValueKind);Assert.False(a.GetProperty("obligationsKnown").GetBoolean());
+    }
+    [Fact]
     public async Task Existing_panel_loads_controls_and_unknown_scope_commands_never_connect()
     {
         await using var h=new NavalProductionHost(); await h.Start();

@@ -50,7 +50,7 @@ public sealed class OkxOwnerControlTests
         using(var status=JsonDocument.Parse(JsonSerializer.Serialize(control.ReadStatus())))
         {
             var a=status.RootElement.GetProperty("accounts")[0];Assert.False(a.GetProperty("ready").GetBoolean());
-            Assert.Equal("STOP",a.GetProperty("mode").GetString());Assert.Equal("1234.56",a.GetProperty("cash").GetString());
+            Assert.Equal("STOP",a.GetProperty("mode").GetString());Assert.Equal("1234.56",a.GetProperty("cash").GetString());Assert.True(a.GetProperty("obligationsKnown").GetBoolean());
         }
         Assert.Equal("OPERATOR_STOP",await control.ExecuteAsync(f.Binding.ScopeId,"stop","stop-1",default));
         Assert.Equal("COMMAND_ALREADY_SEEN_OR_LIMIT",await control.ExecuteAsync(f.Binding.ScopeId,"start","start-1",default));

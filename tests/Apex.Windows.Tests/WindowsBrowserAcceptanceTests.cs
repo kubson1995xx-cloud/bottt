@@ -87,7 +87,7 @@ public sealed class WindowsBrowserAcceptanceTests
         File.WriteAllText(path,c.ToJsonString());await h.StartAsync(new[]{"--data",h.DataRoot,"--no-browser"});await h.ReadyAsync();await b.Reload(sid);
         await b.Wait(sid,"document.querySelector('#okx-scope')?.value==='ui-demo' && !document.querySelector('#okx-operator button[data-action=start]').disabled","Configured scope not rendered passively");
         var results=new List<object>();
-        foreach(var(action,expected)in new[]{("connect","LOCAL_ACTION_REFUSED_PRESERVED"),("baseline","CONNECT_REQUIRED"),("arm","CONNECT_REQUIRED"),("start","CONNECT_REQUIRED"),("stop","OPERATOR_STOP"),("emergency","EMERGENCY_STOP_NO_OPEN_OWNER"),("disconnect","DISCONNECTED_STOP")})
+        foreach(var(action,expected)in new[]{("connect","LOCAL_ACTION_REFUSED_PRESERVED"),("baseline","BASELINE_REFUSED_PRESERVED"),("arm","BASELINE_REQUIRED"),("start","BASELINE_REQUIRED"),("stop","OPERATOR_STOP"),("emergency","EMERGENCY_STOP_NO_OPEN_OWNER"),("disconnect","DISCONNECTED_STOP")})
         {
             await b.Evaluate(sid,"document.querySelector('#okx-result').textContent='';document.querySelector('#okx-operator button[data-action="+action+"]').click()");
             await b.Wait(sid,"document.querySelector('#okx-result')?.textContent.includes("+J(expected)+")===true","Real OKX control result missing: "+action);

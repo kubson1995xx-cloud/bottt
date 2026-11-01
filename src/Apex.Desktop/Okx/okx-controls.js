@@ -18,6 +18,7 @@
       for(const a of state.accounts){const option=document.createElement('option');option.value=a.scopeId;option.textContent=`${a.environment==='Live'?'LIVE':'DEMO'} | UID ${a.uid} | ${a.quote} | ${a.scopeId}`;select.append(option);}
       if([...select.options].some(o=>o.value===previous))select.value=previous;
       const current=state.accounts.find(a=>a.scopeId===select.value);
+      select.disabled=busy||state.accounts.some(a=>a.connected); // Disconnect before changing the active account/environment.
       status.textContent=current?JSON.stringify(current,null,2):'Brak konta. Dodaj je w lokalnym formularzu Windows. Żadne prywatne połączenie nie jest uruchomione.';
       for(const b of actions.querySelectorAll('button'))b.disabled=(busy&&!['stop','emergency'].includes(b.dataset.action))||(b.dataset.action!=='configure'&&!current);
       box.dataset.ready=current?.ready?'true':'false';box.dataset.profile=String(state.productionProfileApproved);

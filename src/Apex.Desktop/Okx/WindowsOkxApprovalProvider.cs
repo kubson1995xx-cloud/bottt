@@ -23,9 +23,30 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
     internal static Task<bool> ConfirmAsync(string message,CancellationToken ct)
     {
         if(!OperatingSystem.IsWindows()||!Environment.UserInteractive||ct.IsCancellationRequested)return Task.FromResult(false);
+        return RunConfirmationAsync(()=>Confirm(message,ct),ct);
+    }
+    // Per-call native operation seam; production always supplies the secure Windows provider above.
+    private static int nativePending;
+    internal static Task<bool> RunConfirmationAsync(Func<bool> native,CancellationToken ct)
+    {
+        if(ct.IsCancellationRequested||Interlocked.CompareExchange(ref nativePending,1,0)!=0)return Task.FromResult(false);
         var tcs=new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread=new Thread(()=>{try{tcs.SetResult(Confirm(message,ct));}catch(Exception e) when(e is not OutOfMemoryException){tcs.SetResult(false);}});
-        thread.SetApartmentState(ApartmentState.STA);thread.IsBackground=true;thread.Start();return tcs.Task;
+        var thread=new Thread(()=>
+        {
+            bool accepted=false;
+            try{accepted=native();}catch(Exception e) when(e is not OutOfMemoryException){}
+            finally{Interlocked.Exchange(ref nativePending,0);tcs.TrySetResult(accepted&&!ct.IsCancellationRequested);}
+        });
+        try{if(OperatingSystem.IsWindows())thread.SetApartmentState(ApartmentState.STA);thread.IsBackground=true;thread.Start();}
+        catch{Interlocked.Exchange(ref nativePending,0);return Task.FromResult(false);}
+        return WaitBounded(tcs.Task,ct);
+    }
+    private static async Task<bool> WaitBounded(Task<bool> result,CancellationToken ct)
+    {
+        // Cancellation/time expiry revoke the permission immediately; the OS secure modal may
+        // still require dismissal. Keep nativePending until its own thread really completes.
+        try{return await result.WaitAsync(TimeSpan.FromSeconds(120),ct).ConfigureAwait(false)&&!ct.IsCancellationRequested;}
+        catch(Exception e) when(e is OperationCanceledException or TimeoutException){return false;}
     }
     private static bool Confirm(string message,CancellationToken ct)
     {

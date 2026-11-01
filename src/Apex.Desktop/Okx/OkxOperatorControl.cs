@@ -43,7 +43,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 connected=entry?.Account.IsConnected??false,mode=trading?.Mode??"STOP",code=trading?.Code??entry?.Account.Status??"NOT_CONNECTED",
                 armed=trading?.Armed??false,ready=trading?.Ready??false,revision=trading?.Revision,
                 cash=trading?.Cash.ToString(CultureInfo.InvariantCulture),held=trading?.Held.ToString(CultureInfo.InvariantCulture),
-                obligations=trading?.Obligations??Array.Empty<string>(),observations=entry?.Account.ReadAccountStatus()};
+                obligations=trading?.Obligations,obligationsKnown=trading!=null,observations=entry?.Account.ReadAccountStatus()};
         }).ToArray()};
     internal bool Known(string scope)=>runtime.Bindings.Any(b=>b.ScopeId==scope);
     private bool Register(string scope,string id)
