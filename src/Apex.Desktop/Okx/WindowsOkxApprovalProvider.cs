@@ -101,8 +101,9 @@ internal sealed class WindowsOkxApprovalProvider : IOkxProtectedActivationProvid
             if(packed!=IntPtr.Zero){for(uint i=0;i<packedSize;i++)Marshal.WriteByte(packed,(int)i,0);Marshal.FreeCoTaskMem(packed);}
         }
     }
+    private const uint CredPackProtectedCredentials=0x1; // Microsoft wincred.h, NOT GenericCredentials (0x4).
     internal static bool UnpackProtected(IntPtr packed,uint size,char[] user,ref uint userSize,char[] domain,ref uint domainSize,char[] password,ref uint passwordSize)=>
-        CredUnPackAuthenticationBufferW(4,packed,size,user,ref userSize,domain,ref domainSize,password,ref passwordSize);
+        CredUnPackAuthenticationBufferW(CredPackProtectedCredentials,packed,size,user,ref userSize,domain,ref domainSize,password,ref passwordSize);
     public async ValueTask<OkxKeyScopeInspection?> InspectAsync(OkxScopeBinding binding,string fingerprint,CancellationToken ct)
     {
         var fields=await WindowsOkxDialog.ShowAsync("APEX — uprawnienia klucza OKX",Scope(binding)+"\nSprawdź klucz w OKX. Trade może obejmować dodatkowe operacje. Nie potwierdzaj bez dowodu wykluczenia finansowania/pożyczek/earn/wypłat.",new[]{

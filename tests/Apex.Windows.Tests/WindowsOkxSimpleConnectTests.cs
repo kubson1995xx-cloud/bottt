@@ -53,10 +53,11 @@ public sealed class WindowsOkxSimpleConnectTests
     public async Task Async_native_form_refusal_stays_open_and_cancel_revokes_pending_work()
     {
         using var stop=new CancellationTokenSource(TimeSpan.FromSeconds(20));var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var ended=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var pending=WindowsOkxSimpleConnect.FormAsync(stop.Token,async(values,ct)=>{entered.SetResult();try{await Task.Delay(Timeout.InfiniteTimeSpan,ct);return null;}finally{ended.SetResult();}});
+        byte[][]? captured=null;
+        var pending=WindowsOkxSimpleConnect.FormAsync(stop.Token,async(values,ct)=>{captured=values;entered.SetResult();try{await Task.Delay(Timeout.InfiniteTimeSpan,ct);return null;}finally{ended.SetResult();}});
         try
         {
-            var w=await WindowsNativeUi.Window(Environment.ProcessId,"APEX — lokalny klucz OKX");for(int i=100;i<103;i++)WindowsNativeUi.Text(w,i,"owned-synthetic-not-broker");WindowsNativeUi.Click(w,1);await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));WindowsNativeUi.Cancel(w);var result=await pending.WaitAsync(TimeSpan.FromSeconds(5));Assert.Null(result.Values);Assert.True(ended.Task.IsCompleted);
+            var w=await WindowsNativeUi.Window(Environment.ProcessId,"APEX — lokalny klucz OKX");for(int i=100;i<103;i++)WindowsNativeUi.Text(w,i,"owned-synthetic-not-broker");WindowsNativeUi.Click(w,1);await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));WindowsNativeUi.Cancel(w);var result=await pending.WaitAsync(TimeSpan.FromSeconds(5));Assert.Null(result.Values);Assert.True(ended.Task.IsCompleted);Assert.NotNull(captured);Assert.True(captured.All(v=>v.All(b=>b==0)),"Cancelled form retained owned input bytes; values withheld");
         }
         finally{stop.Cancel();await pending;}
     }

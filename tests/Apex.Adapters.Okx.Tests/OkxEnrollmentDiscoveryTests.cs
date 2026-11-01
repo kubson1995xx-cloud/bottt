@@ -29,6 +29,19 @@ public sealed class OkxEnrollmentDiscoveryTests
         }
         else Assert.Null(r.Observation);
     }
+    [Fact]
+    public async Task Bootstrap_serializes_unknown_identity_against_existing_private_reader_and_stop_revokes_waiter()
+    {
+        var peer=new OkxExecutionObservationHttpFixture();var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        peer.Steps.Enqueue(("/api/v5/account/config",async ct=>{entered.TrySetResult();await release.Task.WaitAsync(ct);return new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(OkxExecutionObservationHttpFixture.Control("account"))};}));
+        await using var existing=peer.Client();var oldRead=existing.ReadAccountAsync(peer.Context,default);await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var bootstrap=new Peer("empty");using var stop=new CancellationTokenSource();
+        var waiting=OkxEnrollmentDiscoveryClient.RunAsync("Demo","DemoTradingApi",Encoding.ASCII.GetBytes("owned-key"),Encoding.ASCII.GetBytes("owned-secret"),Encoding.ASCII.GetBytes("owned-pass"),null,null,stop.Token,bootstrap);
+        await Task.Delay(100);Assert.Empty(bootstrap.Paths);stop.Cancel();Assert.Equal("DISCOVERY_CANCELLED",(await waiting.WaitAsync(TimeSpan.FromSeconds(3))).Code);Assert.Empty(bootstrap.Paths);
+        release.TrySetResult();Assert.Equal(OkxObservationStatus.Observed,(await oldRead).Status);peer.Done();
+        var control=await OkxEnrollmentDiscoveryClient.RunAsync("Demo","DemoTradingApi",Encoding.ASCII.GetBytes("owned-key"),Encoding.ASCII.GetBytes("owned-secret"),Encoding.ASCII.GetBytes("owned-pass"),null,null,default,bootstrap);
+        Assert.Equal("CONNECTED_READ_ONLY_STOP",control.Code);Assert.Equal(4,bootstrap.Paths.Count);
+    }
     private sealed class Peer(string mode):HttpMessageHandler
     {
         internal readonly List<string> Paths=[];
