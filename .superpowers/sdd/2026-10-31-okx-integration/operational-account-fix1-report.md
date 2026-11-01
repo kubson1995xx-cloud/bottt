@@ -36,6 +36,13 @@ No accounts/network, secrets outside synthetic fixtures, trades, dependencies, p
 
 **Next and only acceptance gate for this fix: narrow independent review of findings 1 and 2 against the retained evidence and exact diff.** No fresh native execution or Windows package acceptance is claimed or requested here. Existing unavailable protected production providers, user provisioning/approval, broker strategy/orders/economics/protection/recovery, panel START and packaged user flow remain the previously disclosed wider delivery gaps, not work included in these fixes. LIVE OFF; no real account/trading readiness claim.
 
+## Commit recovery / stop point
+
+- Local implementation commit: `197a2dac751469a47eedd1a9f69cadf3ed5a2db7` (`fix(okx): admit idle cash and drain refused account inspection`). Six explicitly staged files only: the two product paths, new targeted test file, this report and the two scoped evidence helpers. Parent HANDOFF was excluded.
+- Postcommit verifier exited 0: committed product/test bytes match all settled source maps; actual test/build binary hashes remain unchanged. This is a postcommit hash verification, **not** a postcommit rebuild/test rerun. Full product/test diff is retained at `operational-fix1-evidence/committed.diff`.
+- No background test/build or child worker remains. A final report-only checkpoint commit records this recovery state; obtain its identity with `git log -1` rather than treating that documentation commit as a rebuild.
+- Stop for narrow independent review of P1/P2. Do not repeat unaffected suites or resume wider feature delivery inside this fix task.
+
 Checkpoint history below records the completed progression; its old “next” lines are historical, not active work.
 
 
