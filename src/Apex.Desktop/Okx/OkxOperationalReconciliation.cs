@@ -55,16 +55,19 @@ internal sealed partial class OkxOperationalTradingService
                 }
                 if(a.FailCode is not (null or "" or "0")){problems.Add("PROTECTION_PLACEMENT_CONFLICT:"+parent.Id);continue;}
                 if(string.IsNullOrEmpty(a.AttachAlgoId)){problems.Add("PROTECTION_UNKNOWN:"+parent.Id);continue;}
-                var detail=await reads.ReadAlgoAsync(new(a.AttachAlgoId,a.AttachAlgoClOrdId),context,ct).ConfigureAwait(false);
-                if(detail.Status!=OkxObservationStatus.Observed){problems.Add("PROTECTION_UNKNOWN:"+parent.Id);continue;}
+                // attachAlgoId is NOT forwarded to generated algoId. Only the
+                // exact locally allocated attachment client ID is forwarded.
+                var detail=await reads.ReadAlgoAsync(new(null,a.AttachAlgoClOrdId),context,ct).ConfigureAwait(false);
+                if(detail.Status!=OkxObservationStatus.Observed||detail.Rows.Count!=1){problems.Add("PROTECTION_UNKNOWN:"+parent.Id);continue;}
                 evidence.Add(Surface(detail));
                 foreach(var p in detail.Rows)
                 {
-                    if(p.InstId!=o.InstId||p.AlgoId!=a.AttachAlgoId||p.AlgoClOrdId!=a.AttachAlgoClOrdId||p.Side!="sell"||p.TdMode!="cash"||p.TradeQuoteCcy!=b.Baseline.Binding.Account.QuoteCurrency||
+                    if(p.InstId!=o.InstId||string.IsNullOrEmpty(p.AlgoId)||p.AlgoClOrdId!=a.AttachAlgoClOrdId||p.Side!="sell"||p.TdMode!="cash"||p.TradeQuoteCcy!=b.Baseline.Binding.Account.QuoteCurrency||
+                        x.Protection.Any(old=>old.AttachmentClientId==a.AttachAlgoClOrdId&&old.AttachmentId!=null&&(old.Instrument!=p.InstId||old.ParentOrderId!=o.OrdId||old.AttachmentId!=a.AttachAlgoId||old.AlgoId!=p.AlgoId))||
                         p.FailCode is not (null or "" or "0")&&!(p.State=="order_failed"&&p.OrdIdList is not {Length: >0})||
                         Conditional&&p.State=="live"&&(p.OrdType!="oco"||p.TpOrdPx.Value!=-1||p.SlOrdPx.Value!=-1||p.TpTriggerPxType!="last"||p.SlTriggerPxType!="last"))
                     {problems.Add("PROTECTION_IDENTITY_CONFLICT:"+p.PayloadDigest);continue;}
-                    algos.Add(new(p.InstId,o.OrdId,a.AttachAlgoClOrdId!,p.AlgoId,p.State,p.Sz.Value,p.SlTriggerPx.Value,p.TpTriggerPx.Value,p.OrdIdList?.ToArray()??Array.Empty<string>(),p.PayloadDigest));
+                    algos.Add(new(p.InstId,o.OrdId,a.AttachAlgoClOrdId!,p.AlgoId,p.State,p.Sz.Value,p.SlTriggerPx.Value,p.TpTriggerPx.Value,p.OrdIdList?.ToArray()??Array.Empty<string>(),p.PayloadDigest){AttachmentId=a.AttachAlgoId});
                 }
             }
         }
@@ -72,8 +75,16 @@ internal sealed partial class OkxOperationalTradingService
         foreach(var link in algos.ToArray())foreach(string childId in link.ChildOrderIds)
         {
             var child=await reads.ReadOrderAsync(new(link.Instrument,childId,null),context,ct).ConfigureAwait(false);
-            if(child.Status!=OkxObservationStatus.Observed)problems.Add("PROTECTIVE_CHILD_UNKNOWN:"+childId);
-            else {foreach(var o in child.Rows)if(o.InstId==link.Instrument&&o.OrdId==childId&&o.Side=="sell"&&o.TdMode=="cash")orders.Add(o);else problems.Add("PROTECTIVE_CHILD_IDENTITY_CONFLICT:"+childId);}
+            bool valid=child.Status==OkxObservationStatus.Observed&&child.Rows.Count==1&&child.Rows.All(o=>o.InstId==link.Instrument&&o.OrdId==childId&&o.Side=="sell"&&o.TdMode=="cash"&&
+                (string.IsNullOrEmpty(o.AlgoId)||o.AlgoId==link.AlgoId)&&(string.IsNullOrEmpty(o.AlgoClOrdId)||o.AlgoClOrdId==link.AttachmentClientId));
+            if(!valid)
+            {
+                problems.Add((child.Status==OkxObservationStatus.Observed?"PROTECTIVE_CHILD_IDENTITY_CONFLICT:":"PROTECTIVE_CHILD_UNKNOWN:")+childId);
+                // Do not let the rejected child link authorize individual fills in
+                // Core merely because the same order also appeared in history.
+                algos.Remove(link);
+            }
+            else orders.AddRange(child.Rows);
             if(child.ResponseDigest!=null)evidence.Add(Surface(child));
         }
         uniqueOrders=orders.GroupBy(o=>(o.InstId,o.OrdId)).Select(g=>g.Last()).ToArray();
@@ -92,7 +103,7 @@ internal sealed partial class OkxOperationalTradingService
         {
             var pending=await reads.ReadPendingAlgosAsync(new(OkxAlgoObservationSurface.Pending,filter,null,null,null,null),context,ct).ConfigureAwait(false);
             if(pending.Status!=OkxObservationStatus.Observed)problems.Add("PENDING_ALGOS_INCOMPLETE");
-            else foreach(var p in pending.Rows)if(!algos.Any(a=>a.AlgoId==p.AlgoId&&a.Instrument==p.InstId))problems.Add("FOREIGN_OR_UNLINKED_ALGO:"+p.PayloadDigest);
+            else foreach(var p in pending.Rows)if(!algos.Any(a=>a.AlgoId==p.AlgoId&&a.Instrument==p.InstId&&a.AttachmentClientId==p.AlgoClOrdId))problems.Add("FOREIGN_OR_UNLINKED_ALGO:"+p.PayloadDigest);
             if(pending.Rows.Count>=100)problems.Add("PENDING_ALGO_CAPACITY");if(pending.ResponseDigest!=null)evidence.Add(Surface(pending));
         }
         var balance=await reads.ReadBalancesAsync(context,ct).ConfigureAwait(false);var balances=new List<NavalBrokerBalance>();
@@ -111,7 +122,8 @@ internal sealed partial class OkxOperationalTradingService
         var billRows=bills.GroupBy(v=>(v.BillId,v.PayloadDigest)).Select(g=>g.First()).Select(v=>new NavalBrokerRawBill(v.BillId,v.InstId,v.OrdId,v.ClOrdId,v.TradeId,v.Type,v.Ccy,v.Fee.Value,v.BalChg.Value,v.Ts.Utc,v.PayloadDigest)).ToArray();
         var proofs=uniqueOrders.Select(o=>
         {
-            var a=o.AttachAlgoOrds?.FirstOrDefault();return new NavalBrokerOrderProof(o.InstId,o.OrdId,o.ClOrdId,o.State,o.Sz.Value,o.AccFillSz.Value,o.Fee.Value,o.FeeCcy,o.TradeQuoteCcy,a?.AttachAlgoClOrdId,a?.AttachAlgoId,o.PayloadDigest);
+            var a=o.AttachAlgoOrds?.FirstOrDefault();var generated=algos.SingleOrDefault(p=>p.Instrument==o.InstId&&p.ParentOrderId==o.OrdId&&p.AttachmentClientId==a?.AttachAlgoClOrdId&&p.AttachmentId==a?.AttachAlgoId);
+            return new NavalBrokerOrderProof(o.InstId,o.OrdId,o.ClOrdId,o.State,o.Sz.Value,o.AccFillSz.Value,o.Fee.Value,o.FeeCcy,o.TradeQuoteCcy,a?.AttachAlgoClOrdId,generated?.AlgoId,o.PayloadDigest){AttachmentId=a?.AttachAlgoId};
         }).ToArray();
         if(account.ActivityVersion!=version)problems.Add("STREAM_CHANGED_DURING_RECONCILIATION");
         var result=session.ApplyEconomics(new(capture,mono,problems.Count==0,raw,billRows,proofs,algos,balances,quotes,evidence,problems));

@@ -36,6 +36,12 @@ internal static class TradingEconomicsFixture
                 body["data"]![0]!["details"]=new JsonArray(quote);
             }
         };
+        var withExit=f.Mutate!;f.Mutate=(path,body)=>
+        {
+            withExit(path,body);
+            if(path is "/api/v5/trade/order" or "/api/v5/trade/orders-history" or "/api/v5/trade/orders-history-archive")
+                foreach(var row in body["data"]!.AsArray())if(row!["ordId"]?.GetValue<string>()=="778"){row["algoId"]=peer.GeneratedAlgoId;row["algoClOrdId"]=peer.Attachment;}
+        };
     }
     internal static void Install(OperationalPeer f,TradingPeer peer,decimal quantity,decimal fee,bool protection=false,bool baseFee=false)
     {
@@ -69,7 +75,7 @@ internal static class TradingEconomicsFixture
             {
                 var state=System.Text.Json.JsonSerializer.Deserialize<Apex.Core.Engine.EngineState>(File.ReadAllText(f.Target))!;var reservation=state.Naval!.Reservations.Single();
                 var algo=algoOracle["endpoints"]!["detail"]!["control"]!["data"]![0]!.DeepClone();
-                algo["instId"]="BTC-USDC";algo["algoId"]="888";algo["algoClOrdId"]=peer.Attachment;algo["side"]="sell";algo["ordType"]="oco";algo["tradeQuoteCcy"]="USDC";
+                algo["instId"]="BTC-USDC";algo["algoId"]=peer.GeneratedAlgoId;algo["algoClOrdId"]=peer.Attachment;algo["side"]="sell";algo["ordType"]="oco";algo["tradeQuoteCcy"]="USDC";
                 algo["slOrdPx"]="-1";algo["tpOrdPx"]="-1";algo["slTriggerPxType"]="last";algo["tpTriggerPxType"]="last";
                 algo["sz"]=N(quantity-(baseFee?fee:0));algo["slTriggerPx"]=N(reservation.Intent.StopPrice);algo["tpTriggerPx"]=N(reservation.Intent.TakeProfitPrice);algo["cTime"]=now;algo["uTime"]=now;
                 body["data"]=new JsonArray(algo);

@@ -20,6 +20,7 @@ internal sealed class TradingPeer(OperationalPeer owner) : HttpMessageHandler
     internal bool SawDispatching;
     internal decimal Size;
     internal string Client="",Attachment="";
+    internal string GeneratedAlgoId="889";
     internal bool Unknown;
     internal bool ProtectionCanceled;
     internal bool FailBookAfterCancel,UnknownSell,UnknownCancel;
@@ -45,9 +46,9 @@ internal sealed class TradingPeer(OperationalPeer owner) : HttpMessageHandler
             using var doc=JsonDocument.Parse(body);var row=doc.RootElement;
             if(path=="/api/v5/trade/cancel-algos")
             {
-                Assert.Equal("888",row[0].GetProperty("algoId").GetString());Assert.Equal(Attachment,row[0].GetProperty("algoClOrdId").GetString());ProtectionCanceled=true;Posts++;
+                Assert.Equal(GeneratedAlgoId,row[0].GetProperty("algoId").GetString());Assert.Equal(Attachment,row[0].GetProperty("algoClOrdId").GetString());ProtectionCanceled=true;Posts++;
                 if(UnknownCancel)return Reply("{\"code\":\"50011\",\"msg\":\"synthetic uncertain cancel\",\"data\":[]}");
-                return Reply("{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\"888\",\"algoClOrdId\":\""+Attachment+"\",\"sCode\":\"0\",\"sMsg\":\"\"}]}");
+                return Reply("{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"algoId\":\""+GeneratedAlgoId+"\",\"algoClOrdId\":\""+Attachment+"\",\"sCode\":\"0\",\"sMsg\":\"\"}]}");
             }
             if(row.GetProperty("side").GetString()=="sell")
             {

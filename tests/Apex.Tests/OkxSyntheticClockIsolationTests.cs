@@ -25,6 +25,8 @@ public sealed class OkxSyntheticClockIsolationTests
         {await using var future=new OperationalPeer();future.Clock.Advance(TimeSpan.FromSeconds(31));await future.Connect();return 0;}
         if(scenario.StartsWith("inspection-",StringComparison.Ordinal))
         {await OkxOperationalAccountFixTests.InspectionScenario(scenario[11..]);return 0;}
+        if(scenario.StartsWith("identity-legacy-",StringComparison.Ordinal))
+        {await OkxConditionalTradingTests.LegacyIdentityScenario(bool.Parse(scenario[16..]));return 0;}
         return 98;
     }
     internal static async Task Run(string scenario)

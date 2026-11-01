@@ -12,7 +12,7 @@ using Apex.Desktop.Okx;
 using Xunit;
 namespace Apex.Tests;
 
-public sealed class OkxConditionalTradingTests
+public sealed partial class OkxConditionalTradingTests
 {
     [Fact]
     public async Task Production_Create_has_release_conditional_policy_but_stays_STOP_unarmed()
@@ -212,6 +212,37 @@ public sealed class OkxConditionalTradingTests
         await loop.ReconcileAsync(default);Assert.Equal(2,peer.Posts);
         Assert.Contains(State(f).NavalBroker!.Operational!.SettledIntents,id=>State(f).NavalBroker!.Operational!.Intents.Any(i=>i.Id==id&&i.Operation==NavalExecutionOperation.CancelProtection));
         var reduced=await loop.ExitAsync(State(f).Naval!.Reservations.Single().Id,default);Assert.True(reduced.Status==NavalMutationStatus.Applied,reduced.Code);Assert.Equal(3,peer.Posts);
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Legacy_sealed_identity_state_opens_without_reset_and_only_exact_observed_false_foreign_can_resolve(bool foreign)
+        =>await OkxSyntheticClockIsolationTests.Run("identity-legacy-"+foreign);
+    internal static async Task LegacyIdentityScenario(bool foreign)
+    {
+        await using var f=new OperationalPeer();await f.Connect();Assert.True(await f.Service.ApproveAndCreateAsync(default));using var peer=new TradingPeer(f);await using var loop=Production(f,peer);await Start(f,loop);
+        await loop.RunOnceAsync(NavalFleet.Alpha,"BTC-USDC",default);TradingEconomicsFixture.Install(f,peer,peer.Size,peer.Size*.11m,true);LivePending(f,peer,"889");Assert.Equal(NavalMutationStatus.Applied,(await loop.ReconcileAsync(default)).Status);
+        await loop.DisposeAsync();await f.Service.DisconnectAsync();
+        var state=State(f);var x=state.NavalBroker!.Operational!;string digest=x.Protection.Last().Digest;
+        // Explicit historical representation, not a production migration: old
+        // Orders.AlgoId held attachAlgoId; no generated proof existed on P1.
+        state.NavalBroker=NavalBrokerValidation.Seal(state.NavalBroker with{Operational=x with{
+            Orders=x.Orders.Select(o=>o with{AlgoId=o.AttachmentId,AttachmentId=null}).ToArray(),Protection=Array.Empty<NavalBrokerProtection>(),
+            Obligations=new[]{"FOREIGN_OR_UNLINKED_ALGO:"+(foreign?new string('a',64):digest)}}});
+        System.IO.File.WriteAllText(f.Target,NavalJson.Serialize(state));string legacy=System.IO.File.ReadAllText(f.Target);Assert.DoesNotContain("AttachmentId",legacy);
+        Assert.True(f.Service.OpenExisting());Assert.Equal("STOP",f.Service.Coordinator!.Snapshot().Mode);Assert.Equal(1,peer.Posts);
+        Assert.Equal(peer.Size,State(f).Naval!.Reservations.Single().Inventory);Assert.Equal(state.Naval!.Accounts.Single().Cash,State(f).Naval!.Accounts.Single().Cash);
+        await f.Service.DisposeAsync();
+        await using var connection=Apex.Desktop.Okx.OkxAccountConnectionService.ForTests(f.Runtime,f.Root,f.Binding,f,f.Clock,
+            (s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxExecutionObservationClient.ForTests(f,f.Clock,s,p,h,x,(t,ct)=>{f.Clock.Advance(t);return Task.CompletedTask;}),
+            (s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxObservationStream.ForTests((uri,ct)=>{var socket=new OperationalSocket(uri);f.Sockets.Add(socket);return Task.FromResult<System.Net.WebSockets.WebSocket>(socket);},f.Clock,s,p,h,x));
+        var request=f.Request with{Session=Guid.NewGuid(),ExpiresUtc=DateTimeOffset.UtcNow.AddSeconds(120)};var observe=await f.Runtime.Activation.RequestAsync(request,default);Assert.True(await connection.ConnectAsync(request,observe!,default),connection.Status);
+        await using var resumed=OkxOperationalTradingService.Create(connection,f.Clock,(s,p,h,x)=>Apex.Adapters.Okx.Execution.OkxExecutionClient.ForTests(peer,f.Clock,s,p,h,x),peer);Assert.False(resumed.ReadStatus().Armed);
+        var execute=request with{Purpose=OkxActivationPurpose.Execute,Session=connection.TradingSessionId};var activation=await f.Runtime.Activation.RequestAsync(execute,default);Assert.True(resumed.Arm(execute,activation!));
+        var result=await resumed.ReconcileAsync(default);
+        if(foreign){Assert.NotEqual(NavalMutationStatus.Applied,result.Status);Assert.Contains("FOREIGN_OR_UNLINKED_ALGO:"+new string('a',64),resumed.ReadStatus().Obligations);}
+        else {Assert.True(result.Status==NavalMutationStatus.Applied,result.Code);Assert.Empty(resumed.ReadStatus().Obligations);Assert.Equal("STOP",resumed.ReadStatus().Mode);Assert.Equal("889",State(f).NavalBroker!.Operational!.Protection.Last().AlgoId);}
+        Assert.Equal(1,peer.Posts);Assert.Equal(1,f.Approvals);
     }
     private sealed class QuotePeer(OperationalClock clock):HttpMessageHandler
     {

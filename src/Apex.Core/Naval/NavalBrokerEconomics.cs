@@ -9,9 +9,19 @@ public sealed record NavalBrokerRawFill(string Instrument,string OrderId,string 
 public sealed record NavalBrokerRawBill(string Id,string? Instrument,string? OrderId,string? ClientId,string? TradeId,string Type,string Currency,
     decimal? SignedFee,decimal? BalanceChange,DateTimeOffset? SourceUtc,string Digest);
 public sealed record NavalBrokerOrderProof(string Instrument,string OrderId,string ClientId,string? State,decimal? Quantity,decimal? Accumulated,
-    decimal? SignedFee,string? FeeCurrency,string? ActualQuote,string? AttachmentClientId,string? AlgoId,string Digest);
+    decimal? SignedFee,string? FeeCurrency,string? ActualQuote,string? AttachmentClientId,string? AlgoId,string Digest)
+{
+    // Legacy order proofs stored attachAlgoId in AlgoId. An absent extension stays
+    // absent in canonical JSON, preserving sealed pre-fix state without guessing.
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? AttachmentId { get; init; }
+}
 public sealed record NavalBrokerProtection(string Instrument,string ParentOrderId,string AttachmentClientId,string AlgoId,string? State,
-    decimal? Quantity,decimal? Stop,decimal? TakeProfit,IReadOnlyList<string> ChildOrderIds,string Digest);
+    decimal? Quantity,decimal? Stop,decimal? TakeProfit,IReadOnlyList<string> ChildOrderIds,string Digest)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? AttachmentId { get; init; }
+}
 internal sealed record NavalBrokerEconomicPass(DateTimeOffset CaptureUtc,long CaptureTimestamp,bool CollectionClosed,
     IReadOnlyList<NavalBrokerRawFill> Fills,IReadOnlyList<NavalBrokerRawBill> Bills,IReadOnlyList<NavalBrokerOrderProof> Orders,
     IReadOnlyList<NavalBrokerProtection> Protection,IReadOnlyList<NavalBrokerBalance> Balances,
@@ -28,7 +38,15 @@ public sealed partial class NavalPortfolioCoordinator
         {
             var e=_owner.Read();var s=e.Naval!;var b=e.NavalBroker!;var x=b.Operational??new();
             if(!BrokerSource(session)||_frozen)return Result(s,NavalMutationStatus.Refused,"BROKER_SOURCE_REQUIRED");
-            var obligations=new HashSet<string>(x.Obligations.Where(p=>p.StartsWith("FOREIGN_",StringComparison.Ordinal)||p.StartsWith("UNLINKED_BILL:",StringComparison.Ordinal)||p.StartsWith("FILL_CORRECTION:",StringComparison.Ordinal)).Concat(pass.Problems),StringComparer.Ordinal);
+            // Reclassify only the exact formerly-unlinked payload now proven by a
+            // fresh closed collection, signed parent and allocated forwarded client.
+            // Never clear unrelated foreign digests or infer generated IDs from legacy data.
+            var resolved=pass.CollectionClosed?pass.Protection.Where(p=>p.AttachmentId!=null&&pass.Orders.Any(o=>
+                o.Instrument==p.Instrument&&o.OrderId==p.ParentOrderId&&o.AttachmentId==p.AttachmentId&&o.AlgoId==p.AlgoId&&o.AttachmentClientId==p.AttachmentClientId&&
+                x.Intents.Any(i=>i.Operation==NavalExecutionOperation.Submit&&!i.Reduction&&i.DispatchRevision!=null&&i.Instrument==o.Instrument&&i.ClientId==o.ClientId&&
+                    (i.Outcome?.OrderId==null||i.Outcome.OrderId==o.OrderId)&&x.IdAllocations.SelectMany(a=>a.Ids).Any(id=>id.ReservationId==i.ReservationId&&id.Role==NavalClientIdRole.ProtectionAlgo&&id.ClientId==p.AttachmentClientId))))
+                .Select(p=>"FOREIGN_OR_UNLINKED_ALGO:"+p.Digest).ToHashSet(StringComparer.Ordinal):new HashSet<string>(StringComparer.Ordinal);
+            var obligations=new HashSet<string>(x.Obligations.Where(p=>(p.StartsWith("FOREIGN_",StringComparison.Ordinal)||p.StartsWith("UNLINKED_BILL:",StringComparison.Ordinal)||p.StartsWith("FILL_CORRECTION:",StringComparison.Ordinal))&&!resolved.Contains(p)).Concat(pass.Problems),StringComparer.Ordinal);
             var knownProtection=x.Protection.Concat(pass.Protection).Select((p,n)=>(p,n)).GroupBy(v=>NavalJson.Hash(v.p)).Select(g=>g.Last()).OrderBy(v=>v.n).Select(v=>v.p).ToArray();
             var raw=x.FillEvidence.Concat(pass.Fills).Distinct().ToArray();var bills=x.Bills.Concat(pass.Bills).Distinct().ToArray();
             if(raw.Length>8192||bills.Length>16384||x.Intents.Count>4096)return StopCandidate(e,"BROKER_EVIDENCE_CAPACITY");
@@ -82,7 +100,7 @@ public sealed partial class NavalPortfolioCoordinator
                 bool zeroCanceled=order!=null&&NavalBrokerSettlement.ZeroFillCanceled(i,order,raw);
                 if(!zeroCanceled&&(!terminal||_brokerAuthority?.ProtectionProfile==null))obligations.Add("ENTRY_FEE_FINALITY_UNPROVEN:"+i.Id);
                 // An attached request alone never establishes an observed live stop/take-profit.
-                bool protectedNow=order?.AlgoId!=null&&protection.Any(p=>p.Instrument==i.Instrument&&p.ParentOrderId==order.OrderId&&p.AlgoId==order.AlgoId&&
+                bool protectedNow=order?.AlgoId!=null&&order.AttachmentId!=null&&protection.Any(p=>p.Instrument==i.Instrument&&p.ParentOrderId==order.OrderId&&p.AlgoId==order.AlgoId&&p.AttachmentId==order.AttachmentId&&
                     p.AttachmentClientId==order.AttachmentClientId&&p.State=="live"&&p.Quantity==r.Inventory&&p.Stop==r.Intent.StopPrice&&p.TakeProfit==r.Intent.TakeProfitPrice);
                 if(r.Inventory>0&&!protectedNow)obligations.Add("PROTECTION_GAP:"+i.ReservationId);
                 if(terminal&&_brokerAuthority?.ProtectionProfile!=null&&!conflict)
