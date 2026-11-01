@@ -24,6 +24,23 @@ public sealed class WindowsUiRepairTests
         await b.CommandAsync("Input.dispatchMouseEvent",new{type="mouseReleased",x,y,button="left",clickCount=1},sid);
     }
     [Fact,Trait("Gate","UiRepair")]
+    public async Task NativeInvalidMetadataMustRemainVisible()
+    {
+        await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();
+        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"native-edge"));string sid=await b.NewPage();
+        await b.Navigate(sid,new Uri(h.Origin,"/").AbsoluteUri);
+        await b.Wait(sid,"document.querySelector('#okx-status')?.textContent.includes('Brak konta')===true","Panel did not load");
+        var hit=await Hit(b,sid,"#okx-operator button[data-action=configure]");Assert.True(hit.GetProperty("hit").GetBoolean());await Pointer(b,sid,hit);
+        IntPtr window=await WindowsNativeUi.Metadata(h.Pid);
+        WindowsTestHost.Evidence("native-metadata-visible",WindowsNativeUi.Observe(window,h.Pid));WindowsNativeUi.ScreenshotMetadata(window,"native-metadata-initial");
+        WindowsNativeUi.Click(window,1);await Task.Delay(350);
+        bool remains=WindowsNativeUi.Visible(window);WindowsTestHost.Evidence("native-metadata-validation",new{emptySubmitRemainsVisible=remains,errorVisible=remains&&!string.IsNullOrEmpty(WindowsNativeUi.Error(window))});
+        if(remains)WindowsNativeUi.ScreenshotMetadata(window,"native-metadata-validation");
+        Assert.True(remains,"Invalid metadata silently closes the native form instead of showing validation");
+        Assert.False(string.IsNullOrWhiteSpace(WindowsNativeUi.Error(window)));
+        WindowsNativeUi.Cancel(window);await b.Wait(sid,"document.querySelector('#okx-result').textContent.includes('NATIVE_CANCELLED')","Native cancel missing");
+    }
+    [Fact,Trait("Gate","UiRepair")]
     public async Task ExtractedPointerConfigureMustBeReachable()
     {
         await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();

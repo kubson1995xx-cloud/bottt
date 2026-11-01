@@ -22,6 +22,8 @@ Push-Location $sdk
 try {
  & $dotnet build (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release
  if ($LASTEXITCODE -ne 0) {throw 'Test compilation failed; not behavioral RED'}
+ $runtime=Join-Path $e 'test-runtime';New-Item -ItemType Directory -Path $runtime|Out-Null
+ Copy-Item (Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0/*') $runtime -Recurse
  & $dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter 'Gate=UiRepair' --logger 'trx;LogFileName=ui-original.trx' --results-directory $e
  $result=$LASTEXITCODE
 } finally {Pop-Location}
