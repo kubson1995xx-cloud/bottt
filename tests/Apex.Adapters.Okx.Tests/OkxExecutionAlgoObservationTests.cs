@@ -163,6 +163,14 @@ public sealed class OkxExecutionAlgoObservationTests
     {
         using var f=new OkxExecutionObservationHttpFixture();Add(f,PathFor("detail"),new JsonObject{["code"]=code,["msg"]="PRIVATE_ALGO_SENTINEL",["data"]=new JsonArray()},status);await using var c=f.Client();var result=await Read(c,f,"detail");Assert.Equal(OkxObservationStatus.Failed,result.Status);Assert.Empty(result.Rows);Assert.Single(f.Sent);Assert.DoesNotContain("PRIVATE_ALGO_SENTINEL",System.Text.Json.JsonSerializer.Serialize(result));f.Done();
     }
+    [Theory][InlineData("cancel")][InlineData("dispose")][InlineData("late-failure")]
+    public async Task AlgoCollect_RetainsEarlierRowsOnCancellationDisposalAndLateFailure(string variant)
+    {
+        using var f=new OkxExecutionObservationHttpFixture();using var cancel=new CancellationTokenSource();OkxExecutionObservationClient? client=null;Task? disposal=null;Add(f,PathFor("pending"),Rows(("900","")));var later=variant=="late-failure"?JsonNode.Parse("{\"code\":\"50011\",\"msg\":\"private\",\"data\":[]}")!:Rows();Add(f,"/api/v5/trade/orders-algo-pending?after=900&instType=SPOT&limit=100&ordType=conditional",later);
+        f.OnOpen=()=>{if(f.Opens==2){if(variant=="cancel")cancel.Cancel();if(variant=="dispose")disposal=client!.DisposeAsync().AsTask();}};
+        await using var c=f.Client();client=c;var r=await new OkxObservationPager(c).CollectAlgosAsync(Page(),f.Context,cancel.Token);if(disposal is not null)await disposal;
+        Assert.Equal(OkxObservationCollectionStatus.Incomplete,r.Status);Assert.Single(r.Rows);Assert.Equal("900",r.Rows[0].AlgoId);Assert.Equal(2,r.Trace.Count);Assert.Equal(OkxObservationStatus.Failed,r.Trace[^1].Status);Assert.Equal(variant=="late-failure"?2:1,f.Sent.Count);if(variant=="late-failure")f.Done();else Assert.Single(f.Steps);
+    }
     [Fact] public void AlgoCollect_ExposesSeparateReadOnlyCollectionContract()
     {
         Assert.Equal(typeof(IReadOnlyList<OkxExecutionAlgoDto>),typeof(OkxAlgoObservationCollection).GetProperty("Rows")!.PropertyType);

@@ -156,7 +156,7 @@ public sealed class OkxExecutionStreamTests
     {
         var clock=new ObservationTestClock();clock.Utc=DateTimeOffset.UtcNow+TimeSpan.FromSeconds(2);
         using var http=new OkxExecutionObservationHttpFixture(clock);await using var f=new OkxExecutionWebSocketFixture(clock:clock,scope:http.Scope,context:http.Context);f.InspectLogin=_=>{clock.Advance(TimeSpan.FromSeconds(1));return Task.CompletedTask;};await using var stream=f.Stream();await using var e=stream.ObserveAsync(f.Context,default).GetAsyncEnumerator();await Buffering(e);
-        var order=f.Update("orders");order["data"]![0]!["uTime"]="20";var before=stream.ReadState().Sequence;await f.Push(OkxStreamLane.PrivateOrders,order.ToJsonString());await Until(()=>stream.ReadState().Sequence>before);
+        var order=f.Update("orders");order["data"]![0]!["uTime"]="20";var before=stream.ReadState().Sequence;await f.Push(OkxStreamLane.PrivateOrders,order.ToJsonString());await Until(()=>stream.ReadState().Sequence>before);var protective=f.Update("algos");protective["data"]![0]!["triggerTime"]="21";await f.Push(OkxStreamLane.BusinessAlgos,protective.ToJsonString());
         var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var head=JsonNode.Parse("{\"code\":\"0\",\"msg\":\"\",\"data\":[{\"instType\":\"SPOT\",\"instId\":\"BTC-USDT\",\"ordId\":\"452197707845865472\",\"clOrdId\":\"\",\"cTime\":\"1\",\"uTime\":\"1\"}]}")!;
         const string path="/api/v5/trade/orders-pending?instType=SPOT&limit=1";
@@ -164,8 +164,8 @@ public sealed class OkxExecutionStreamTests
         OkxExecutionAlgoObservationTests.Add(http,"/api/v5/trade/orders-pending?after=452197707845865472&instType=SPOT&limit=1",JsonNode.Parse("{\"code\":\"0\",\"msg\":\"\",\"data\":[]}")!);OkxExecutionAlgoObservationTests.Add(http,path,head);
         await using var client=http.Client();var rest=new OkxObservationPager(client).CollectAsync(new(OkxObservationSurface.Pending,new(null,null,null,null,null,1),http.Context),default);var firstBoundary=await Task.WhenAny(rest,entered.Task).WaitAsync(TimeSpan.FromSeconds(5));if(firstBoundary==rest){var refused=await rest;Assert.Fail("REST refused before held handler: "+refused.ErrorCode+":"+string.Join(",",refused.Trace.Select(x=>x.ErrorCode)));}await entered.Task;
         order["data"]![0]!["uTime"]="30";await f.Push(OkxStreamLane.PrivateOrders,order.ToJsonString());var algo=f.Update("algos");algo["data"]![0]!["triggerTime"]="31";await f.Push(OkxStreamLane.BusinessAlgos,algo.ToJsonString());release.SetResult();var r=await rest;Assert.True(r.Status==OkxObservationCollectionStatus.Collected,r.ErrorCode+":"+string.Join(",",r.Trace.Select(x=>x.ErrorCode)));Assert.Equal("1",Assert.Single(r.Orders).UTime.Raw);
-        order["data"]![0]!["uTime"]="40";await f.Push(OkxStreamLane.PrivateOrders,order.ToJsonString());var observed=new List<OkxStreamObservation>();while(observed.Count<4){Assert.True(await e.MoveNextAsync());observed.Add(e.Current);}
-        Assert.Equal(new[]{"20","30","40"},observed.SelectMany(x=>x.Orders).Select(x=>x.UTime.Raw));Assert.Equal("31",Assert.Single(observed.SelectMany(x=>x.Algos)).Algo.TriggerTime.Raw);Assert.True(observed.All(x=>x.Context==http.Context));Assert.Single(observed.Select(x=>x.Epoch).Distinct());Assert.True(stream.ReadState().PairedSubscribed);Assert.False(stream.ReadState().HasGap);http.Done();
+        order["data"]![0]!["uTime"]="40";await f.Push(OkxStreamLane.PrivateOrders,order.ToJsonString());protective["data"]![0]!["triggerTime"]="41";await f.Push(OkxStreamLane.BusinessAlgos,protective.ToJsonString());var observed=new List<OkxStreamObservation>();while(observed.Count<6){Assert.True(await e.MoveNextAsync());observed.Add(e.Current);}
+        Assert.Equal(new[]{"20","30","40"},observed.SelectMany(x=>x.Orders).Select(x=>x.UTime.Raw));Assert.Equal(new[]{"21","31","41"},observed.SelectMany(x=>x.Algos).Select(x=>x.Algo.TriggerTime.Raw));Assert.True(observed.All(x=>x.Context==http.Context));Assert.Single(observed.Select(x=>x.Epoch).Distinct());Assert.True(stream.ReadState().PairedSubscribed);Assert.False(stream.ReadState().HasGap);http.Done();
     }
     [Fact] public async Task Stream_ExplicitReplacementHasFreshEpochNotAuthority()
     {
@@ -244,6 +244,33 @@ public sealed class OkxExecutionStreamTests
         await using var f=new OkxExecutionWebSocketFixture();var s=f.Stream();var e=s.ObserveAsync(f.Context,default).GetAsyncEnumerator();await Buffering(e);var seq=s.ReadState().Sequence;await f.Push(OkxStreamLane.PrivateOrders,f.Update("orders").ToJsonString());await Until(()=>s.ReadState().Sequence>seq);f.GapAction=()=>throw new InvalidOperationException("FenceDrainBoundary");
         await Assert.ThrowsAsync<InvalidOperationException>(()=>s.DisposeAsync().AsTask());await Assert.ThrowsAsync<InvalidOperationException>(()=>e.DisposeAsync().AsTask());
         var queue=typeof(OkxObservationStream).GetField("queue",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!.GetValue(s)!;Assert.Equal(0,(int)queue.GetType().GetProperty("Count")!.GetValue(queue)!);Assert.True(OwnedBuffers(s).All(b=>b.All(x=>x==0)));Assert.True(s.ReadState().Closed);
+    }
+    [Fact] public async Task Stream_AlgoLinksDoNotAcceptProtection()
+    {
+        await using var f=new OkxExecutionWebSocketFixture();await using var s=f.Stream();await using var e=s.ObserveAsync(f.Context,default).GetAsyncEnumerator();await Buffering(e);var w=f.Update("algos");var row=w["data"]![0]!;
+        row["algoId"]="200";row["algoClOrdId"]="parentAttachment";row["attachAlgoOrds"]=JsonNode.Parse("[{\"attachAlgoClOrdId\":\"differentChildIntent\",\"tpOrdPx\":\"-1\"}]");row["ordIdList"]=new JsonArray("300");row["subAlgoIdList"]=new JsonArray("400");row["linkedOrd"]=JsonNode.Parse("{\"ordId\":\"500\"}");row["triggerTime"]="600";
+        foreach(var state in new[]{"effective","partially_effective","partially_failed","canceled","pause","unknown-state"})
+        {row["state"]=state;await f.Push(OkxStreamLane.BusinessAlgos,w.ToJsonString());Assert.True(await e.MoveNextAsync());var dto=Assert.Single(e.Current.Algos).Algo;Assert.Equal(state,dto.State);Assert.Equal("200",dto.AlgoId);Assert.Equal("parentAttachment",dto.AlgoClOrdId);Assert.Equal("differentChildIntent",dto.AttachAlgoOrds!.Value[0].AttachAlgoClOrdId);Assert.Equal("300",Assert.Single(dto.OrdIdList!.Value));Assert.Equal("400",Assert.Single(dto.SubAlgoIdList!.Value));Assert.Equal("500",dto.LinkedOrd!.OrdId);Assert.Equal("600",dto.TriggerTime.Raw);Assert.Equal("USDT",dto.TradeQuoteCcy);}
+        foreach(bool absent in new[]{true,false}){row.AsObject().Remove("attachAlgoOrds");row.AsObject().Remove("ordIdList");if(!absent){row["attachAlgoOrds"]=new JsonArray();row["ordIdList"]=new JsonArray();}await f.Push(OkxStreamLane.BusinessAlgos,w.ToJsonString());Assert.True(await e.MoveNextAsync());var dto=Assert.Single(e.Current.Algos).Algo;if(absent){Assert.Null(dto.AttachAlgoOrds);Assert.Null(dto.OrdIdList);}else{Assert.Empty(dto.AttachAlgoOrds!.Value);Assert.Empty(dto.OrdIdList!.Value);}}
+        Assert.DoesNotContain(typeof(OkxExecutionAlgoDto).GetProperties(),p=>p.Name is "Protected" or "Accepted" or "Coverage" or "Receipt");
+    }
+    [Fact] public async Task Stream_LateProviderCannotReopenAfterDisposal()
+    {
+        await using var f=new OkxExecutionWebSocketFixture();var entered=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);var release=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);OkxSigningMaterial? late=null;
+        f.OpenOverride=async ct=>{entered.TrySetResult();await release.Task;return late=new OkxSigningMaterial(f.Scope,"DemoTradingApi",f.KeyBytes,f.SecretBytes,f.PassBytes);};
+        await using var s=f.Stream();var run=Task.Run(async()=>{await foreach(var item in s.ObserveAsync(f.Context,default)){} });await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));var disposal=s.DisposeAsync().AsTask();Assert.True(s.ReadState().HasGap);release.SetResult();await disposal.WaitAsync(TimeSpan.FromSeconds(5));await run;Assert.NotNull(late);Assert.True(late!.Key.All(b=>b==0));Assert.Empty(f.Logins);Assert.Equal(1,f.Opens);
+    }
+    [Fact] public void Stream_ExactLoginAndAckSchemasRefuseCrossedControls()
+    {
+        byte[] Bytes(string s)=>Encoding.UTF8.GetBytes(s);var valid="{\"event\":\"login\",\"code\":\"0\",\"connId\":\"c1\"}";Assert.Equal("login",OkxObservationStreamJson.Parse(Bytes(valid),OkxStreamLane.PrivateOrders,"123",null,0).Event);
+        foreach(var bad in new[]{"{\"event\":\"login\",\"connId\":\"c1\"}","{\"event\":\"login\",\"code\":\"0\",\"connId\":\"\"}","{\"event\":\"login\",\"code\":0,\"connId\":\"c1\"}","{\"event\":\"login\",\"code\":\"1\",\"connId\":\"c1\"}"})Assert.ThrowsAny<Exception>(()=>OkxObservationStreamJson.Parse(Bytes(bad),OkxStreamLane.PrivateOrders,"123",null,0));
+        var ack="{\"id\":\"orders1\",\"event\":\"subscribe\",\"arg\":{\"channel\":\"orders\",\"instType\":\"SPOT\"},\"connId\":\"c1\"}";Assert.Equal("subscribe",OkxObservationStreamJson.Parse(Bytes(ack),OkxStreamLane.PrivateOrders,"123","c1",1).Event);
+        foreach(var bad in new[]{ack.Replace("orders1","algos1"),ack.Replace("\"orders\"","\"orders-algo\""),ack.Replace("SPOT","ANY"),ack.Replace("c1","c2")})Assert.ThrowsAny<Exception>(()=>OkxObservationStreamJson.Parse(Bytes(bad),OkxStreamLane.PrivateOrders,"123","c1",1));Assert.ThrowsAny<Exception>(()=>OkxObservationStreamJson.Parse(Bytes(ack),OkxStreamLane.PrivateOrders,"123","c1",0));
+    }
+    [Fact] public async Task Stream_IdleFenceRevocationDoesNotWaitForOrders()
+    {
+        var clock=new StreamTestClock();await using var f=new OkxExecutionWebSocketFixture(clock:clock);await using var s=f.Stream();await using var e=s.ObserveAsync(f.Context,default).GetAsyncEnumerator();var opening=Buffering(e);for(int tick=0;!opening.IsCompleted&&tick<50;tick++){clock.Advance(TimeSpan.FromMilliseconds(100));await Task.Delay(5);}await opening;
+        f.Allowed=false;clock.Advance(TimeSpan.FromMilliseconds(250));await f.Gap.Task.WaitAsync(TimeSpan.FromSeconds(5));Assert.Equal("ReadFenceDenied",s.ReadState().ErrorCode);Assert.False(s.ReadState().PairedSubscribed);Assert.Equal(2,f.Opens);Assert.Equal(2,f.Connects.Count);await s.DisposeAsync();Assert.Equal(0,clock.TimerCount);
     }
     [Fact] public async Task Stream_LazyConstructionAndSingleUse()
     {
