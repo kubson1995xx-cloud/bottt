@@ -11,7 +11,8 @@ internal sealed class ObservationTestClock : TimeProvider
 {
     internal DateTimeOffset Utc=new(2026,11,1,12,0,0,TimeSpan.Zero);
     internal long Mono;
-    public override DateTimeOffset GetUtcNow()=>Utc;
+    internal Action? OnUtcRead;
+    public override DateTimeOffset GetUtcNow() { OnUtcRead?.Invoke();return Utc; }
     public override long GetTimestamp()=>Mono;
     public override long TimestampFrequency=>TimeSpan.TicksPerSecond;
     internal void Advance(TimeSpan t) { Utc+=t;Mono+=t.Ticks; }
@@ -29,6 +30,8 @@ internal sealed class OkxExecutionObservationHttpFixture : HttpMessageHandler, I
     internal int Opens;
     internal bool Allowed=true;
     internal Action? OnOpen, OnFence;
+    internal Action<string>? OnAuthenticatedRequest;
+    internal Func<DateTimeOffset>? ExpectedSigningUtc;
     internal Exception? ProviderError;
     internal OkxExecutionScope? MaterialScope;
     internal OkxSigningMaterial? LastMaterial;
@@ -52,11 +55,12 @@ internal sealed class OkxExecutionObservationHttpFixture : HttpMessageHandler, I
         {
             Assert.Equal(Key,request.Headers.GetValues("OK-ACCESS-KEY").Single());Assert.Equal(Pass,request.Headers.GetValues("OK-ACCESS-PASSPHRASE").Single());
             var stamp=request.Headers.GetValues("OK-ACCESS-TIMESTAMP").Single();
-            Assert.Equal(Clock.Utc.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'",System.Globalization.CultureInfo.InvariantCulture),stamp);
+            Assert.Equal((ExpectedSigningUtc?.Invoke()??Clock.Utc).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'",System.Globalization.CultureInfo.InvariantCulture),stamp);
             Assert.Equal(new[]{"OK-ACCESS-KEY","OK-ACCESS-PASSPHRASE","OK-ACCESS-SIGN","OK-ACCESS-TIMESTAMP","x-simulated-trading"}.OrderBy(x=>x,StringComparer.Ordinal),request.Headers.Select(x=>x.Key).OrderBy(x=>x,StringComparer.Ordinal));
             // Independent BCL HMAC, no use of production signer/query builder/parser.
             var expected=Convert.ToBase64String(HMACSHA256.HashData(Encoding.ASCII.GetBytes(Secret),Encoding.UTF8.GetBytes(stamp+"GET"+path)));
             Assert.Equal(expected,request.Headers.GetValues("OK-ACCESS-SIGN").Single());
+            OnAuthenticatedRequest?.Invoke(stamp);
         }
         Assert.NotEmpty(Steps);var step=Steps.Dequeue();Assert.Equal(step.Path,path);
         Sent.Add((path,Clock.Utc,Clock.Mono));return step.Reply(ct);

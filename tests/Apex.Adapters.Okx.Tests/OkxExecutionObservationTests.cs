@@ -325,3 +325,100 @@ public sealed class OkxExecutionObservationTests
         Assert.Empty(f.Sent);Assert.Equal(0,f.Opens);
     }
 }
+
+// F1: retain Read_FinalFenceClockMutationCannotSend above as historical early-check coverage.
+public sealed class OkxObservationFinalAdmissionTests(Xunit.Abstractions.ITestOutputHelper output)
+{
+    [Theory]
+    [InlineData("none")]
+    [InlineData("utc-expiry")]
+    [InlineData("mono-expiry")]
+    [InlineData("fence-revoked")]
+    public async Task Read_FinalAdmissionAfterSigningIsIsolated(string change)
+    {
+        using var f=new OkxExecutionObservationHttpFixture();
+        await using var c=f.Client();
+        var trace=new List<string>();
+        var signingLane=new List<DateTimeOffset>();
+        string[]? controlPrefix=null,finalPrefix=null;
+        bool opened=false,recordSigningLane=false;
+        int fencesAfterProvider=0,validatedSignatures=0,finalCheckpoints=0;
+        int expectedOpens=1;
+        string activeChange="none";
+        DateTimeOffset startUtc=default;
+        long startMono=0;
+
+        // Unique UTC samples let the strict peer bind the actual signed timestamp to the
+        // sample between post-provider admission and final admission. No clock-count-only oracle.
+        f.Clock.OnUtcRead=()=>
+        {
+            f.Clock.Utc+=TimeSpan.FromMilliseconds(1);
+            if(recordSigningLane) { signingLane.Add(f.Clock.Utc);trace.Add("utc"); }
+        };
+        f.OnOpen=()=> { opened=true;trace.Add("provider"); };
+        f.OnFence=()=>
+        {
+            if(!opened) { trace.Add("early-fence");return; }
+            fencesAfterProvider++;
+            if(fencesAfterProvider==1)
+            {
+                trace.Add("post-provider-fence");recordSigningLane=true;return;
+            }
+            if(fencesAfterProvider!=2) { trace.Add("post-response-fence");return; }
+
+            // Source checkpoint semantics: after OpenMaterial, first fence is line 104;
+            // second is line 118, after AuthenticateRead (line 112). Both precede HTTP.
+            trace.Add("final-admission");finalPrefix=trace.ToArray();finalCheckpoints++;
+            recordSigningLane=false;
+            Assert.Equal(4,signingLane.Count); // trailing post-provider budget, signing, final budget, fence UTC
+            Assert.Equal(expectedOpens,f.Opens);
+            Assert.True(f.Allowed);
+            Assert.InRange(f.Clock.Utc-startUtc,TimeSpan.Zero,TimeSpan.FromSeconds(1));
+            Assert.Equal(startMono,f.Clock.Mono);
+            switch(activeChange)
+            {
+                case "utc-expiry":f.Clock.Utc+=TimeSpan.FromSeconds(10);break;
+                case "mono-expiry":f.Clock.Mono+=TimeSpan.FromSeconds(10).Ticks;break;
+                case "fence-revoked":f.Allowed=false;break;
+            }
+        };
+        f.OnAuthenticatedRequest=stamp=>
+        {
+            // This callback runs only AFTER the independent BCL HMAC/header assertions.
+            validatedSignatures++;trace.Add("authenticated-handler");
+            Assert.Equal(signingLane[1].UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'",System.Globalization.CultureInfo.InvariantCulture),stamp);
+            Assert.True(signingLane[0]<signingLane[1]&&signingLane[1]<signingLane[2]);
+        };
+        f.ExpectedSigningUtc=()=>signingLane[1];
+
+        // Real unchanged-DLL control traverses exactly this instrumented final lane.
+        f.Add("account");startUtc=f.Clock.Utc;startMono=f.Clock.Mono;
+        var control=await c.ReadAccountAsync(f.Context,default);
+        Assert.Equal(OkxObservationStatus.Observed,control.Status);
+        Assert.Single(f.Sent);Assert.Equal(1,validatedSignatures);Assert.Equal(1,finalCheckpoints);
+        Assert.Equal(new[]{"early-fence","early-fence","early-fence","provider","post-provider-fence","utc","utc","utc","utc","final-admission"},finalPrefix);
+        controlPrefix=finalPrefix;
+        output.WriteLine("control: "+string.Join(" -> ",trace));
+
+        // Explicit quota boundary: no earlier wait/budget predicate can consume the late change.
+        f.Clock.Advance(TimeSpan.FromMilliseconds(600));
+        opened=false;recordSigningLane=false;fencesAfterProvider=0;trace.Clear();signingLane.Clear();finalPrefix=null;
+        activeChange=change;expectedOpens=2;startUtc=f.Clock.Utc;startMono=f.Clock.Mono;
+        f.Add("balance");
+        var result=await c.ReadBalancesAsync(f.Context,default);
+        // Primary behavioral oracle: final denial must not invoke the strict handler again.
+        Assert.Equal(change=="none"?2:1,f.Sent.Count);
+        Assert.Equal(controlPrefix,finalPrefix);
+        Assert.Equal(2,f.Opens);Assert.Equal(2,finalCheckpoints);
+        Assert.Equal(change=="none"?2:1,validatedSignatures);
+        Assert.Equal(change=="none"?OkxObservationStatus.Observed:OkxObservationStatus.Failed,result.Status);
+        if(change=="none") { Assert.Null(result.ErrorCode);f.Done(); }
+        else
+        {
+            Assert.Empty(result.Rows);
+            Assert.Equal(change=="fence-revoked"?"ReadFenceDenied":"ExpiredOrStopped",result.ErrorCode);
+            Assert.Equal(OkxExecutionObservationHttpFixture.PathFor("balance"),Assert.Single(f.Steps).Path);
+        }
+        output.WriteLine(change+": "+string.Join(" -> ",trace));
+    }
+}
