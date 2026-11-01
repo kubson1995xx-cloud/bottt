@@ -14,7 +14,13 @@ public sealed class WindowsUiRepairTests
     }
     private static async Task<JsonElement> Hit(WindowsCdpBrowser b,string sid,string selector)
     {
-        return await b.Evaluate(sid,"(()=>{let e=document.querySelector("+J(selector)+");e.scrollIntoView({block:'center'});let r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,h=document.elementFromPoint(x,y);return {x,y,width:r.width,height:r.height,hit:e===h||e.contains(h),target:h?.tagName,targetClass:h?.className,disabled:!!e.disabled};})()");
+        // Closed native <details> uses content-visibility: descendants can retain
+        // nonzero layout boxes while not paintable. Open ancestors with real input,
+        // never by mutating .open, before measuring a nested disclosure control.
+        string token=Guid.NewGuid().ToString("N");
+        var ancestors=await b.Evaluate(sid,"(()=>{let e=document.querySelector("+J(selector)+"),a=[],p=e?.parentElement;while(p){if(p.tagName==='DETAILS'&&!p.open&&p.querySelector(':scope>summary')!==e){let id="+J(token)+"+'-'+a.length;p.setAttribute('data-ui-open',id);a.push('details[data-ui-open=\"'+id+'\"]>summary');}p=p.parentElement;}return a.reverse();})()");
+        foreach(var ancestor in ancestors.EnumerateArray()){var a=await Hit(b,sid,ancestor.GetString()!);Assert.True(a.GetProperty("hit").GetBoolean(),"Closed disclosure ancestor not reachable");await Pointer(b,sid,a);}
+        return await b.Evaluate(sid,"(()=>{let e=document.querySelector("+J(selector)+");e.scrollIntoView({block:'center'});let r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,h=document.elementFromPoint(x,y);return {x,y,width:r.width,height:r.height,visible:e.checkVisibility({checkVisibilityCSS:true}),hit:e===h||e.contains(h),target:h?.tagName,targetClass:h?.className,disabled:!!e.disabled};})()");
     }
     private static async Task Pointer(WindowsCdpBrowser b,string sid,JsonElement hit)
     {
@@ -35,6 +41,15 @@ public sealed class WindowsUiRepairTests
         exceptions=b.Events.Count(e=>e.Session==sid&&e.Method=="Runtime.exceptionThrown"),
         console=b.Events.Where(e=>e.Session==sid&&e.Method=="Runtime.consoleAPICalled").Select(e=>new{type=e.Data.GetProperty("type").GetString()}).ToArray(),
         responses=b.Events.Where(e=>e.Session==sid&&e.Method=="Network.responseReceived").Select(e=>new{path=new Uri(e.Data.GetProperty("response").GetProperty("url").GetString()!).AbsolutePath,status=e.Data.GetProperty("response").GetProperty("status").GetInt32()}).ToArray()};
+    [Fact,Trait("Gate","UiNavigation")]
+    public async Task OperatorReturnNavigationMustRemainPointerReachable()
+    {
+        await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"navigation-edge"));string sid=await b.NewPage();var records=new List<object>();
+        try{foreach(var(width,height)in new[]{(1440,900),(900,650),(640,800)}){
+            await b.CommandAsync("Emulation.setDeviceMetricsOverride",new{width,height,deviceScaleFactor=1,mobile=false},sid);await b.Navigate(sid,new Uri(h.Origin,"/naval/").AbsoluteUri);await b.Wait(sid,"document.querySelector('#okx-operator-slot #okx-operator')!==null","Operator did not mount");
+            var hit=await Hit(b,sid,".rail-bottom button");records.Add(new{width,height,hit});await Screenshot(b,sid,width+"x"+height+"-return-navigation");Assert.True(hit.GetProperty("hit").GetBoolean(),"Constrained return-to-OKX navigation is hidden/clipped");await Pointer(b,sid,hit);await b.Wait(sid,"document.activeElement?.id==='okx-operator'","Operator return did not focus actual panel");
+        }}finally{WindowsTestHost.Evidence("ui-navigation",new{records,diagnostics=Diagnostics(b,sid)});}
+    }
     [Fact,Trait("Gate","UiUpgrade")]
     public async Task PreviousExeProfilePreservedByFreshUiAndRestart()
     {
@@ -98,7 +113,8 @@ public sealed class WindowsUiRepairTests
                     foreach(var item in controls.EnumerateArray().Reverse()){
                         string selector="[data-ui-probe='"+item.GetProperty("id").GetInt32()+"']";
                         Assert.True((await b.Evaluate(sid,"document.querySelector("+J(selector)+")!==null")).GetBoolean(),"Inventory control lost before its pointer action: "+route+" "+item.GetProperty("label").GetString());
-                        var hit=await Hit(b,sid,selector);if(hit.GetProperty("width").GetDouble()==0||hit.GetProperty("height").GetDouble()==0){records.Add(new{viewport,route,item,result="not rendered (optional capability / closed details)"});continue;}
+                        var hit=await Hit(b,sid,selector);records.Add(new{viewport,route,item,probe=hit});if(!hit.GetProperty("visible").GetBoolean()||hit.GetProperty("width").GetDouble()==0||hit.GetProperty("height").GetDouble()==0){records.Add(new{viewport,route,item,result="not rendered (optional capability / closed details)"});continue;}
+                        if(!hit.GetProperty("hit").GetBoolean())await Screenshot(b,sid,viewport+"-"+route+"-failed-hit");
                         Assert.True(hit.GetProperty("hit").GetBoolean(),"View control occluded: "+route+" "+item.GetProperty("label").GetString());await Pointer(b,sid,hit);await Task.Delay(40);
                         var after=await b.Evaluate(sid,"(()=>{let e=document.querySelector("+J(selector)+");return {pressed:e?.getAttribute('aria-pressed'),disabled:!!e?.disabled,detailsOpen:e?.parentElement?.open??null};})()");records.Add(new{viewport,route,item,hit,after});
                     }

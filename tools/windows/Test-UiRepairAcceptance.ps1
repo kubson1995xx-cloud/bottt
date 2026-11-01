@@ -36,7 +36,7 @@ try {
  if ($LASTEXITCODE -ne 0) {throw 'Test-only build failed'}
  $closure=Join-Path $e 'test-runtime';New-Item -ItemType Directory -Path $closure|Out-Null
  Copy-Item (Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0/*') $closure -Recurse
- foreach ($gate in @('UiRepair','UiInventory','UiUpgrade')) {
+ foreach ($gate in @('UiRepair','UiInventory','UiUpgrade','UiNavigation')) {
   & $dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$gate+'.trx') --results-directory $e
   if ($LASTEXITCODE -ne 0) {$failed=$true}
  }
