@@ -41,6 +41,21 @@ public sealed class WindowsUiRepairTests
         exceptions=b.Events.Count(e=>e.Session==sid&&e.Method=="Runtime.exceptionThrown"),
         console=b.Events.Where(e=>e.Session==sid&&e.Method=="Runtime.consoleAPICalled").Select(e=>new{type=e.Data.GetProperty("type").GetString()}).ToArray(),
         responses=b.Events.Where(e=>e.Session==sid&&e.Method=="Network.responseReceived").Select(e=>new{path=new Uri(e.Data.GetProperty("response").GetProperty("url").GetString()!).AbsolutePath,status=e.Data.GetProperty("response").GetProperty("status").GetInt32()}).ToArray()};
+    [Fact,Trait("Gate","EnrollmentOriginal")]
+    public async Task MetadataApprovalFailureMustNotBeReportedAsUserCancellation()
+    {
+        await using var h=new WindowsTestHost(WindowsTestHost.Package,WindowsTestHost.NewRoot());await h.InitializeAsync();
+        await using var b=await WindowsCdpBrowser.StartAsync(Path.Combine(h.FixtureRoot,"enrollment-edge"));string sid=await b.NewPage();
+        await b.Navigate(sid,new Uri(h.Origin,"/naval/").AbsoluteUri);await b.Wait(sid,"document.querySelector('#okx-operator')!==null","Operator missing");
+        await Click(b,sid,"[data-action=configure]");var w=await WindowsNativeUi.Metadata(h.Pid);
+        foreach(var(id,text)in new[]{(100,"DEMO"),(101,"native-proof"),(102,"123456"),(103,"EUR")})WindowsNativeUi.Text(w,id,text);
+        WindowsNativeUi.Click(w,1);await WindowsTestHost.Until(()=>Task.FromResult(!WindowsNativeUi.Visible(w)),"Metadata did not close");
+        var deadline=DateTime.UtcNow.AddSeconds(8);JsonElement state=default;
+        do{state=await h.Json("/api/naval/okx/status");if(state.GetProperty("lastResult").GetString()!="NOT_CONNECTED")break;await Task.Delay(100);}while(DateTime.UtcNow<deadline);
+        string? result=state.GetProperty("lastResult").GetString();
+        WindowsTestHost.Evidence("original-enrollment-boundary",new{result,metadataAccepted=true,userCancelled=false,secretInputEntered=false,credentialsSaved=Directory.Exists(Path.Combine(h.DataRoot,"okx")),exeSha256=h.PayloadHash});
+        await h.StopAsync();Assert.NotEqual("NATIVE_CANCELLED",result);
+    }
     [Fact,Trait("Gate","UiNavigation")]
     public async Task OperatorReturnNavigationMustRemainPointerReachable()
     {

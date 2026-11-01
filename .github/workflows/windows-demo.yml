@@ -5,7 +5,7 @@ on:
       mode:
         description: 'full-delivery packages; task1-source/task2-source/task3-source/task4-source validate only the named source prerequisite'
         type: choice
-        options: [ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
+        options: [okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
         default: full-delivery
       ui_run_id:
         description: 'Immutable UI candidate artifact run for test-only acceptance'
@@ -39,6 +39,37 @@ on:
 permissions:
   contents: read
 jobs:
+  okxEnrollmentOriginal:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'okx-enrollment-original' && github.ref == 'refs/heads/feature/apex-naval-command'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.427'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - uses: actions/download-artifact@v4
+        with:
+          name: UI-Repair-Candidate-41346858479-1
+          run-id: 41346858479
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/enrollment-original-input
+      - name: Native original API and extracted browser enrollment boundary
+        shell: powershell
+        run: ./tools/windows/Test-OkxEnrollment.ps1 -Download "$env:RUNNER_TEMP/enrollment-original-input"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: OKX-Enrollment-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/okx-enrollment-evidence/**
+          if-no-files-found: error
+          retention-days: 30
   uiRepairAcceptance:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'ui-repair-acceptance' && github.ref == 'refs/heads/feature/apex-naval-command'
     runs-on: windows-latest
