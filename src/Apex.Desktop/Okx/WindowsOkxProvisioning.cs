@@ -44,7 +44,7 @@ internal static class WindowsOkxProvisioning
     // Same actual native form used by production. Tests of this function alone do
     // NOT establish that Windows protected approval succeeded.
     internal static Task<OkxNativeForm> ShowSecretsAsync(OkxScopeBinding binding,CancellationToken ct)=>
-        WindowsOkxDialog.ShowDetailedAsync("APEX — lokalny klucz OKX",WindowsOkxApprovalProvider.Scope(binding)+"\nKrok 3/3: trzy maskowane pola, wyłącznie lokalnie. Klucz z wybranego DEMO/LIVE. Odczyt DEMO wymaga klucza read_only (bez Trade). Zapis CurrentUser DPAPI; bez automatycznego połączenia.",new[]{new OkxNativeField("API Key",true),new OkxNativeField("Secret Key",true),new OkxNativeField("Passphrase",true)},ct,values=>values.Length==3&&values.All(v=>v.Length is >0 and <=4096&&!v.Any(b=>b<32||b==127))?null:"OKX_SECRET_INVALID");
+        WindowsOkxDialog.ShowDetailedAsync("APEX — lokalny klucz OKX",WindowsOkxApprovalProvider.Scope(binding)+"\nKrok 3/3: trzy maskowane pola, wyłącznie lokalnie. Dla bota DEMO zapisz docelowy klucz read_only,trade; test salda wykona tylko odczyt, bez zgody na handel. Jeden niezmienny zakres na środowisko; UI nie oferuje rotacji. Zapis CurrentUser DPAPI; bez automatycznego połączenia.",new[]{new OkxNativeField("API Key",true),new OkxNativeField("Secret Key",true),new OkxNativeField("Passphrase",true)},ct,values=>values.Length==3&&values.All(v=>v.Length is >0 and <=4096&&!v.Any(b=>b<32||b==127))?null:"OKX_SECRET_INVALID");
     internal static OkxEnrollmentResult PersistAndVerify(ConfigStore config,OkxScopeOptions option,OkxScopeBinding binding,byte[][] secrets,Action<string>? progress=null)
     {
         string failure="KEY_STORE_WRITE_FAILED_PRESERVED";

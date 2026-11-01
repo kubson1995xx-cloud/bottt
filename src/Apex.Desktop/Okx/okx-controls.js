@@ -59,7 +59,7 @@
       state=next;healthy=true;options(select,state.accounts.map(a=>[a.scopeId,`${a.environment==='Live'?'LIVE':'DEMO'} | UID ${a.uid} | ${a.quote} | ${a.scopeId}`]),'Brak konta OKX');
       const current=state.accounts.find(a=>a.scopeId===select.value);
       stage.textContent=enrollmentHelp(state.enrollmentStage);
-      status.textContent=(current?JSON.stringify(current,null,2):'Brak konta. Dodaj je w lokalnym formularzu Windows. Żadne prywatne połączenie nie jest uruchomione.')+'\nMagazyn: '+(state.unboundStoreState||'status nieznany')+'\nSaldo DEMO to obserwacja, nie P&L ani baza kapitału. Test wymaga klucza read_only bez Trade.';
+      status.textContent=(current?JSON.stringify(current,null,2):'Brak konta. Dodaj je w lokalnym formularzu Windows. Żadne prywatne połączenie nie jest uruchomione.')+'\nMagazyn: '+(state.unboundStoreState||'status nieznany')+'\nDla bota DEMO zapisz od razu docelowy klucz read_only,trade. Test salda dopuszcza read_only albo read_only,trade, ale wykonuje wyłącznie odczyt. To nie P&L, baza kapitału ani zgoda na handel. Jeden niezmienny zakres na środowisko; UI nie oferuje rotacji. Nie usuwaj ani nie nadpisuj istniejących danych.';
     }catch(e){healthy=false;status.textContent='Status niedostępny — '+(e.name==='AbortError'?'przekroczono 5 s':e.message)+'. Nie jest to potwierdzenie stanu rachunku.';}
     finally{clearTimeout(timer);polling=false;render();}
   }
@@ -74,7 +74,7 @@
       const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-Apex-Local':'1'},body:JSON.stringify(payload),signal:abort.signal});
       let body;try{body=await response.json();}catch{body=null;}
       const code=body?.code||body?.reasonCode||'HTTP '+response.status;
-      result.textContent=enrollmentHelp(code)+(code.includes('UnsafeAccountConfig')?' Test używa istniejącego czytnika read_only; wymaga klucza bez Trade i zgodnego cash SPOT/IP. Nie zmienia zasad kluczy handlowych.':'')+' — brak automatycznego START ani ponownej wysyłki.';
+      result.textContent=enrollmentHelp(code)+(code.includes('UnsafeAccountConfig')?' Test wymaga bezpiecznego cash SPOT/IP bez pożyczek oraz dokładnie read_only albo read_only,trade. Withdraw i inne uprawnienia są odrzucane. Trade samo w sobie nie daje zgody na handel.':'')+' — brak automatycznego START ani ponownej wysyłki.';
     }catch(e){result.textContent='Niepewny wynik polecenia '+action+'. Sprawdź stan; nie ponawiaj w ciemno. '+(e.name==='AbortError'?'Upłynął czas oczekiwania.':e.message);}
     finally{clearTimeout(timer);pending.delete(action);render();void refresh();}
   }

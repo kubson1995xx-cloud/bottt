@@ -3,6 +3,8 @@
 param([Parameter(Mandatory=$true)][string]$Download)
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+& git -C $repo diff --quiet 3ceb2b135952e71eb540cfadea0ff42f246f13c3 -- src/Apex.Desktop/Okx/WindowsOkxApprovalProvider.cs src/Apex.Desktop/Okx/OkxActivationPolicy.cs tests/Apex.Tests/OkxNativeWaitTests.cs
+if ($LASTEXITCODE -ne 0) {throw 'Protected approval/native wait changed; retained timeout proof cannot be reused'}
 . (Join-Path $PSScriptRoot 'TestEvidence.ps1')
 $e=Join-Path $env:RUNNER_TEMP 'ui-delivery-evidence';New-Item -ItemType Directory -Path $e|Out-Null
 $zip=Join-Path $Download 'APEX-NAVAL-COMMAND-Windows-x64.zip'
@@ -25,14 +27,16 @@ $failed=$false
 Push-Location $sdk
 try {
  Copy-Item (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') (Join-Path $e 'unit-runtime') -Recurse
- & $dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --no-restore --filter 'FullyQualifiedName~OkxEnrollmentBoundaryTests|FullyQualifiedName~OkxDemoBalanceTests|FullyQualifiedName~OkxNativeWaitTests|FullyQualifiedName~OkxNativeCredentialTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxControlTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests' --logger 'trx;LogFileName=enrollment-read.trx' --results-directory $e
+ & $dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --no-restore --filter 'FullyQualifiedName~OkxEnrollmentBoundaryTests|FullyQualifiedName~OkxDemoBalanceTests|FullyQualifiedName~OkxNativeCredentialTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxControlTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests' --logger 'trx;LogFileName=enrollment-read.trx' --results-directory $e
  if ($LASTEXITCODE -ne 0) {$failed=$true}
- foreach ($gate in @('EnrollmentSource','UiRepair','UiInventory','UiUpgrade','UiNavigation','EnrollmentOriginal')) {
+ # Protected approval runtime is unchanged: reuse source-bound timeout evidence,
+ # never repeat the two-minute modal merely for a GET-only service change.
+ foreach ($gate in @('EnrollmentSource','UiRepair','UiInventory','UiUpgrade','UiNavigation')) {
   & $dotnet test (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release --no-build --no-restore --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$gate+'.trx') --results-directory $e
   if ($LASTEXITCODE -ne 0) {$failed=$true}
  }
 }finally {Pop-Location}
 & (Join-Path $PSScriptRoot 'Smoke-Windows.ps1') -Pakiet ($output+'-extracted') -Evidence ($output+'-smoke-evidence')
 & (Join-Path ($output+'-extracted') 'Sprawdz-Pakiet.ps1') -Pakiet ($output+'-extracted')
-@{status=$(if($failed){'FAIL'}else{'PASS'});sourceCommit=(& git -C $repo rev-parse HEAD);zipSha256=(Get-FileHash ($output+'.zip') -Algorithm SHA256).Hash.ToLowerInvariant();exeSha256=(Get-FileHash (Join-Path ($output+'-extracted') 'APEX-Desktop/ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant();uiRepair=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'UiRepair.trx')}else{$null});uiInventory=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'UiInventory.trx')}else{$null});enrollmentRead=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'enrollment-read.trx')}else{$null});nativeSecretStore=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'EnrollmentSource.trx')}else{$null});protectedBoundary=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'EnrollmentOriginal.trx')}else{$null});securePositiveVerified=$false;privateBrokerTested=$false;engineSuites='REUSED: identical source inputs, original TRX retained, not rerun'}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $e 'summary.json') -Encoding UTF8
+@{status=$(if($failed){'FAIL'}else{'PASS'});sourceCommit=(& git -C $repo rev-parse HEAD);zipSha256=(Get-FileHash ($output+'.zip') -Algorithm SHA256).Hash.ToLowerInvariant();exeSha256=(Get-FileHash (Join-Path ($output+'-extracted') 'APEX-Desktop/ApexDesktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant();uiRepair=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'UiRepair.trx')}else{$null});uiInventory=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'UiInventory.trx')}else{$null});enrollmentRead=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'enrollment-read.trx')}else{$null});nativeSecretStore=$(if(-not $failed){Read-ApexTestCounts (Join-Path $e 'EnrollmentSource.trx')}else{$null});protectedBoundary='REUSED: run 41354194261 EnrollmentOriginal.trx; WindowsOkxApprovalProvider.cs unchanged';securePositiveVerified=$false;privateBrokerTested=$false;engineSuites='REUSED: identical source inputs, original TRX retained, not rerun'}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $e 'summary.json') -Encoding UTF8
 if ($failed) {throw 'Actual extracted pointer/native UI gate failed; retain candidate and exact evidence'}
