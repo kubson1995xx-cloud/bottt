@@ -14,6 +14,10 @@
 
 ## Checkpoints
 
+- Native RED `41366229525` completed failure: 9 executed, 2 controls passed / 7 reached final-fence regressions failed. Cancellation case reached actual old Save and restart List found the enrolled account despite cancel; generation/clock/secret-binding cases also saved. Complete runtime/TRX/input map downloaded to `/home/ubuntu/apex-deliveries/okx-simple-connect-cancel-fix/evidence/red-41366229525`. This is helper-replayed actual-store evidence, NOT full protected-positive enrollment. The initial synthetic keys/clocks were random and were not retained verbatim; before runtime edits, replacing only these fixture operands with public deterministic values and fixed clocks, then retaining a second RED for exact RED/GREEN operand comparison. No threshold or production code changed.
+
+- Commit `3c1e815199c105544522fe214946e32e09c45110` pushed and remote SHA read back. Native deterministic RED run `41366229525` dispatched/read back in progress. No runtime edits before its reached failure. Original input closure is this commit; pre-invocation binaries are retained by the lane. Next gate: download and inspect actual TRX/closure before implementation.
+
 - RED fixture preparation: initial local `--no-restore` compile used stale transitive project assets and failed missing adapter references (not behavioral RED). Normal project build restored the current project graph and passed 0 warnings/errors. No runtime changes. Reflection compatibility adapter explicitly replays the old check/progress/actual production Save/late-throw order; synthetic permission is not OS approval. Native RED will assert reached final boundary and persisted-state absence against the actual original store.
 
 - Entry: inspected vulnerable source: cancellation check → progress callback → uncancelable synchronous Save/CreateNew/flush/readback → cancellation throw. Next missing gate: executable deterministic RED and complete request/revocation call-path inspection.

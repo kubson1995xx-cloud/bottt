@@ -17,7 +17,7 @@ public sealed class WindowsOkxCommitFenceTests
     private sealed class Attempt : IDisposable
     {
         internal readonly string Root=WindowsTestHost.NewRoot();
-        internal readonly byte[][] Values=Enumerable.Range(0,3).Select(_=>Encoding.ASCII.GetBytes(Convert.ToHexString(RandomNumberGenerator.GetBytes(24)))).ToArray();
+        internal readonly byte[][] Values=Enumerable.Range(0,3).Select(i=>Encoding.ASCII.GetBytes("owned-public-synthetic-not-broker-field-"+i)).ToArray();
         internal readonly CancellationTokenSource Stop=new();
         internal readonly object Sync=new();
         internal readonly WindowsOkxReadStore Store;
@@ -25,8 +25,8 @@ public sealed class WindowsOkxCommitFenceTests
         internal readonly ConfigStore Config;
         internal readonly byte[] OriginalConfig;
         internal bool Current=true;
-        internal DateTimeOffset Utc=DateTimeOffset.UtcNow;
-        internal long Ticks=Environment.TickCount64;
+        internal DateTimeOffset Utc=new(2026,11,1,0,0,0,TimeSpan.Zero);
+        internal long Ticks=1000;
         internal object? Fence;
         internal OkxReadAccount? Listed;
         private static readonly BindingFlags Flags=BindingFlags.Instance|BindingFlags.Static|BindingFlags.NonPublic|BindingFlags.Public;
