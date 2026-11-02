@@ -1,5 +1,5 @@
 #requires -Version 5.1
-param([ValidateSet('red','green','delivery','wait')][string]$Phase='green')
+param([ValidateSet('red','green','delivery','wait','commit-red','commit-green','commit-delivery')][string]$Phase='green')
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $e=Join-Path $env:RUNNER_TEMP 'okx-simple-connect';New-Item -ItemType Directory -Path $e|Out-Null
@@ -18,7 +18,7 @@ foreach($base in @('src','tests','tools','frontend/naval')) {
 $inputs|ConvertTo-Json -Depth 4|Set-Content (Join-Path $e 'inputs.json') -Encoding UTF8
 $dotnet=(Get-Command dotnet).Source
 $env:APEX_WINDOWS_EVIDENCE=$e
-if($Phase -eq 'delivery') {
+if($Phase -in @('delivery','commit-delivery')) {
  $prior=Join-Path $env:RUNNER_TEMP 'simple-connect-reuse'
  & python (Join-Path $repo 'tests/package/safe_extract.py') (Join-Path $env:RUNNER_TEMP 'simple-connect-prior/APEX-NAVAL-COMMAND-Windows-x64.zip') $prior (Join-Path $e 'prior-readback.json') '87deacbf67fd9de196511951ed95c50ff3c1f2595e8c769037824252d8732005'
  if($LASTEXITCODE -ne 0){throw 'Pinned prior CRC/hash/layout refused'}
@@ -52,6 +52,12 @@ try {
  }
  & $dotnet build (Join-Path $repo 'tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj') -c Release *> (Join-Path $e 'build.log');if($LASTEXITCODE -ne 0){throw 'Native build failed'}
  Copy-Item (Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0') (Join-Path $e 'native-runtime') -Recurse
+ @(Get-ChildItem (Join-Path $e 'native-runtime') -Recurse -File|ForEach-Object{@{path=$_.FullName.Substring($e.Length+1);sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}})|ConvertTo-Json -Depth 4|Set-Content (Join-Path $e 'native-binaries-before.json') -Encoding UTF8
+ if($Phase -in @('commit-red','commit-green')) {
+  & $dotnet test (Join-Path $e 'native-runtime/Apex.Windows.Tests.dll') --filter 'Gate=CommitFence' --logger 'trx;LogFileName=commit-fence.trx' --results-directory $e
+  if($LASTEXITCODE -ne 0){throw 'Commit fence behavioral gate failed; exact original runtime and operands retained'}
+  return
+ }
  & $dotnet test (Join-Path $e 'native-runtime/Apex.Windows.Tests.dll') --filter 'Gate=SimpleConnectSource' --logger 'trx;LogFileName=native.trx' --results-directory $e
  if($LASTEXITCODE -ne 0){throw 'Native behavioral gate failed; exact inputs and runtime retained'}
  if($Phase -ne 'red') {
@@ -61,7 +67,7 @@ try {
   & $dotnet test (Join-Path $repo 'tests/Apex.Adapters.Okx.Tests/Apex.Adapters.Okx.Tests.csproj') -c Release --no-build --no-restore --filter 'FullyQualifiedName~OkxEnrollmentDiscoveryTests|FullyQualifiedName~OkxNativeQuotaWaitTests|FullyQualifiedName~OkxSerializedDispatchTests' --logger 'trx;LogFileName=adapter-native.trx' --results-directory $e
   if($LASTEXITCODE -ne 0){throw 'Native signed discovery/quota gate failed'}
  }
- if($Phase -eq 'delivery') {
+ if($Phase -in @('delivery','commit-delivery')) {
   $failed=$false
   Copy-Item (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') (Join-Path $e 'host-runtime') -Recurse
   & $dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --no-restore --filter 'FullyQualifiedName~OkxEnrollmentBoundaryTests|FullyQualifiedName~OkxDemoBalanceTests|FullyQualifiedName~OkxNativeCredentialTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxControlTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests|FullyQualifiedName~OkxNativeWaitTests' --logger 'trx;LogFileName=host-affected.trx' --results-directory $e
