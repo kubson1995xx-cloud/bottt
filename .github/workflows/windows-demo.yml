@@ -79,6 +79,7 @@ jobs:
         if: always()
         with:
           name: OKX-Simple-Connect-${{ github.run_id }}
+          include-hidden-files: true
           path: |
             ${{ runner.temp }}/okx-simple-connect/**
             ${{ runner.temp }}/APEX-NAVAL-COMMAND-Windows-x64-build-evidence/**

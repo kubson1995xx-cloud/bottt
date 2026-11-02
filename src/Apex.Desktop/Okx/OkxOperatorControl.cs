@@ -90,11 +90,11 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
             if(action=="configure")
             {
                 if(entries.Values.Any(e=>e.Account.IsConnected))return last="DISCONNECT_BEFORE_CONFIGURATION";
-                var added=await WindowsOkxSimpleConnect.CreateAsync(config,linked.Token,s=>enrollmentStage=s).ConfigureAwait(false);
+                var added=await WindowsOkxSimpleConnect.CreateAsync(config,linked.Token,sync,()=>generation==epoch&&!disposed,a=>readAccounts.TryAdd(a.ScopeId,a),s=>enrollmentStage=s).ConfigureAwait(false);
                 enrollmentStage=added.Code;
-                if(added.Account==null||added.Observation==null)return last=added.Code;
+                if(added.Account==null)return last=added.Code;
                 readAccounts.TryAdd(added.Account.ScopeId,added.Account);
-                lock(sync){if(generation!=epoch||linked.IsCancellationRequested)return last="CONNECT_CANCELLED_SAVED_DISCONNECTED";readObservations[added.Account.ScopeId]=added.Observation;}
+                lock(sync){if(generation!=epoch||linked.IsCancellationRequested||added.Observation==null)return last=enrollmentStage="CONNECT_CANCELLED_SAVED_DISCONNECTED";readObservations[added.Account.ScopeId]=added.Observation;}
                 return last=enrollmentStage=added.Code;
             }
             if(readAccounts.TryGetValue(scope,out var readAccount))

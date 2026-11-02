@@ -70,9 +70,11 @@ try {
  if($Phase -in @('delivery','commit-delivery')) {
   $failed=$false
   Copy-Item (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') (Join-Path $e 'host-runtime') -Recurse
-  & $dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --no-restore --filter 'FullyQualifiedName~OkxEnrollmentBoundaryTests|FullyQualifiedName~OkxDemoBalanceTests|FullyQualifiedName~OkxNativeCredentialTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxControlTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests|FullyQualifiedName~OkxNativeWaitTests' --logger 'trx;LogFileName=host-affected.trx' --results-directory $e
+  $hostFilter='FullyQualifiedName~OkxEnrollmentBoundaryTests|FullyQualifiedName~OkxDemoBalanceTests|FullyQualifiedName~OkxNativeCredentialTests|FullyQualifiedName~OkxCredentialTests|FullyQualifiedName~OkxControlTests|FullyQualifiedName~OkxCompositionTests|FullyQualifiedName~OkxActivationTests'
+  if($Phase -eq 'delivery'){$hostFilter+='|FullyQualifiedName~OkxNativeWaitTests'}
+  & $dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --no-restore --filter $hostFilter --logger 'trx;LogFileName=host-affected.trx' --results-directory $e
   if($LASTEXITCODE -ne 0){$failed=$true}
-  foreach($gate in @('EnrollmentSource','UiRepair','UiInventory','UiUpgrade','UiNavigation')) {
+  foreach($gate in @('CommitFence','EnrollmentSource','UiRepair','UiInventory','UiUpgrade','UiNavigation')) {
    & $dotnet test (Join-Path $e 'native-runtime/Apex.Windows.Tests.dll') --filter ('Gate='+$gate) --logger ('trx;LogFileName='+$gate+'.trx') --results-directory $e
    if($LASTEXITCODE -ne 0){$failed=$true}
   }

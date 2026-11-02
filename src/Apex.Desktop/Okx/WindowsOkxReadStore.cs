@@ -1,12 +1,14 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Apex.Adapters.Okx.Execution;
 using Apex.Desktop.Services;
+using Microsoft.Win32.SafeHandles;
 namespace Apex.Desktop.Okx;
 
 internal sealed record OkxReadAccount(string ScopeId,string Uid,string MainUid,string Environment,string Provenance,string Fingerprint);
@@ -21,8 +23,11 @@ internal sealed class OkxReadSecret(OkxReadAccount account,byte[][] values):IDis
 internal sealed class WindowsOkxReadStore(string root)
 {
     private string DirectoryPath=>Path.Combine(root,"okx-read");
+    private string PendingPath=>Path.Combine(root,"okx-read-pending");
+    private void CheckPending(){if(System.IO.Directory.Exists(PendingPath)&&System.IO.Directory.EnumerateFileSystemEntries(PendingPath).Any())throw new InvalidDataException("READ_STORE_PENDING_PRESERVED");}
     internal OkxReadAccount[] List()
     {
+        CheckPending();
         if(!System.IO.Directory.Exists(DirectoryPath))return Array.Empty<OkxReadAccount>();
         using var admitted=WindowsPrivateData.Open(root,AppContext.BaseDirectory);
         var files=System.IO.Directory.GetFiles(DirectoryPath);if(files.Length>32)throw new InvalidDataException("READ_STORE_LIMIT");
@@ -43,6 +48,10 @@ internal sealed class WindowsOkxReadStore(string root)
         using var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);
         if(file.Length is <=0 or >20000)throw new InvalidDataException("READ_STORE_SIZE");
         var encrypted=new byte[(int)file.Length];file.ReadExactly(encrypted);
+        return Decode(encrypted,path);
+    }
+    private OkxReadSecret Decode(byte[] encrypted,string path)
+    {
         byte[] plain=WindowsOkxCredentialStore.Crypt(encrypted,Purpose(path),false);byte[][] values=new byte[3][];
         try
         {
@@ -57,13 +66,18 @@ internal sealed class WindowsOkxReadStore(string root)
         catch{foreach(var b in values)if(b!=null)CryptographicOperations.ZeroMemory(b);throw;}
         finally{CryptographicOperations.ZeroMemory(plain);}
     }
-    internal OkxReadAccount Save(OkxEnrollmentObservation observed,byte[][] values)
+    internal OkxReadAccount Save(OkxEnrollmentObservation observed,byte[][] values)=>Save(observed,values,null,null);
+    internal OkxReadAccount Save(OkxEnrollmentObservation observed,byte[][] values,OkxReadCommit? commit,Action<string>? checkpoint)
     {
+        commit?.Check(observed,values);
         if(observed.Environment!="Demo"||observed.Provenance!="DemoTradingApi"||observed.Fingerprint!=Convert.ToHexString(SHA256.HashData(values[0])).ToLowerInvariant())throw new InvalidDataException("READ_STORE_BINDING");
         using var admitted=WindowsPrivateData.Open(root,AppContext.BaseDirectory);
         if(List().Any(a=>a.Uid==observed.Uid&&a.Environment==observed.Environment))throw new InvalidDataException("ACCOUNT_ALREADY_SAVED_RECONNECT");
         var account=new OkxReadAccount("read-"+Guid.NewGuid().ToString("N"),observed.Uid,observed.MainUid,observed.Environment,observed.Provenance,observed.Fingerprint);Validate(account);
         if(!System.IO.Directory.Exists(DirectoryPath))WindowsPathSecurity.CreatePrivateDirectory(DirectoryPath);
+        if(!System.IO.Directory.Exists(PendingPath))WindowsPathSecurity.CreatePrivateDirectory(PendingPath);
+        // Hold new directories too; do not swap/recreate an existing admitted path.
+        admitted.ValidateTree();
         string path=Path.Combine(DirectoryPath,account.ScopeId+".dpapi");byte[] metadata=JsonSerializer.SerializeToUtf8Bytes(account);
         // Exact bounded non-growing encoding, no plaintext JSON secret/string copies.
         if(values.Length!=3||values.Any(b=>b.Length is <=0 or >4096))throw new InvalidDataException("READ_STORE_FIELD");
@@ -73,12 +87,54 @@ internal sealed class WindowsOkxReadStore(string root)
             using(var stream=new MemoryStream(plain,true))using(var writer=new BinaryWriter(stream,Encoding.UTF8,true))
             {writer.Write(metadata.Length);writer.Write(metadata);foreach(var b in values){writer.Write(b.Length);writer.Write(b);}}
             byte[] encrypted=WindowsOkxCredentialStore.Crypt(plain,Purpose(path),true);
-            using(var file=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None,4096,FileOptions.WriteThrough)){file.Write(encrypted);file.Flush(true);}
-            using var readback=Open(account.ScopeId);
+            using var staged=new OwnedCiphertext(Path.Combine(PendingPath,account.ScopeId+".dpapi.pending"),encrypted);
+            using var readback=Decode(staged.Read(),path);
             if(readback.Account!=account||!values.Select((v,i)=>v.AsSpan().SequenceEqual(readback.Values[i])).All(b=>b))throw new InvalidDataException("READ_STORE_READBACK_PRESERVED");
-            return account;
+            checkpoint?.Invoke("CURRENT_USER_DPAPI_PREPARED");
+            if(commit!=null)return commit.Publish(observed,values,account,()=>staged.Publish(path));
+            staged.Publish(path);return account; // Internal store helper, never enrollment.
         }
         finally{CryptographicOperations.ZeroMemory(plain);}
+    }
+    // Handle-owned ciphertext: no pathname-based cleanup, no write/delete sharing,
+    // CREATE_NEW and ReplaceIfExists=false. Unknown prior files are never removed.
+    private sealed class OwnedCiphertext : IDisposable
+    {
+        private readonly FileStream file;
+        private bool published;
+        internal OwnedCiphertext(string path,byte[] encrypted)
+        {
+            var handle=CreateFileW(path,0xC0010000,0,IntPtr.Zero,1,0x80200000,IntPtr.Zero);
+            if(handle.IsInvalid){handle.Dispose();throw new InvalidDataException("READ_STORE_STAGE_CREATE_REFUSED");}
+            file=new FileStream(handle,FileAccess.ReadWrite,4096,false);
+            try
+            {
+                if(!GetFileInformationByHandle(handle,out var info)||info.Links!=1||(info.Attributes&(uint)(FileAttributes.ReparsePoint|FileAttributes.Directory))!=0)throw new InvalidDataException("READ_STORE_STAGE_REFUSED");
+                using var view=new WindowsPathSecurity.NativeObject(new SafeFileHandle(handle.DangerousGetHandle(),false),path,info);WindowsPathSecurity.Validate(view,true);
+                file.Write(encrypted);file.Flush(true);
+            }
+            catch{Dispose();throw;}
+        }
+        internal byte[] Read(){file.Position=0;if(file.Length is <=0 or >20000)throw new InvalidDataException("READ_STORE_SIZE");var bytes=new byte[(int)file.Length];file.ReadExactly(bytes);return bytes;}
+        internal void Publish(string path)
+        {
+            // FILE_RENAME_INFO: BOOLEAN, aligned HANDLE, DWORD, UTF16 filename.
+            int rootOffset=IntPtr.Size==8?8:4,lengthOffset=rootOffset+IntPtr.Size,nameOffset=lengthOffset+4;
+            byte[] name=Encoding.Unicode.GetBytes(path);byte[] info=new byte[checked(nameOffset+name.Length)];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(info.AsSpan(lengthOffset),name.Length);name.CopyTo(info,nameOffset);
+            if(!SetFileInformationByHandle(file.SafeFileHandle,3,info,(uint)info.Length))throw new InvalidDataException("READ_STORE_COMMIT_REFUSED_PRESERVED");
+            published=true;
+        }
+        public void Dispose()
+        {
+            bool cleaned=true;
+            try{if(!published)cleaned=SetFileInformationByHandle(file.SafeFileHandle,4,new byte[]{1},1);}
+            finally{file.Dispose();}
+            if(!cleaned)throw new InvalidDataException("READ_STORE_OWNED_STAGE_CLEANUP_REFUSED_PRESERVED");
+        }
+        [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr attributes,uint creation,uint flags,IntPtr template);
+        [DllImport("kernel32.dll",SetLastError=true)]private static extern bool SetFileInformationByHandle(SafeFileHandle file,int infoClass,byte[] info,uint size);
+        [DllImport("kernel32.dll",SetLastError=true)]private static extern bool GetFileInformationByHandle(SafeFileHandle file,out WindowsPathSecurity.FileInformation info);
     }
     private static void Validate(OkxReadAccount a)
     {
