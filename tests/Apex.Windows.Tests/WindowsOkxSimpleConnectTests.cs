@@ -61,6 +61,27 @@ public sealed class WindowsOkxSimpleConnectTests
         }
         finally{stop.Cancel();await pending;}
     }
+    [Fact,Trait("Gate","SimpleConnectSource")]
+    public async Task Sanitized_discovery_refusal_reaches_native_error_and_remains_retryable_without_saving()
+    {
+        const string code="DISCOVERY_HTTP_REFUSED [GET /api/v5/account/instruments?instType=SPOT; HTTP 401; OKX 50101]";
+        using var stop=new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        byte[][]? captured=null;
+        var pending=WindowsOkxSimpleConnect.FormAsync(stop.Token,(values,ct)=>{captured=values;return Task.FromResult<string?>(code);});
+        try
+        {
+            var w=await WindowsNativeUi.Window(Environment.ProcessId,"APEX — lokalny klucz OKX");
+            for(int i=100;i<103;i++)WindowsNativeUi.Text(w,i,"owned-synthetic-not-broker");
+            WindowsNativeUi.Click(w,1);
+            await WindowsTestHost.Until(()=>Task.FromResult(WindowsNativeUi.Error(w)==code),"Sanitized endpoint/status/code did not reach native refusal label");
+            Assert.True(WindowsNativeUi.Visible(w));Assert.True(IsWindowEnabled(GetDlgItem(w,1)));
+            Assert.NotNull(captured);Assert.True(captured.All(v=>v.All(b=>b==0)),"Refused form retained input bytes; values withheld");
+            WindowsNativeUi.ScreenshotMetadata(w,"discovery-http-diagnostic-empty-form");
+            WindowsNativeUi.Cancel(w);Assert.Null((await pending).Values);
+            WindowsTestHost.Evidence("discovery-http-diagnostic-native",new{code,formRemainedOpen=true,retryEnabled=true,inputCleared=true,networkCalled=false,protectedPositive=false});
+        }
+        finally{stop.Cancel();await pending;}
+    }
     [DllImport("user32.dll")]private static extern IntPtr GetDlgItem(IntPtr w,int id);
     [DllImport("user32.dll")]private static extern bool IsWindowEnabled(IntPtr w);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)]private static extern int GetWindowTextW(IntPtr w,StringBuilder text,int count);

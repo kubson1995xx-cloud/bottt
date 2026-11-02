@@ -9,7 +9,13 @@ namespace Apex.Adapters.Okx.Execution;
 public sealed record OkxEnrollmentObservation(string Uid,string MainUid,string Environment,string Provenance,
     string Fingerprint,DateTimeOffset ObservedUtc,ImmutableArray<OkxExecutionBalanceDetailDto> Balances,
     ImmutableArray<OkxExecutionInstrumentDto> Instruments);
-public sealed record OkxEnrollmentDiscovery(OkxEnrollmentObservation? Observation,string Code);
+// Only closed request targets, HTTP integers and numeric OKX codes reach UI/status.
+// No venue messages, response text, headers or account identifiers are diagnostics.
+public sealed record OkxEnrollmentDiagnostic(string Endpoint,int HttpStatus,string? OkxCode)
+{
+    internal string Suffix=>$" [GET {Endpoint}; HTTP {HttpStatus}; OKX {OkxCode??"UNKNOWN"}]";
+}
+public sealed record OkxEnrollmentDiscovery(OkxEnrollmentObservation? Observation,string Code,OkxEnrollmentDiagnostic? Diagnostic=null);
 public static class OkxEnrollmentDiscoveryClient
 {
     public static Task<OkxEnrollmentDiscovery> DiscoverAsync(string environment,string provenance,ReadOnlyMemory<byte> key,
@@ -63,15 +69,24 @@ public static class OkxEnrollmentDiscoveryClient
                 }
                 Check(); // final fence after signing, immediately before invocation
                 using var response=await http.SendAsync(request,ct).ConfigureAwait(false);Check();
-                if(!response.IsSuccessStatusCode)throw new DiscoveryFailure("DISCOVERY_HTTP_REFUSED");
                 const int cap=1024*1024;byte[] bytes=new byte[cap+1];
+                bool refused=!response.IsSuccessStatusCode;
+                DiscoveryFailure Refusal(string? code=null)=>new("DISCOVERY_HTTP_REFUSED",new(exact,(int)response.StatusCode,code));
                 try
                 {
-                    if(response.Content.Headers.ContentLength>cap)throw new DiscoveryFailure("DISCOVERY_BODY_LIMIT");
+                    if(response.Content.Headers.ContentLength>cap){if(refused)throw Refusal();throw new DiscoveryFailure("DISCOVERY_BODY_LIMIT");}
                     await using var stream=await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);int used=0,n;
-                    while((n=await stream.ReadAsync(bytes.AsMemory(used,bytes.Length-used),ct).ConfigureAwait(false))>0){used+=n;if(used>cap)throw new DiscoveryFailure("DISCOVERY_BODY_LIMIT");}
-                    Check();return OkxObservationJson.Parse<T>(bytes.AsMemory(0,used),endpoint);
+                    while((n=await stream.ReadAsync(bytes.AsMemory(used,bytes.Length-used),ct).ConfigureAwait(false))>0)
+                    {
+                        used+=n;if(used>cap){if(refused)throw Refusal();throw new DiscoveryFailure("DISCOVERY_BODY_LIMIT");}
+                    }
+                    Check();
+                    if(refused)throw Refusal(NumericErrorCode(bytes.AsMemory(0,used)));
+                    try{return OkxObservationJson.Parse<T>(bytes.AsMemory(0,used),endpoint);}
+                    catch(OkxObservationJson.VenueException e){throw new DiscoveryFailure("DISCOVERY_API_"+e.Code,new(exact,(int)response.StatusCode,e.Code));}
                 }
+                catch(IOException) when(refused){Check();throw Refusal();}
+                catch(HttpRequestException) when(refused){Check();throw Refusal();}
                 finally{CryptographicOperations.ZeroMemory(bytes);}
             }
             var timeStart=DateTimeOffset.UtcNow;var time=await Get<OkxTimeDto>("/api/v5/public/time",authenticated:false).ConfigureAwait(false);var receive=DateTimeOffset.UtcNow;
@@ -85,7 +100,7 @@ public static class OkxEnrollmentDiscoveryClient
             if(instruments.Any(i=>i.InstrumentType!="SPOT"||!Grammar.Instrument(i.Instrument))||instruments.Select(i=>i.Instrument).Distinct(StringComparer.Ordinal).Count()!=instruments.Count)return new(null,"DISCOVERY_INSTRUMENT_INVALID");
             Check();return new(new(a.Uid,a.MainUid,"Demo",provenance,Convert.ToHexString(SHA256.HashData(k)).ToLowerInvariant(),DateTimeOffset.UtcNow,balances,instruments.ToImmutableArray()),"CONNECTED_READ_ONLY_STOP");
         }
-        catch(DiscoveryFailure e){return new(null,e.Code);}
+        catch(DiscoveryFailure e){return new(null,e.Code+(e.Diagnostic?.Suffix??""),e.Diagnostic);}
         catch(OperationCanceledException){return new(null,caller.IsCancellationRequested?"DISCOVERY_CANCELLED":"DISCOVERY_TIMEOUT_OR_UNSAFE_DIAGNOSTICS");}
         catch(OkxObservationJson.VenueException e){return new(null,"DISCOVERY_API_"+e.Code);}
         catch(Exception e) when(e is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException or DecoderFallbackException or OkxObservationJson.CardinalityException){return new(null,"DISCOVERY_INVALID_PAYLOAD");}
@@ -96,6 +111,26 @@ public static class OkxEnrollmentDiscoveryClient
             if(held){await Task.Delay(TimeSpan.FromMilliseconds(610)).ConfigureAwait(false);BootstrapInterlock.Release();}
         }
     }
+    // Error envelopes may be gateway HTML or have no data array. Inspect only
+    // one exact top-level code; malformed/ambiguous/non-numeric codes stay unknown.
+    private static string? NumericErrorCode(ReadOnlyMemory<byte> bytes)
+    {
+        try
+        {
+            using var doc=JsonDocument.Parse(bytes);
+            if(doc.RootElement.ValueKind!=JsonValueKind.Object)return null;
+            string? code=null;int count=0;
+            foreach(var property in doc.RootElement.EnumerateObject())
+            {
+                if(!property.Name.Equals("code",StringComparison.OrdinalIgnoreCase))continue;
+                if(++count!=1||property.Name!="code"||property.Value.ValueKind!=JsonValueKind.String)return null;
+                code=property.Value.GetString();
+            }
+            return count==1&&(code=="0"||Grammar.Match(code,"[1-9][0-9]{4,7}"))?code:null;
+        }
+        catch(Exception e) when(e is JsonException or InvalidOperationException){return null;}
+    }
     private static bool Header(ReadOnlySpan<byte> b){if(b.Length is <=0 or >4096)return false;foreach(byte v in b)if(v is <33 or >126)return false;return true;}
-    private sealed class DiscoveryFailure(string code):Exception{internal string Code=>code;}
+    private sealed class DiscoveryFailure(string code,OkxEnrollmentDiagnostic? diagnostic=null):Exception
+    {internal string Code=>code;internal OkxEnrollmentDiagnostic? Diagnostic=>diagnostic;}
 }

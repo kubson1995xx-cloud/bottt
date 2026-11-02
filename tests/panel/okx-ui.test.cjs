@@ -13,6 +13,13 @@ function setup(handler,naval=true){
  return {document,calls,timers,poll:()=>interval?.(),click:action=>document.querySelector('[data-action='+action+']').dispatchEvent(new window.Event('click'))};
 }
 const tick=()=>new Promise(setImmediate);
+test('sanitized discovery endpoint/status/code survives command and status rendering as text',async()=>{
+ const code='DISCOVERY_HTTP_REFUSED [GET /api/v5/account/config; HTTP 401; OKX 50101]';
+ const p=setup((url,options)=>({ok:true,status:200,json:async()=>options?.method==='POST'?{code}:{accounts:[],nativeAvailable:true,enrollmentStage:code}}));
+ await tick();assert.match(p.document.querySelector('#okx-enrollment-stage').textContent,/GET \/api\/v5\/account\/config; HTTP 401; OKX 50101/);
+ p.click('configure');await tick();assert.match(p.document.querySelector('#okx-result').textContent,/DISCOVERY_HTTP_REFUSED \[GET \/api\/v5\/account\/config; HTTP 401; OKX 50101\]/);
+ assert.equal(p.document.querySelectorAll('input').length,0);assert.equal(p.calls.filter(c=>c.options?.method==='POST').length,1);
+});
 test('explicit read-only DEMO test and saved-state diagnosis are separate from connect and START',async()=>{const p=setup(()=>ok());await tick();assert.ok(p.document.querySelector('[data-action=test-demo]'));assert.ok(p.document.querySelector('[data-action=diagnose]'));assert.ok(p.document.querySelector('#okx-enrollment-stage'));});
 test('single DEMO form guidance disclaims trading authority and keeps currencies separate',async()=>{const p=setup(()=>ok());await tick();const text=p.document.querySelector('#okx-status').textContent;assert.match(text,/read_only albo read_only,trade/);assert.match(text,/wyłącznie odczyt/);assert.match(text,/nie P&L, baza kapitału ani zgoda na handel/);assert.match(text,/UI nie oferuje rotacji/);assert.match(text,/Salda walut są oddzielne/);assert.doesNotMatch(text,/read_only bez Trade/);assert.equal(p.document.querySelector('[data-action=configure]').textContent,'Połącz konto OKX');assert.equal(p.document.querySelectorAll('input').length,0);});
 const ok=(accounts=[])=>({ok:true,status:200,json:async()=>({accounts,productionProfileApproved:false,nativeAvailable:true})});

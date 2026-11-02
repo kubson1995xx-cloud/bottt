@@ -42,7 +42,41 @@ public sealed class OkxEnrollmentDiscoveryTests
         var control=await OkxEnrollmentDiscoveryClient.RunAsync("Demo","DemoTradingApi",Encoding.ASCII.GetBytes("owned-key"),Encoding.ASCII.GetBytes("owned-secret"),Encoding.ASCII.GetBytes("owned-pass"),null,null,default,bootstrap);
         Assert.Equal("CONNECTED_READ_ONLY_STOP",control.Code);Assert.Equal(4,bootstrap.Paths.Count);
     }
-    private sealed class Peer(string mode):HttpMessageHandler
+    // Catch the old early non-2xx throw: preserve only the literal request target,
+    // HTTP status and validated numeric code, never venue text/private payload.
+    [Theory]
+    [InlineData(1,403,"{\"code\":\"50013\",\"msg\":\"private-response-sentinel\",\"data\":[]}","50013")]
+    [InlineData(2,401,"{\"code\":\"50101\",\"msg\":\"private-response-sentinel\",\"data\":[]}","50101")]
+    [InlineData(3,429,"{\"code\":\"50011\",\"msg\":\"private-response-sentinel\",\"data\":[]}","50011")]
+    [InlineData(4,400,"{\"code\":\"51000\",\"msg\":\"private-response-sentinel\",\"data\":[]}","51000")]
+    [InlineData(2,200,"{\"code\":\"50101\",\"msg\":\"private-response-sentinel\",\"data\":[]}","50101")]
+    [InlineData(2,403,"<html>private-response-sentinel</html>","UNKNOWN")]
+    [InlineData(2,302,"private-response-sentinel","UNKNOWN")]
+    [InlineData(2,500,"{\"code\":\"private-response-sentinel\"}","UNKNOWN")]
+    [InlineData(2,401,"{\"code\":50101}","UNKNOWN")]
+    [InlineData(2,401,"{\"code\":\"50101\",\"code\":\"50102\"}","UNKNOWN")]
+    [InlineData(2,401,"{\"code\":\"50101\",\"Code\":\"50102\"}","UNKNOWN")]
+    [InlineData(2,401,"{\"code\":\"50101\\n\"}","UNKNOWN")]
+    public async Task Refusal_identifies_exact_get_status_and_numeric_code_without_response_text(int target,int status,string body,string venue)
+    {
+        var peer=new Peer("empty",target,status,body);
+        var result=await OkxEnrollmentDiscoveryClient.RunAsync("Demo","DemoTradingApi",Encoding.ASCII.GetBytes("owned-key"),Encoding.ASCII.GetBytes("owned-secret"),Encoding.ASCII.GetBytes("owned-pass"),null,null,default,peer);
+        string path=new[]{"/api/v5/public/time","/api/v5/account/config","/api/v5/account/balance","/api/v5/account/instruments?instType=SPOT"}[target-1];
+        string category=status==200?"DISCOVERY_API_50101":"DISCOVERY_HTTP_REFUSED";
+        Assert.Null(result.Observation);Assert.Equal(target,peer.Paths.Count);
+        Assert.Equal(category+" [GET "+path+"; HTTP "+status+"; OKX "+venue+"]",result.Code);
+        Assert.DoesNotContain("private-response-sentinel",result.ToString());
+        Assert.DoesNotContain("owned-",result.ToString());
+    }
+    [Fact]
+    public async Task Oversized_refusal_stays_bounded_and_keeps_status_without_publishing_body()
+    {
+        var peer=new Peer("empty",2,403,new string('x',1024*1024+1));
+        var result=await OkxEnrollmentDiscoveryClient.RunAsync("Demo","DemoTradingApi",Encoding.ASCII.GetBytes("owned-key"),Encoding.ASCII.GetBytes("owned-secret"),Encoding.ASCII.GetBytes("owned-pass"),null,null,default,peer);
+        Assert.Equal("DISCOVERY_HTTP_REFUSED [GET /api/v5/account/config; HTTP 403; OKX UNKNOWN]",result.Code);
+        Assert.Null(result.Observation);Assert.Equal(2,peer.Paths.Count);
+    }
+    private sealed class Peer(string mode,int refusalAt=0,int status=200,string? refusalBody=null):HttpMessageHandler
     {
         internal readonly List<string> Paths=[];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r,CancellationToken ct)
@@ -60,7 +94,9 @@ public sealed class OkxEnrollmentDiscoveryTests
                 if(Paths.Count==2){var a=body["data"]![0]!;a["uid"]="123456";a["mainUid"]="123456";a["perm"]=mode=="withdraw"?"read_only,withdraw":"read_only,trade";if(mode=="borrow")a["autoLoan"]=true;}
                 if(Paths.Count==3){var b=body["data"]![0]!;var rows=(JsonArray)b["details"]!;if(mode=="empty")rows.Clear();else{var first=rows[0]!.DeepClone();first["ccy"]="USD";first["cashBal"]="100";var second=first.DeepClone();second["ccy"]="USDT";second["cashBal"]="1";b["details"]=new JsonArray(first,second);}}
             }
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(body.ToJsonString())});
+            return Task.FromResult(Paths.Count==refusalAt
+                ?new HttpResponseMessage((HttpStatusCode)status){Content=new StringContent(refusalBody!)}
+                :new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(body.ToJsonString())});
         }
     }
 }
