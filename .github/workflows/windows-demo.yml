@@ -619,10 +619,10 @@ jobs:
             $preference=$ErrorActionPreference
             try {
               $ErrorActionPreference='Continue'
-              & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~NativeEnvironmentTests|FullyQualifiedName~Apex.ControllerAdmission.Tests' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
+              & dotnet test $project -c Release --no-build --no-restore --filter '(FullyQualifiedName~Apex.ControllerTransport.Tests)&(FullyQualifiedName!~Os_programdata)&(FullyQualifiedName!~Existing_native_sshd_accepts)' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
               $code=$LASTEXITCODE
             } finally { $ErrorActionPreference=$preference }
-            [ordered]@{exit=$code;sourceOnly=$true;phase='green-admitted-environment-v2'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
+            [ordered]@{exit=$code;sourceOnly=$true;phase='red-transport-after-environment'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
             if ($code -ne 0) { throw 'Native transport tests failed; retain closure and TRX' }
           } finally { Pop-Location }
       - name: Retain source-gate evidence and verify unchanged source

@@ -105,6 +105,20 @@ public sealed class NativeTransportTests
         try{await t.ReadAsync(1024,cancel.Token);}catch(Exception e) when(e is OperationCanceledException or IOException){}
         await Reaped(t);Assert.True(timer.Elapsed<TimeSpan.FromSeconds(10));Assert.InRange(Property<long>(t,"StderrBytes"),0,65536);
     }
+    [Fact] public async Task Native_transport_owns_read_deadline_and_overlapping_disposal_drains_once()
+    {
+        await using var f=await NativeSshFixture.Open("silent");var t=await ConnectionTests.Factory(f.Root)(default);
+        var timer=Stopwatch.StartNew();await Assert.ThrowsAnyAsync<IOException>(()=>t.ReadAsync(1024,default));
+        await Task.WhenAll(t.DisposeAsync().AsTask(),t.DisposeAsync().AsTask());await Reaped(t);Assert.True(timer.Elapsed<TimeSpan.FromSeconds(25));
+    }
+    [Fact] public async Task Native_blocked_stdin_write_has_deadline_without_reconnect_or_remote_stop()
+    {
+        await using var f=await NativeSshFixture.Open("silent");var t=await ConnectionTests.Factory(f.Root)(default);
+        var timer=Stopwatch.StartNew();
+        async Task Flood(){for(int i=0;i<16384;i++)await t.WriteAsync(new string('x',1024),default);}
+        await Assert.ThrowsAnyAsync<IOException>(()=>Flood().WaitAsync(TimeSpan.FromSeconds(25)));
+        await Reaped(t);Assert.True(timer.Elapsed<TimeSpan.FromSeconds(25));Assert.DoesNotContain("STOP",f.Events);
+    }
     [Fact] public async Task Wrong_pinned_real_host_key_denies_authentication_with_no_peer_command()
     {
         await using var f=await NativeSshFixture.Open();var changed=f.Config with{HostKey=Apex.ControllerAdmission.Tests.NativeAdmissionTests.Profile.Pin};
