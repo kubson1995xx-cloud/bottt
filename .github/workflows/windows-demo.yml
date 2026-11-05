@@ -542,7 +542,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
   controllerWindowsSource:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-native-20261105' && inputs.mode == 'okx-task1-source'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-admission-20261105' && inputs.mode == 'okx-task1-source'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -615,6 +615,26 @@ jobs:
             $c=$trx.TestRun.ResultSummary.Counters
             if ([int]$c.total -ne 32 -or [int]$c.passed -ne 32 -or [int]$c.failed -ne 0) { throw 'Unexpected client case counts' }
           } finally { Pop-Location }
+      - name: Native controller transport admission (never launches SSH)
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
+          $items=Join-Path $e 'admission-build-inputs'; New-Item -ItemType Directory -Path $items | Out-Null
+          Push-Location (Join-Path $e 'sdk')
+          try {
+            $project=Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerAdmission.Tests/Apex.ControllerAdmission.Tests.csproj'
+            & dotnet build $project -c Release -p:NuGetAudit=false "-p:CustomAfterMicrosoftCommonTargets=$e/compile-evidence.targets" "-p:ControllerEvidenceRoot=$items" *> (Join-Path $e 'admission-build.log')
+            if ($LASTEXITCODE -ne 0) { throw 'Admission compilation failure, not behavioral RED' }
+            $closure=Join-Path $e 'admission-closure'; New-Item -ItemType Directory -Path $closure | Out-Null
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerAdmission.Tests/bin/Release/net8.0') -Destination (Join-Path $closure 'tests') -Recurse
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
+            & dotnet test $project -c Release --no-build --no-restore --logger 'trx;LogFileName=admission.trx' --results-directory $e *> (Join-Path $e 'admission-tests.log')
+            $code=$LASTEXITCODE
+            [ordered]@{exit=$code;sourceOnly=$true;sshStarted=$false;phase='red'} | ConvertTo-Json | Set-Content (Join-Path $e 'admission-summary.json')
+            if ($code -ne 0) { throw 'Native admission tests failed; retain original closure and TRX' }
+          } finally { Pop-Location }
       - name: Existing native broker-store source gate only
         if: always() && steps.client.outcome != 'skipped'
         shell: powershell
@@ -644,7 +664,7 @@ jobs:
           $before=Get-Content (Join-Path $e 'source-inputs-before-build.json') -Raw | ConvertFrom-Json
           $changed=@($before | Where-Object { (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $_.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $_.sha256 })
           [ordered]@{unchanged=($changed.Count -eq 0);changedPaths=@($changed | ForEach-Object {$_.path})} | ConvertTo-Json | Set-Content (Join-Path $e 'source-after-tests.json')
-          $binaryMap=@(Get-ChildItem -LiteralPath $e -File -Recurse | Where-Object { $_.FullName -match '[\\/](client-closure|store-closure)[\\/]' } | ForEach-Object { [ordered]@{path=$_.FullName.Substring($e.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
+          $binaryMap=@(Get-ChildItem -LiteralPath $e -File -Recurse | Where-Object { $_.FullName -match '[\\/](client-closure|store-closure|admission-closure)[\\/]' } | ForEach-Object { [ordered]@{path=$_.FullName.Substring($e.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
           $binaryMap | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $e 'binary-closures.json')
           if ($changed.Count -ne 0) { throw 'Tracked source changed during native execution' }
       - uses: actions/upload-artifact@v4
