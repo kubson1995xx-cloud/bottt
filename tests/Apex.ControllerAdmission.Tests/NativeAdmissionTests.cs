@@ -152,6 +152,15 @@ public sealed class NativeAdmissionTests
         var acl=new FileInfo(p).GetAccessControl();acl.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null));new FileInfo(p).SetAccessControl(acl);
         Refuses(f.Root,f.Config);
     }
+    [Fact] public void Native_system_ssh_meets_single_link_requirement()
+    {
+        Assert.True(OperatingSystem.IsWindows());var windows=new StringBuilder(32768);
+        uint n=GetSystemWindowsDirectoryW(windows,(uint)windows.Capacity);Assert.InRange(n,1u,32767u);
+        using var exe=WindowsPathSecurity.Open(Path.Combine(windows.ToString(),"System32","OpenSSH","ssh.exe"));
+        Assert.True(GetFileInformationByHandle(exe.Handle,out var info));
+        Assert.False((info.Attributes&(uint)(FileAttributes.Directory|FileAttributes.ReparsePoint))!=0);
+        Assert.Equal(1u,info.Links); // Actual native precondition, not an inferred servicing claim.
+    }
     [Fact] public void Wrong_platform_refuses_before_accessing_any_path()
     {
         if(OperatingSystem.IsWindows())return; // Executed separately on actual Linux; not native positive evidence.
@@ -176,6 +185,8 @@ public sealed class NativeAdmissionTests
     {Assert.Equal(WindowsOkxControllerTransportAdmission.Refused,Assert.Throws<InvalidOperationException>(()=>WindowsOkxControllerTransportAdmission.Open(root,config).Dispose()).Message);}
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern bool CreateHardLinkW(string newName,string existing,IntPtr attributes);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern uint GetShortPathNameW(string path,StringBuilder output,int length);
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern uint GetSystemWindowsDirectoryW(StringBuilder buffer,uint size);
+    [DllImport("kernel32.dll",SetLastError=true)]private static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle file,out WindowsPathSecurity.FileInformation info);
     internal sealed class Profile:IDisposable
     {
         internal const string FakeIdentity="SYNTHETIC-NOT-A-PRIVATE-KEY-controller-admission";

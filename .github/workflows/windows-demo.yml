@@ -589,6 +589,8 @@ jobs:
                 <Output TaskParameter="Items" ItemName="ControllerEvidenceHashed" />
               </GetFileHash>
               <WriteLinesToFile File="$(ControllerEvidenceRoot)/$(MSBuildProjectName)-compile-input-hashes.txt" Lines="@(ControllerEvidenceHashed->'%(FileHash) %(FullPath)')" Overwrite="true" />
+              <MakeDir Directories="$(ControllerEvidenceRoot)/input-bytes" />
+              <Copy SourceFiles="@(ControllerEvidenceHashed)" DestinationFiles="@(ControllerEvidenceHashed->'$(ControllerEvidenceRoot)/input-bytes/%(FileHash).bin')" SkipUnchangedFiles="true" />
             </Target>
           </Project>
           '@ | Set-Content (Join-Path $e 'compile-evidence.targets')
@@ -632,7 +634,7 @@ jobs:
             Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
             & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName!~Wrong_platform_refuses_before_accessing_any_path' --logger 'trx;LogFileName=admission.trx' --results-directory $e *> (Join-Path $e 'admission-tests.log')
             $code=$LASTEXITCODE
-            [ordered]@{exit=$code;sourceOnly=$true;sshStarted=$false;phase='final'} | ConvertTo-Json | Set-Content (Join-Path $e 'admission-summary.json')
+            [ordered]@{exit=$code;sourceOnly=$true;sshStarted=$false;phase='native-precondition'} | ConvertTo-Json | Set-Content (Join-Path $e 'admission-summary.json')
             if ($code -ne 0) { throw 'Native admission tests failed; retain original closure and TRX' }
           } finally { Pop-Location }
       - name: Existing native broker-store source gate only
