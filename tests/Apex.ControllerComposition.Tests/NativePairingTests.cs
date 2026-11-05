@@ -41,7 +41,9 @@ public sealed class NativePairingTests
             {
                 stage="COMPLETION";IntPtr done=IntPtr.Zero;
                 await WindowsTestHost.Until(()=>Task.FromResult((done=Window(child.Id,"APEX — konfiguracja kontrolera"))!=IntPtr.Zero),"Pairing completion modal missing");
-                Assert.True(File.Exists(Path.Combine(root,"controller-public-key.txt")),"NATIVE_PROVISIONING_DID_NOT_COMPLETE");Click(GetDlgItem(done,1));
+                Assert.True(File.Exists(Path.Combine(root,"controller-public-key.txt")),"NATIVE_PROVISIONING_DID_NOT_COMPLETE");
+                await WindowsTestHost.Until(()=>Task.FromResult(GetDlgItem(done,1)!=IntPtr.Zero&&IsWindowVisible(GetDlgItem(done,1))),"Pairing completion button not populated");
+                Click(GetDlgItem(done,1));
             }
             stage="EXIT";await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));await Task.WhenAll(stdout,stderr);Assert.Equal(trust?0:2,child.ExitCode);
             WindowsTestHost.Evidence("native-pairing-"+child.Id,new{extractedExe=true,invalidInputStaysOpen=true,fieldsAgree,parserAccepts,keyboardSubmit=true,hostFingerprintDisplayed=true,explicitTrust=trust,noNetworkOrBrokerConnect=true,processExited=true});

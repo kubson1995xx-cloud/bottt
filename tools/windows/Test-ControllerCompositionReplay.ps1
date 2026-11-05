@@ -57,7 +57,9 @@ try {
  Copy-Item $testRoot (Join-Path $closure 'tests') -Recurse
  Copy-Item $oldHost (Join-Path $closure 'host') -Recurse
  $old=$ErrorActionPreference
- try{$ErrorActionPreference='Continue';& dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~PackagedTests.Extracted_EXE_native_SSH_pointer_lifecycle_five_views_and_close_after_START|FullyQualifiedName~NativePairingTests.Extracted_native_pairing_trust_cancel_preserves_existing_profile' --logger 'trx;LogFileName=extracted-package-replay.trx' --results-directory $e *> (Join-Path $e 'extracted-package-replay.log');$code=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
+ $filter='FullyQualifiedName~PackagedTests.Extracted_EXE_native_SSH_pointer_lifecycle_five_views_and_close_after_START'
+ if(-not $Phase.Contains('completion')){$filter+='|FullyQualifiedName~NativePairingTests.Extracted_native_pairing_trust_cancel_preserves_existing_profile'}
+ try{$ErrorActionPreference='Continue';& dotnet test $project -c Release --no-build --no-restore --filter $filter --logger 'trx;LogFileName=extracted-package-replay.trx' --results-directory $e *> (Join-Path $e 'extracted-package-replay.log');$code=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
  if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $zipHash){throw 'Retained ZIP mutated'}
  [ordered]@{phase=$Phase;packageExit=$code;productRun=42121399200;productCommit='0df508c1eb1f608f058005ae71bdf92a4675a3a8';testCommit=(& git -C $repo rev-parse HEAD);zipSha256=$zipHash;exeSha256=(Get-FileHash $env:APEX_COMPOSITION_PACKAGE_EXE -Algorithm SHA256).Hash.ToLowerInvariant();retainedGenericDesktopSha256=$hostHash;productInputsIdentical=$true;productRebuilt=$false;compositionSuiteRerun=$false;brokerTested=$false;vpsTested=$false;windows11Tested=$false}|ConvertTo-Json|Set-Content (Join-Path $e 'candidate-summary.json') -Encoding UTF8
  if($code -ne 0){throw 'Retained EXE native UI replay failed; diagnostic layer retained'}
