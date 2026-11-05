@@ -61,25 +61,26 @@ public sealed class NativeAdmissionTests
     [Theory][InlineData("key")][InlineData("pin")][InlineData("host")][InlineData("port")]
     public void Explicit_config_binding_refuses_mismatched_key_pin_host_or_port(string field)
     {
-        using var f=new Profile();var c=f.Config;
+        using var f=new Profile();Control(f);var c=f.Config;
         c=field switch{"key"=>c with{IdentitySha256=new string('0',64)},"pin"=>c with{HostKey=Convert.ToBase64String(Convert.FromBase64String(Profile.Pin).Select((b,i)=>i==50?(byte)(b+1):b).ToArray())},"host"=>c with{Host="other.example"},_=>c with{Port=22}};
         Refuses(f.Root,c);Assert.Equal(Profile.FakeIdentity,File.ReadAllText(f.Identity));
     }
     [Theory][InlineData("wildcard")][InlineData("duplicate")][InlineData("crlf")][InlineData("comment")][InlineData("hashed")][InlineData("oversize")]
     public void Known_hosts_requires_one_exact_bounded_canonical_pinned_line(string kind)
     {
-        using var f=new Profile();string line=File.ReadAllText(f.KnownHosts);
+        using var f=new Profile();Control(f);string line=File.ReadAllText(f.KnownHosts);
         string mutant=kind switch{"wildcard"=>line.Replace("[vps.example]:2222","*"),"duplicate"=>line+line,"crlf"=>line.Replace("\n","\r\n"),"comment"=>line.TrimEnd()+" comment\n","hashed"=>line.Replace("[vps.example]:2222","|1|fake|fake"),_=>new string('x',1025)};
         File.WriteAllText(f.KnownHosts,mutant,new UTF8Encoding(false));Refuses(f.Root,f.Config);Assert.Equal(mutant,File.ReadAllText(f.KnownHosts));
     }
     [Theory][InlineData("root")][InlineData("profile")][InlineData("identity")][InlineData("known_hosts")]
     public void Broad_native_acl_is_refused_without_repair(string target)
     {
-        using var f=new Profile();string p=target switch{"root"=>f.Root,"profile"=>f.DirectoryPath,"identity"=>f.Identity,_=>f.KnownHosts};
+        using var f=new Profile();Control(f);string p=target switch{"root"=>f.Root,"profile"=>f.DirectoryPath,"identity"=>f.Identity,_=>f.KnownHosts};
         FileSystemSecurity acl=Directory.Exists(p)?new DirectoryInfo(p).GetAccessControl():new FileInfo(p).GetAccessControl();
         acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid,null),FileSystemRights.Read,AccessControlType.Allow));
         if(acl is DirectorySecurity d)new DirectoryInfo(p).SetAccessControl(d);else new FileInfo(p).SetAccessControl((FileSecurity)acl);
-        var before=acl.GetSecurityDescriptorBinaryForm();Refuses(f.Root,f.Config);
+        FileSystemSecurity persisted=Directory.Exists(p)?new DirectoryInfo(p).GetAccessControl():new FileInfo(p).GetAccessControl();
+        var before=persisted.GetSecurityDescriptorBinaryForm();Refuses(f.Root,f.Config);
         FileSystemSecurity after=Directory.Exists(p)?new DirectoryInfo(p).GetAccessControl():new FileInfo(p).GetAccessControl();Assert.Equal(before,after.GetSecurityDescriptorBinaryForm());
     }
     [Theory][InlineData("root")][InlineData("profile")][InlineData("identity")]
@@ -95,26 +96,26 @@ public sealed class NativeAdmissionTests
     [Theory][InlineData("identity")][InlineData("known_hosts")]
     public void Hard_linked_file_refuses_actual_multi_link_native_identity(string leaf)
     {
-        using var f=new Profile();string target=leaf=="identity"?f.Identity:f.KnownHosts;
+        using var f=new Profile();Control(f);string target=leaf=="identity"?f.Identity:f.KnownHosts;
         string extra=Path.Combine(f.Root,"hardlink");Assert.True(CreateHardLinkW(extra,target,IntPtr.Zero));
         Refuses(f.Root,f.Config);Assert.True(File.Exists(extra));
     }
     [Fact] public void Reparse_profile_is_refused_without_following_or_repair()
     {
-        using var f=new Profile();string moved=Path.Combine(f.Root,"real-profile");Directory.Move(f.DirectoryPath,moved);
+        using var f=new Profile();Control(f);string moved=Path.Combine(f.Root,"real-profile");Directory.Move(f.DirectoryPath,moved);
         Directory.CreateSymbolicLink(f.DirectoryPath,moved);
         try{Refuses(f.Root,f.Config);Assert.True((File.GetAttributes(f.DirectoryPath)&FileAttributes.ReparsePoint)!=0);}
         finally{Directory.Delete(f.DirectoryPath);Directory.Move(moved,f.DirectoryPath);}
     }
     [Fact] public void Reparse_key_is_refused_on_the_actual_read_handle()
     {
-        using var f=new Profile();string moved=Path.Combine(f.Root,"real-identity");File.Move(f.Identity,moved);File.CreateSymbolicLink(f.Identity,moved);
+        using var f=new Profile();Control(f);string moved=Path.Combine(f.Root,"real-identity");File.Move(f.Identity,moved);File.CreateSymbolicLink(f.Identity,moved);
         Refuses(f.Root,f.Config);Assert.True((File.GetAttributes(f.Identity)&FileAttributes.ReparsePoint)!=0);
     }
     [Theory][InlineData("unc")][InlineData("environment")][InlineData("alias")][InlineData("traversal")][InlineData("device")]
     public void Noncanonical_root_syntax_or_native_alias_refuses(string kind)
     {
-        using var f=new Profile();var b=new StringBuilder(32768);Assert.NotEqual(0u,GetShortPathNameW(f.Root,b,b.Capacity));
+        using var f=new Profile();Control(f);var b=new StringBuilder(32768);Assert.NotEqual(0u,GetShortPathNameW(f.Root,b,b.Capacity));
         string alias=b.ToString();Assert.NotEqual(f.Root.ToUpperInvariant(),alias.ToUpperInvariant());
         string root=kind switch{"unc"=>@"\\localhost\"+f.Root[0]+"$"+f.Root[2..],"environment"=>f.Root+@"\%PROFILE%","alias"=>alias,"device"=>@"\\?\"+f.Root,_=>f.Root+@"\..\"+Path.GetFileName(f.Root)};
         Refuses(root,f.Config);
@@ -122,7 +123,7 @@ public sealed class NativeAdmissionTests
     [Theory][InlineData("missing")][InlineData("extra")][InlineData("financial")]
     public void Missing_closed_profile_extra_companion_and_financial_root_refuse_without_provision(string kind)
     {
-        using var f=new Profile();
+        using var f=new Profile();Control(f);
         if(kind=="missing"){Directory.Delete(f.DirectoryPath,true);Refuses(f.Root,f.Config);Assert.False(Directory.Exists(f.DirectoryPath));}
         else if(kind=="extra"){File.WriteAllText(f.Identity+"-cert.pub","synthetic");Refuses(f.Root,f.Config);Assert.True(File.Exists(f.Identity+"-cert.pub"));}
         else{File.WriteAllText(Path.Combine(f.Root,".naval-owner.lock"),"synthetic");Refuses(f.Root,f.Config);}
@@ -138,6 +139,21 @@ public sealed class NativeAdmissionTests
         if(OperatingSystem.IsWindows())return; // Executed separately on actual Linux; not native positive evidence.
         Assert.Throws<PlatformNotSupportedException>(()=>WindowsOkxControllerTransportAdmission.Open("/not-touched",new("vps.example",2222,"apex",new string('0',64),Profile.Pin)));
     }
+    [Fact] public void Capability_expires_on_real_monotonic_time_while_native_handles_remain_held()
+    {
+        using var f=new Profile();using var lease=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
+        Assert.NotNull(lease.Spec.CreateStartInfo(lease.Capability));
+        Thread.Sleep(TimeSpan.FromSeconds(31));
+        Assert.Throws<InvalidOperationException>(()=>lease.Spec.CreateStartInfo(lease.Capability));
+        Assert.Throws<IOException>(()=>File.Delete(f.Identity));
+    }
+    [Fact] public void Default_port_uses_exact_unbracketed_hostname_pin()
+    {
+        using var f=new Profile();Control(f);File.WriteAllText(f.KnownHosts,"vps.example ssh-ed25519 "+Profile.Pin+"\n",new UTF8Encoding(false));
+        using var lease=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config with{Port=22});Assert.NotNull(lease.Spec.CreateStartInfo(lease.Capability));
+    }
+    private static void Control(Profile f)
+    {using var lease=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);Assert.NotNull(lease.Spec.CreateStartInfo(lease.Capability));}
     private static void Refuses(string root,WindowsOkxControllerTransportConfig config)
     {Assert.Equal(WindowsOkxControllerTransportAdmission.Refused,Assert.Throws<InvalidOperationException>(()=>WindowsOkxControllerTransportAdmission.Open(root,config).Dispose()).Message);}
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern bool CreateHardLinkW(string newName,string existing,IntPtr attributes);
@@ -160,6 +176,10 @@ public sealed class NativeAdmissionTests
             WindowsPathSecurity.CreatePrivateDirectory(Root);WindowsPathSecurity.CreatePrivateDirectory(DirectoryPath);
             File.WriteAllText(Identity,FakeIdentity,new System.Text.UTF8Encoding(false));
             File.WriteAllText(KnownHosts,"[vps.example]:2222 ssh-ed25519 "+Pin+"\n",new System.Text.UTF8Encoding(false));
+            // Elevated Windows token defaults file ownership to Administrators. Provision the
+            // synthetic fixture with the required current-SID owner, before any admission.
+            foreach(string p in new[]{Identity,KnownHosts})
+            {var acl=new FileInfo(p).GetAccessControl();acl.SetOwner(WindowsIdentity.GetCurrent().User!);new FileInfo(p).SetAccessControl(acl);}
         }
         public void Dispose(){Directory.Delete(Root,true);}
     }
