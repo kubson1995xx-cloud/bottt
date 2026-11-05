@@ -5,10 +5,10 @@ using Xunit;
 namespace Apex.ControllerTransport.Tests;
 public sealed class NativeTransportTests
 {
-    private static async Task<string> VersionProbe(Apex.Desktop.Okx.WindowsOkxControllerTransportAdmission lease,bool systemRoot)
+    private static async Task<string> VersionProbe(Apex.Desktop.Okx.WindowsOkxControllerTransportAdmission lease,params string[] variables)
     {
         var info=lease.Spec.CreateStartInfo(lease.Capability);info.ArgumentList.Clear();info.ArgumentList.Add("-V");
-        if(systemRoot)info.Environment.Add("SystemRoot",Directory.GetParent(Path.GetDirectoryName(lease.Spec.Executable)!)!.Parent!.FullName);
+        foreach(string name in variables)if(Environment.GetEnvironmentVariable(name) is string value)info.Environment.Add(name,value);
         using var p=Process.Start(info)!;var error=p.StandardError.ReadToEndAsync();var output=p.StandardOutput.ReadToEndAsync();
         await p.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));string e=await error;await output;
         return p.ExitCode+":"+e.Contains("OpenSSH",StringComparison.Ordinal);
@@ -21,13 +21,16 @@ public sealed class NativeTransportTests
         await using var f=await NativeSshFixture.Open();
         // Independent OS positive: no product transport API needed to reach auth/ForceCommand.
         using var admission=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
-        string emptyVersion=await VersionProbe(admission,false),rootVersion=await VersionProbe(admission,true);
+        string[] osNames={"SystemRoot","SystemDrive","WINDIR","USERPROFILE","USERNAME","USERDOMAIN","HOMEDRIVE","HOMEPATH","PATH","TEMP","TMP","COMSPEC","LOCALAPPDATA","APPDATA","PROGRAMDATA","ALLUSERSPROFILE","ProgramFiles","CommonProgramFiles","OS","PROCESSOR_ARCHITECTURE","NUMBER_OF_PROCESSORS"};
+        string emptyVersion=await VersionProbe(admission),rootVersion=await VersionProbe(admission,"SystemRoot");
+        var calibration=new List<string>{"OS_ALLOWLIST="+await VersionProbe(admission,osNames)};
+        foreach(string name in osNames)calibration.Add(name+"="+await VersionProbe(admission,name));
         using var child=Process.Start(admission.Spec.CreateStartInfo(admission.Capability))!;
         var err=child.StandardError.ReadToEndAsync();
         try
         {
             string? hello=await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("CONTROL_EOF exit="+child.ExitCode+" versionEmpty="+emptyVersion+" versionOsSystemRoot="+rootVersion+" client="+NativeSshFixture.Classify(diagnostic)+" syntheticDiagnostic="+NativeSshFixture.SyntheticError(diagnostic,f.Root)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
+            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("CONTROL_EOF exit="+child.ExitCode+" versionEmpty="+emptyVersion+" versionOsSystemRoot="+rootVersion+" envCalibration="+string.Join(",",calibration)+" client="+NativeSshFixture.Classify(diagnostic)+" syntheticDiagnostic="+NativeSshFixture.SyntheticError(diagnostic,f.Root)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
             Assert.Equal(OkxControllerProtocol.Version,OkxControllerProtocol.DecodeHello(hello).Schema);
             Assert.Contains("AUTHENTICATED_FIXED_RELAY",f.Events);
         }
