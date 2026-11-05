@@ -10,6 +10,8 @@ using Xunit;
 namespace Apex.ControllerAdmission.Tests;
 public sealed class NativeAdmissionTests
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper output;
+    public NativeAdmissionTests(Xunit.Abstractions.ITestOutputHelper output){this.output=output;}
     [Fact] public void Valid_native_profile_issues_spec_bound_start_info_without_starting_ssh()
     {
         using var f=new Profile();
@@ -98,7 +100,8 @@ public sealed class NativeAdmissionTests
     {
         using var f=new Profile();Control(f);string target=leaf=="identity"?f.Identity:f.KnownHosts;
         string extra=Path.Combine(f.Root,"hardlink");Assert.True(CreateHardLinkW(extra,target,IntPtr.Zero));
-        Refuses(f.Root,f.Config);Assert.True(File.Exists(extra));
+        using(var native=WindowsPathSecurity.Open(target)){Assert.True(GetFileInformationByHandle(native.Handle,out var info));Assert.True(info.Links>1);}
+        var failure=Refuses(f.Root,f.Config);Assert.Equal(leaf=="identity"?"IDENTITY":"HOST_PIN",failure.Data["Stage"]);Assert.Equal("FILE_IDENTITY",failure.Data["Check"]);Assert.True(File.Exists(extra));
     }
     [Fact] public void Reparse_profile_is_refused_without_following_or_repair()
     {
@@ -138,12 +141,32 @@ public sealed class NativeAdmissionTests
     {
         using var f=new Profile();Control(f);
         var method=typeof(WindowsOkxControllerTransportAdmission).GetMethod("ValidateSystemSecurity",BindingFlags.Static|BindingFlags.NonPublic)!;
+        SetSyntheticOsDirectorySecurity(f.DirectoryPath);
         using var opened=WindowsPathSecurity.Open(f.DirectoryPath);
         method.Invoke(null,new object[]{opened.Handle,true,true});
         var acl=new DirectoryInfo(f.DirectoryPath).GetAccessControl();
         acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid,null),FileSystemRights.CreateFiles,AccessControlType.Allow));new DirectoryInfo(f.DirectoryPath).SetAccessControl(acl);
         var ex=Assert.Throws<TargetInvocationException>(()=>method.Invoke(null,new object[]{opened.Handle,true,true}));
         Assert.IsType<InvalidOperationException>(ex.InnerException);Assert.Equal(WindowsOkxControllerTransportAdmission.Refused,ex.InnerException.Message);
+    }
+    [Theory][InlineData("owner")][InlineData("write")]
+    public void Os_policy_does_not_treat_ordinary_current_sid_as_system_authority(string kind)
+    {
+        using var f=new Profile();Control(f);SetSyntheticOsDirectorySecurity(f.DirectoryPath);
+        var method=typeof(WindowsOkxControllerTransportAdmission).GetMethod("ValidateSystemSecurity",BindingFlags.Static|BindingFlags.NonPublic)!;
+        using var opened=WindowsPathSecurity.Open(f.DirectoryPath);method.Invoke(null,new object[]{opened.Handle,true,true});
+        var acl=new DirectoryInfo(f.DirectoryPath).GetAccessControl();
+        if(kind=="owner")acl.SetOwner(WindowsIdentity.GetCurrent().User!);
+        else acl.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!,FileSystemRights.Write,AccessControlType.Allow));
+        new DirectoryInfo(f.DirectoryPath).SetAccessControl(acl);
+        var ex=Assert.Throws<TargetInvocationException>(()=>method.Invoke(null,new object[]{opened.Handle,true,true}));Assert.IsType<InvalidOperationException>(ex.InnerException);
+    }
+    private static void SetSyntheticOsDirectorySecurity(string path)
+    {
+        var admin=new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null);
+        var acl=new DirectorySecurity();acl.SetOwner(admin);acl.SetAccessRuleProtection(true,false);
+        foreach(var sid in new[]{admin,new SecurityIdentifier(WellKnownSidType.LocalSystemSid,null)})acl.AddAccessRule(new FileSystemAccessRule(sid,FileSystemRights.FullControl,InheritanceFlags.ContainerInherit|InheritanceFlags.ObjectInherit,PropagationFlags.None,AccessControlType.Allow));
+        new DirectoryInfo(path).SetAccessControl(acl);
     }
     [Theory][InlineData("identity")][InlineData("known_hosts")]
     public void Native_key_and_pin_owner_must_be_current_sid(string leaf)
@@ -152,14 +175,39 @@ public sealed class NativeAdmissionTests
         var acl=new FileInfo(p).GetAccessControl();acl.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null));new FileInfo(p).SetAccessControl(acl);
         Refuses(f.Root,f.Config);
     }
-    [Fact] public void Native_system_ssh_meets_single_link_requirement()
+    [Fact] public void Native_system_ssh_pins_observed_identity_link_count_length_and_security_per_lease()
     {
-        Assert.True(OperatingSystem.IsWindows());var windows=new StringBuilder(32768);
-        uint n=GetSystemWindowsDirectoryW(windows,(uint)windows.Capacity);Assert.InRange(n,1u,32767u);
-        using var exe=WindowsPathSecurity.Open(Path.Combine(windows.ToString(),"System32","OpenSSH","ssh.exe"));
-        Assert.True(GetFileInformationByHandle(exe.Handle,out var info));
-        Assert.False((info.Attributes&(uint)(FileAttributes.Directory|FileAttributes.ReparsePoint))!=0);
-        Assert.Equal(1u,info.Links); // Actual native precondition, not an inferred servicing claim.
+        using var f=new Profile();using var lease=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
+        using var exe=WindowsPathSecurity.Open(lease.Spec.Executable);
+        Assert.True(GetFileInformationByHandle(exe.Handle,out var before));
+        Assert.False((before.Attributes&(uint)(FileAttributes.Directory|FileAttributes.ReparsePoint))!=0);
+        Assert.True(before.Links>=1); // Measured, not an assumption that Windows always has two.
+        output.WriteLine("Native OS-selected SSH link count: "+before.Links);
+        var files=(System.Collections.IEnumerable)typeof(WindowsOkxControllerTransportAdmission).GetField("files",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(lease)!;
+        object held=files.Cast<object>().Single(x=>(string)x.GetType().GetProperty("Path",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(x)! == lease.Spec.Executable);
+        var original=held.GetType().GetField("original",BindingFlags.Instance|BindingFlags.NonPublic)!;
+        var recorded=(WindowsPathSecurity.FileInformation)original.GetValue(held)!;
+        Assert.Equal(before.Links,recorded.Links);Assert.Equal(before.VolumeSerial,recorded.VolumeSerial);
+        Assert.Equal(before.IndexHigh,recorded.IndexHigh);Assert.Equal(before.IndexLow,recorded.IndexLow);
+        Assert.Equal(before.SizeHigh,recorded.SizeHigh);Assert.Equal(before.SizeLow,recorded.SizeLow);
+        Assert.NotNull(lease.Spec.CreateStartInfo(lease.Capability));
+        Assert.True(GetFileInformationByHandle(exe.Handle,out var after));
+        Assert.Equal(before.Links,after.Links);Assert.Equal(before.VolumeSerial,after.VolumeSerial);
+        Assert.Equal(before.IndexHigh,after.IndexHigh);Assert.Equal(before.IndexLow,after.IndexLow);
+        Assert.Equal(before.SizeHigh,after.SizeHigh);Assert.Equal(before.SizeLow,after.SizeLow);
+        // Compare native held evidence against changed expectations, without changing OS state.
+        foreach(string field in new[]{"Links","VolumeSerial","IndexHigh","IndexLow","SizeHigh","SizeLow"})
+        {
+            object altered=recorded;var member=typeof(WindowsPathSecurity.FileInformation).GetField(field,BindingFlags.Instance|BindingFlags.NonPublic)!;
+            member.SetValue(altered,unchecked((uint)member.GetValue(altered)!+1u));original.SetValue(held,altered);
+            Assert.Throws<InvalidOperationException>(()=>lease.Spec.CreateStartInfo(lease.Capability));
+            original.SetValue(held,recorded);Assert.NotNull(lease.Spec.CreateStartInfo(lease.Capability));
+        }
+        var securityField=held.GetType().GetField("originalSecurity",BindingFlags.Instance|BindingFlags.NonPublic)!;
+        var security=Assert.IsType<byte[]>(securityField.GetValue(held));
+        byte saved=security[^1];security[^1]^=1;
+        Assert.Throws<InvalidOperationException>(()=>lease.Spec.CreateStartInfo(lease.Capability));
+        security[^1]=saved;Assert.NotNull(lease.Spec.CreateStartInfo(lease.Capability));
     }
     [Fact] public void Wrong_platform_refuses_before_accessing_any_path()
     {
@@ -181,8 +229,8 @@ public sealed class NativeAdmissionTests
     }
     private static void Control(Profile f)
     {using var lease=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);Assert.NotNull(lease.Spec.CreateStartInfo(lease.Capability));}
-    private static void Refuses(string root,WindowsOkxControllerTransportConfig config)
-    {Assert.Equal(WindowsOkxControllerTransportAdmission.Refused,Assert.Throws<InvalidOperationException>(()=>WindowsOkxControllerTransportAdmission.Open(root,config).Dispose()).Message);}
+    private static InvalidOperationException Refuses(string root,WindowsOkxControllerTransportConfig config)
+    {var e=Assert.Throws<InvalidOperationException>(()=>WindowsOkxControllerTransportAdmission.Open(root,config).Dispose());Assert.Equal(WindowsOkxControllerTransportAdmission.Refused,e.Message);return e;}
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern bool CreateHardLinkW(string newName,string existing,IntPtr attributes);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern uint GetShortPathNameW(string path,StringBuilder output,int length);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern uint GetSystemWindowsDirectoryW(StringBuilder buffer,uint size);
