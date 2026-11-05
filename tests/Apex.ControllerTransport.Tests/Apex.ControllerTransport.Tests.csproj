@@ -11,5 +11,6 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
     <ProjectReference Include="../../src/Apex.Desktop/Apex.Desktop.csproj" />
     <Compile Include="../Apex.ControllerAdmission.Tests/NativeAdmissionTests.cs" Link="NativeAdmissionTests.cs" />
+    <Compile Include="../Apex.ControllerClient.Tests/*.cs" Link="Client/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

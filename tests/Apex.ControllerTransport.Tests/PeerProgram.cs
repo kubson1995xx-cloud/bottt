@@ -10,6 +10,8 @@ internal static class PeerProgram
         if(args.Length!=2||args[0]!="--peer")return 90;
         string root=args[1];
         if(Environment.GetEnvironmentVariable("SSH_ORIGINAL_COMMAND")!=OkxControllerSshLaunchSpec.Relay)return 91;
+        using(var process=System.Diagnostics.Process.GetCurrentProcess())
+            File.WriteAllText(Path.Combine(root,"peer-"+Guid.NewGuid().ToString("N")+".json"),System.Text.Json.JsonSerializer.Serialize(new {Id=process.Id,StartedUtcTicks=process.StartTime.ToUniversalTime().Ticks}));
         File.AppendAllLines(Path.Combine(root,"events"),new[]{"AUTHENTICATED_FIXED_RELAY"});
         string behavior=File.ReadAllText(Path.Combine(root,"behavior"));
         if(behavior=="silent"){await Task.Delay(60000);return 0;}

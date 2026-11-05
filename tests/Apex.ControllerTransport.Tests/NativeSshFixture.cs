@@ -86,6 +86,21 @@ internal sealed class NativeSshFixture:IAsyncDisposable
     internal string[] Events=>File.Exists(Path.Combine(ServerRoot,"events"))?File.ReadAllLines(Path.Combine(ServerRoot,"events")):Array.Empty<string>();
     public async ValueTask DisposeAsync()
     {
+        // Windows sshd can create ForceCommand via a different parent. Its silent/flood
+        // test peer may outlive the SSH session and keep inherited sshd pipes open.
+        // Reap only our exact registered launch, never a later process reusing that PID.
+        if(Directory.Exists(ServerRoot))foreach(string file in Directory.GetFiles(ServerRoot,"peer-*.json"))
+        {
+            using var record=System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(file));
+            int id=record.RootElement.GetProperty("Id").GetInt32();long started=record.RootElement.GetProperty("StartedUtcTicks").GetInt64();
+            Process? peer=null;
+            try{peer=Process.GetProcessById(id);}catch(ArgumentException){}
+            if(peer!=null)using(peer)
+            {
+                if(!peer.HasExited&&peer.StartTime.ToUniversalTime().Ticks==started)
+                {peer.Kill(true);await peer.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));}
+            }
+        }
         if(Server!=null)
         {
             if(!Server.HasExited)Server.Kill(true);
