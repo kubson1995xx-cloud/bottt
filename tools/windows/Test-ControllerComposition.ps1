@@ -7,6 +7,13 @@ $items=Join-Path $e 'composition-build-inputs';New-Item -ItemType Directory -Pat
 Push-Location (Join-Path $e 'sdk')
 try {
  if($Phase.StartsWith('candidate')) {
+  Push-Location $repo
+  $nativePreference=$ErrorActionPreference
+  try {
+   $ErrorActionPreference='Continue'
+   & npm.cmd ci --ignore-scripts --no-audit --no-fund *> (Join-Path $e 'panel-install.log');if($LASTEXITCODE -ne 0){throw 'Pinned root panel dependency install failed'}
+   & npm.cmd test *> (Join-Path $e 'panel-tests.log');if($LASTEXITCODE -ne 0){throw 'Existing Polish panel regression failed'}
+  }finally{$ErrorActionPreference=$nativePreference;Pop-Location}
   Push-Location (Join-Path $repo 'frontend/naval')
   $nativePreference=$ErrorActionPreference
   try {

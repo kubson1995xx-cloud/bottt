@@ -602,7 +602,7 @@ jobs:
           node-version: '26'
       - name: Native composition and pairing gate
         shell: powershell
-        run: ./tools/windows/Test-ControllerComposition.ps1 -Phase candidate
+        run: ./tools/windows/Test-ControllerComposition.ps1 -Phase candidate-root
       - name: Retain source-gate evidence and verify unchanged source
         if: always()
         shell: powershell
