@@ -27,14 +27,22 @@ internal sealed class OkxControllerSshLaunchSpec
     }
     // OpenSSH parses -o paths again; quote its configuration grammar, not a shell.
     private static string QuoteConfigPath(string path)=>"\""+path.Replace("\\","\\\\",StringComparison.Ordinal).Replace("\"","\\\"",StringComparison.Ordinal)+"\"";
-    // No issuer exists in this portable slice. Native ACL/path/identity admission is a separate gate.
+    // Issuance requires an actual native lease; neither strings nor an arbitrary predicate can mint it.
     internal sealed class AdmittedTransportCapability
     {
-        private AdmittedTransportCapability(){}
+        private readonly WindowsOkxControllerTransportAdmission admission;
+        private AdmittedTransportCapability(WindowsOkxControllerTransportAdmission admission){this.admission=admission;}
+        internal static AdmittedTransportCapability Issue(WindowsOkxControllerTransportAdmission admission)
+            =>admission.WithValidatedSpec(admission.Spec,()=>new AdmittedTransportCapability(admission));
+        internal ProcessStartInfo Create(OkxControllerSshLaunchSpec spec)=>admission.WithValidatedSpec(spec,spec.BuildStartInfo);
     }
     internal ProcessStartInfo CreateStartInfo(AdmittedTransportCapability capability)
     {
         if(capability==null)throw new InvalidOperationException("NATIVE_TRANSPORT_ADMISSION_REQUIRED");
+        return capability.Create(this);
+    }
+    private ProcessStartInfo BuildStartInfo()
+    {
         var info=new ProcessStartInfo(Executable){UseShellExecute=false,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,CreateNoWindow=true};
         info.Environment.Clear();foreach(var item in Environment)info.Environment.Add(item.Key,item.Value);
         foreach(var arg in Arguments)info.ArgumentList.Add(arg);return info;
