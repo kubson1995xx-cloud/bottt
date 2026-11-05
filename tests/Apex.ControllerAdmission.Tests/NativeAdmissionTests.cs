@@ -37,7 +37,8 @@ public sealed class NativeAdmissionTests
         using var f=new Profile();using var other=new Profile();
         using var lease=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
         using var second=WindowsOkxControllerTransportAdmission.Open(other.Root,other.Config);
-        var foreign=OkxControllerSshLaunchSpec.Build(new("vps.example",2222,"apex",f.Identity,f.KnownHosts),lease.Spec.Executable,"NUL");
+        var foreign=OkxControllerSshLaunchSpec.BuildWindows(new("vps.example",2222,"apex",f.Identity,f.KnownHosts),lease.Spec.Executable,lease.Spec.Environment["SystemRoot"],lease.Spec.Environment["PROGRAMDATA"]);
+        Assert.True(foreign.Arguments.SequenceEqual(lease.Spec.Arguments)&&foreign.Environment.OrderBy(x=>x.Key).SequenceEqual(lease.Spec.Environment.OrderBy(x=>x.Key)));
         Assert.Throws<InvalidOperationException>(()=>foreign.CreateStartInfo(lease.Capability));
         Assert.Throws<InvalidOperationException>(()=>second.Spec.CreateStartInfo(lease.Capability));
         Assert.Throws<InvalidOperationException>(()=>lease.Spec.CreateStartInfo(null!));
