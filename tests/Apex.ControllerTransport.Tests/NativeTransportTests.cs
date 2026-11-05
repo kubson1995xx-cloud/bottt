@@ -5,6 +5,14 @@ using Xunit;
 namespace Apex.ControllerTransport.Tests;
 public sealed class NativeTransportTests
 {
+    private static async Task<string> VersionProbe(Apex.Desktop.Okx.WindowsOkxControllerTransportAdmission lease,bool systemRoot)
+    {
+        var info=lease.Spec.CreateStartInfo(lease.Capability);info.ArgumentList.Clear();info.ArgumentList.Add("-V");
+        if(systemRoot)info.Environment.Add("SystemRoot",Directory.GetParent(Path.GetDirectoryName(lease.Spec.Executable)!)!.Parent!.FullName);
+        using var p=Process.Start(info)!;var error=p.StandardError.ReadToEndAsync();var output=p.StandardOutput.ReadToEndAsync();
+        await p.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));string e=await error;await output;
+        return p.ExitCode+":"+e.Contains("OpenSSH",StringComparison.Ordinal);
+    }
     private static T Property<T>(object t,string name)=>(T)t.GetType().GetProperty(name,BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(t)!;
     private static async Task Reaped(IOkxControllerFrameTransport t)
     {await t.DisposeAsync();await t.DisposeAsync();Assert.True(Property<bool>(t,"ChildReaped"));}
@@ -13,12 +21,13 @@ public sealed class NativeTransportTests
         await using var f=await NativeSshFixture.Open();
         // Independent OS positive: no product transport API needed to reach auth/ForceCommand.
         using var admission=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
+        string emptyVersion=await VersionProbe(admission,false),rootVersion=await VersionProbe(admission,true);
         using var child=Process.Start(admission.Spec.CreateStartInfo(admission.Capability))!;
         var err=child.StandardError.ReadToEndAsync();
         try
         {
             string? hello=await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("CONTROL_EOF exit="+child.ExitCode+" client="+NativeSshFixture.Classify(diagnostic)+" syntheticDiagnostic="+NativeSshFixture.SyntheticError(diagnostic,f.Root)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
+            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("CONTROL_EOF exit="+child.ExitCode+" versionEmpty="+emptyVersion+" versionOsSystemRoot="+rootVersion+" client="+NativeSshFixture.Classify(diagnostic)+" syntheticDiagnostic="+NativeSshFixture.SyntheticError(diagnostic,f.Root)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
             Assert.Equal(OkxControllerProtocol.Version,OkxControllerProtocol.DecodeHello(hello).Schema);
             Assert.Contains("AUTHENTICATED_FIXED_RELAY",f.Events);
         }
