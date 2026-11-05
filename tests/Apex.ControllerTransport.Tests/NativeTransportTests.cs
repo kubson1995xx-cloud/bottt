@@ -28,17 +28,20 @@ public sealed class NativeTransportTests
         Assert.Equal("0:True",await VersionProbe(lease,"@CommonApplicationData"));
         Assert.Empty(lease.Spec.Environment);Assert.Empty(lease.Spec.CreateStartInfo(lease.Capability).Environment);
     }
-    [Fact] public async Task Os_programdata_only_control_authenticates_fixed_relay_without_changing_product()
+    [Fact] public Task Os_programdata_only_control_authenticates_fixed_relay_without_changing_product()=>ConnectionProbe(false);
+    [Fact] public Task Os_programdata_and_systemroot_control_authenticates_fixed_relay_without_changing_product()=>ConnectionProbe(true);
+    private static async Task ConnectionProbe(bool includeSystemRoot)
     {
         await using var f=await NativeSshFixture.Open();using var admission=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
         var info=admission.Spec.CreateStartInfo(admission.Capability);
         // Explicit TEST-ONLY calibration. This mutable StartInfo is NOT an accepted native spec.
         info.Environment.Add("PROGRAMDATA",Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+        if(includeSystemRoot)info.Environment.Add("SystemRoot",Environment.GetFolderPath(Environment.SpecialFolder.Windows));
         using var child=Process.Start(info)!;var err=child.StandardError.ReadToEndAsync();
         try
         {
             string? hello=await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("PROGRAMDATA_CONTROL_EOF exit="+child.ExitCode+" client="+NativeSshFixture.Classify(diagnostic)+" syntheticDiagnostic="+NativeSshFixture.SyntheticError(diagnostic,f.Root)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
+            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("PROGRAMDATA_CONTROL_EOF withSystemRoot="+includeSystemRoot+" exit="+child.ExitCode+" client="+NativeSshFixture.Classify(diagnostic)+" syntheticDiagnostic="+NativeSshFixture.SyntheticError(diagnostic,f.Root)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
             Assert.Equal(OkxControllerProtocol.Version,OkxControllerProtocol.DecodeHello(hello).Schema);Assert.Contains("AUTHENTICATED_FIXED_RELAY",f.Events);
         }
         finally{child.StandardInput.Close();if(!child.HasExited)child.Kill(true);await child.WaitForExitAsync();await err;}
