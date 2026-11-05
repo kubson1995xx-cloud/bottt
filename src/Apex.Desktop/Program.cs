@@ -79,6 +79,11 @@ namespace Apex.Desktop
             }
 
             using var startupLock = lockFile;
+            if (OperatingSystem.IsWindows() && (File.Exists(Path.Combine(dataDir, "controller-pairing.pending")) || Directory.Exists(Path.Combine(dataDir, "controller-pairing.pending"))))
+            {
+                Console.Error.WriteLine("CONTROLLER_PAIRING_INCOMPLETE: Zachowaj częściowy profil do sprawdzenia; nie naprawiono ani nie usunięto danych.");
+                return 2;
+            }
             ConfigStore config;
             NavalRuntimeOptions? naval;
             IReadOnlyList<OkxScopeBinding> okxBindings;
@@ -126,6 +131,13 @@ namespace Apex.Desktop
                 Console.Error.WriteLine("HOST_CONFIG_INVALID");
                 return 2;
             }
+            // Explicit local-only setup entry. Ordinary boot never prompts, generates
+            // an identity, reads controller metadata/key bytes or starts SSH.
+            if (args.Contains("--pair-controller"))
+            {
+                if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("WINDOWS_TRANSPORT_REQUIRED"); return 2; }
+                return await WindowsOkxControllerPairing.ShowAsync(dataDir, cancellation) ? 0 : 2;
+            }
             int port = config.Config.HttpPort;
             int portIndex = Array.IndexOf(args, "--port");
             if ((portIndex >= 0 && !int.TryParse(GetArg(args, "--port"), out port)) || port is < 1 or > 65535)
@@ -141,7 +153,9 @@ namespace Apex.Desktop
             WebApplication? app = null;
             OkxNavalRuntime? okx = null;
             OkxOperatorControl? okxControl = null;
-            await using var remoteController = new OkxRemoteControllerControl();
+            await using var remoteController = new OkxRemoteControllerControl(
+                OperatingSystem.IsWindows() && File.Exists(Path.Combine(dataDir, "controller-connection.json"))
+                    ? WindowsOkxControllerConnectionStore.CreateFactory(dataDir) : null);
             CancellationTokenRegistration stopping = default;
             void StopBackground()
             {
