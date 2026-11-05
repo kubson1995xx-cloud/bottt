@@ -16,10 +16,15 @@ internal sealed class NativeSshFixture:IAsyncDisposable
 {
     internal readonly NativeAdmissionTests.Profile Profile=new();
     internal string Root=>Profile.Root;
-    internal string ServerRoot=>Path.Combine(Root,"synthetic-sshd");
+    internal string ServerRoot=>Root+"-sshd";
     internal WindowsOkxControllerTransportConfig Config=null!;
     internal Process Server=null!;
     private Task stderr=Task.CompletedTask,stdout=Task.CompletedTask;
+    private readonly StringBuilder serverDiagnostic=new();
+    internal static string Classify(string text)=>string.Join("|",new[]{"Permission denied","Host key verification failed","Bad owner or permissions","bad ownership","Accepted publickey","Failed publickey","CreateProcessW failed","CreateProcessAsUserW failed","unable to load","Could not load","not allowed","No such file","not recognized","Could not resolve","Connection closed","Connection reset","Server listening","Starting session","shell request","exec request","subsystem request","get_passwd","privsep","posix_spawn","cannot find","not found","not implemented"}.Where(s=>text.Contains(s,StringComparison.OrdinalIgnoreCase)));
+    private async Task DrainDiagnostic(StreamReader input)
+    {char[] b=new char[2048];int n;while((n=await input.ReadAsync(b))>0){lock(serverDiagnostic){if(serverDiagnostic.Length<65536)serverDiagnostic.Append(b,0,Math.Min(n,65536-serverDiagnostic.Length));}}}
+    internal string ServerCodes{get{lock(serverDiagnostic)return Classify(serverDiagnostic.ToString());}}
     private readonly List<Process> helpers=new();
     private string sshDirectory="";
     internal static async Task<NativeSshFixture> Open(string behavior="normal")
@@ -60,10 +65,10 @@ internal sealed class NativeSshFixture:IAsyncDisposable
         string force='"'+dotnet+'"'+" "+'"'+typeof(PeerProgram).Assembly.Location+'"'+" --peer "+'"'+ServerRoot+'"';
         string Slash(string p)=>p.Replace('\\','/');
         string config=Path.Combine(ServerRoot,"sshd_config");
-        File.WriteAllText(config,$"Port {port}\nListenAddress 127.0.0.1\nHostKey \"{Slash(host)}\"\nPidFile \"{Slash(Path.Combine(ServerRoot,"sshd.pid"))}\"\nAuthorizedKeysFile \"{Slash(authorized)}\"\nPubkeyAuthentication yes\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAuthenticationMethods publickey\nStrictModes yes\nAllowUsers {user}\nAllowTcpForwarding no\nAllowAgentForwarding no\nPermitTTY no\nForceCommand {force}\nLogLevel ERROR\n",new UTF8Encoding(false));
+        File.WriteAllText(config,$"Port {port}\nListenAddress 127.0.0.1\nHostKey \"{Slash(host)}\"\nPidFile \"{Slash(Path.Combine(ServerRoot,"sshd.pid"))}\"\nAuthorizedKeysFile \"{Slash(authorized)}\"\nPubkeyAuthentication yes\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAuthenticationMethods publickey\nStrictModes yes\nAllowUsers {user}\nAllowTcpForwarding no\nAllowAgentForwarding no\nPermitTTY no\nForceCommand {force}\nLogLevel DEBUG3\n",new UTF8Encoding(false));
         await Run(sshd,"-t","-f",config);
         var start=new ProcessStartInfo(sshd){UseShellExecute=false,RedirectStandardError=true,RedirectStandardOutput=true,CreateNoWindow=true};start.ArgumentList.Add("-D");start.ArgumentList.Add("-e");start.ArgumentList.Add("-f");start.ArgumentList.Add(config);
-        Server=Process.Start(start)!;stderr=Server.StandardError.BaseStream.CopyToAsync(Stream.Null);stdout=Server.StandardOutput.BaseStream.CopyToAsync(Stream.Null);
+        Server=Process.Start(start)!;stderr=DrainDiagnostic(Server.StandardError);stdout=Server.StandardOutput.BaseStream.CopyToAsync(Stream.Null);
         var until=Stopwatch.StartNew();bool ready=false;
         while(until.Elapsed<TimeSpan.FromSeconds(10)&&!Server.HasExited)
         {try{using var socket=new TcpClient();await socket.ConnectAsync(IPAddress.Loopback,port);ready=true;break;}catch(SocketException){await Task.Delay(50);}}
@@ -79,6 +84,6 @@ internal sealed class NativeSshFixture:IAsyncDisposable
             using var b=new CancellationTokenSource(TimeSpan.FromSeconds(5));await Server.WaitForExitAsync(b.Token);await Task.WhenAll(stderr,stdout).WaitAsync(TimeSpan.FromSeconds(5));Server.Dispose();
         }
         // No generated identity, host key or authorization file enters evidence/artifacts.
-        Profile.Dispose();
+        Profile.Dispose();if(Directory.Exists(ServerRoot))Directory.Delete(ServerRoot,true);
     }
 }

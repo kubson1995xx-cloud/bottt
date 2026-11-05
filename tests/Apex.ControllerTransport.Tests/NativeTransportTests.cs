@@ -14,11 +14,12 @@ public sealed class NativeTransportTests
         // Independent OS positive: no product transport API needed to reach auth/ForceCommand.
         using var admission=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
         using var child=Process.Start(admission.Spec.CreateStartInfo(admission.Capability))!;
-        var err=child.StandardError.BaseStream.CopyToAsync(Stream.Null);
+        var err=child.StandardError.ReadToEndAsync();
         try
         {
             string? hello=await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            Assert.NotNull(hello);Assert.Equal(OkxControllerProtocol.Version,OkxControllerProtocol.DecodeHello(hello).Schema);
+            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("CONTROL_EOF exit="+child.ExitCode+" client="+NativeSshFixture.Classify(diagnostic)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
+            Assert.Equal(OkxControllerProtocol.Version,OkxControllerProtocol.DecodeHello(hello).Schema);
             Assert.Contains("AUTHENTICATED_FIXED_RELAY",f.Events);
         }
         finally{child.StandardInput.Close();if(!child.HasExited)child.Kill(true);await child.WaitForExitAsync();await err;}
