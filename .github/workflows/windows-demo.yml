@@ -604,7 +604,7 @@ jobs:
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./tools/windows/Test-ControllerCompositionReplay.ps1 -Phase acceptance-native-submit
+        run: ./tools/windows/Test-ControllerCompositionReplay.ps1 -Phase acceptance-native-foreground
       - name: Retain source-gate evidence and verify unchanged source
         if: always()
         shell: powershell

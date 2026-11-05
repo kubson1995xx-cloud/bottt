@@ -35,7 +35,20 @@ public sealed class CompositionTests
             var setup=WindowsLocalSetup.Ensure(Path_,Environment.GetEnvironmentVariable("APEX_PRESENTATION_TEST_DIRECTORY")!);
             setup.Store.Update(c=>{c.News.Enabled=false;c.OpenBrowserOnStart=false;c.BridgeTcpPort=0;});
         }
-        public void Dispose(){if(Directory.Exists(Path_))Directory.Delete(Path_,true);}
+        public void Dispose()
+        {
+            var until=Stopwatch.StartNew();
+            while(Directory.Exists(Path_))
+            {
+                try
+                {
+                    string ownedLock=Path.Combine(Path_,"apex.lock");
+                    if(File.Exists(ownedLock)){using var reopened=new FileStream(ownedLock,FileMode.Open,FileAccess.ReadWrite,FileShare.None);}
+                    Directory.Delete(Path_,true);return;
+                }
+                catch(IOException) when(until.Elapsed<TimeSpan.FromSeconds(5)){Thread.Sleep(25);}
+            }
+        }
     }
     internal sealed class Host:IAsyncDisposable
     {
