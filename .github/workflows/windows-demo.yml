@@ -545,6 +545,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-admission-20261105' && inputs.mode == 'okx-task1-source'
     runs-on: windows-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -596,6 +599,8 @@ jobs:
           '@ | Set-Content (Join-Path $e 'compile-evidence.targets')
       - name: Real native controller SSH transport and fixed public configuration
         shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference='Stop'
           $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
@@ -607,6 +612,16 @@ jobs:
           }
           [ordered]@{systemOpenSsh=$prereq;otherExistingSshd=@(Get-Command sshd.exe -ErrorAction SilentlyContinue | ForEach-Object {$_.Source});noInstall=$true;noService=$true;loopbackOnly=$true} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $e 'ssh-prerequisites.json')
           $items=Join-Path $e 'transport-build-inputs'; New-Item -ItemType Directory -Path $items | Out-Null
+          if ('green-same-fixture-causal' -eq 'green-same-fixture-causal') {
+            $old=Join-Path $env:RUNNER_TEMP 'retained-empty-env-source'
+            & gh run download 42110443015 --repo kubson1995xx-cloud/bottt --name Controller-Windows-Source-42110443015-1 --dir $old
+            if ($LASTEXITCODE -ne 0) { throw 'Retained causal artifact unavailable' }
+            $causal=Join-Path $e 'causal-empty-env-closure'
+            Copy-Item -LiteralPath (Join-Path $old 'transport-closure/host') -Destination $causal -Recurse
+            $env:APEX_RETAINED_EMPTY_ENV_DESKTOP=Join-Path $causal 'ApexDesktop.dll'
+            if ((Get-FileHash -LiteralPath $env:APEX_RETAINED_EMPTY_ENV_DESKTOP -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3d495d79d849ab5cdc3a0d51eb1e3c04c6313d1c44dc091b7e89f4f9f06356a5') { throw 'Retained old production mismatch' }
+            Get-ChildItem -LiteralPath $causal -File -Recurse | ForEach-Object { [ordered]@{path=$_.FullName.Substring($causal.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $e 'causal-inputs-before-test.json')
+          }
           Push-Location (Join-Path $e 'sdk')
           try {
             $project=Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerTransport.Tests/Apex.ControllerTransport.Tests.csproj'
@@ -619,10 +634,10 @@ jobs:
             $preference=$ErrorActionPreference
             try {
               $ErrorActionPreference='Continue'
-              & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~Foreign_identical_spec_other_lease_null_and_disposal_cannot_authorize_start_info' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
+              & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~CausalNativeTests' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
               $code=$LASTEXITCODE
             } finally { $ErrorActionPreference=$preference }
-            [ordered]@{exit=$code;sourceOnly=$true;phase='green-exact-environment-clone'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
+            [ordered]@{exit=$code;sourceOnly=$true;phase='green-same-fixture-causal'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
             if ($code -ne 0) { throw 'Native transport tests failed; retain closure and TRX' }
           } finally { Pop-Location }
       - name: Retain source-gate evidence and verify unchanged source
