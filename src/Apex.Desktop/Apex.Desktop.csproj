@@ -17,6 +17,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Okx/okx-controls.js" />
     <EmbeddedResource Include="Okx/okx-controls.css" />
+    <EmbeddedResource Include="Okx/remote-controller.js" />
+    <EmbeddedResource Include="Okx/remote-controller.css" />
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

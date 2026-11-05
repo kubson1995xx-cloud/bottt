@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><IsPackable>false</IsPackable><OutputType>Exe</OutputType><StartupObject>Apex.Tests.PanelConnectEntry</StartupObject><AssemblyName>Apex.Tests</AssemblyName><RootNamespace>Apex.Tests</RootNamespace></PropertyGroup>
+  <ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1"/><PackageReference Include="xunit" Version="2.9.2"/><PackageReference Include="xunit.runner.visualstudio" Version="2.8.2"/></ItemGroup>
+  <ItemGroup>
+    <!-- Reuse accepted mixed-owner helpers inside the existing friend identity. Only the explicit filter runs; no historical suite or child entry is invoked. -->
+    <Compile Include="../Apex.Tests/*.cs" Exclude="../Apex.Tests/obj/**;../Apex.Tests/bin/**"/>
+    <Compile Include="../Apex.ControllerPanel.Tests/*.cs"/>
+    <EmbeddedResource Include="../Apex.Tests/Fixtures/okx-old-v1-*.json" Link="Fixtures/%(Filename)%(Extension)"/>
+    <EmbeddedResource Include="../Apex.Tests/Fixtures/okx-pre-r1-broker-baseline.json" Link="Fixtures/okx-pre-r1-broker-baseline.json"/>
+    <Compile Include="../../src/Platforms/cTrader/Shared/CommandJournal.cs" Link="Production/CommandJournal.cs"/>
+    <Compile Include="../../src/Platforms/cTrader/Shared/ScopedPlatformState.cs" Link="Production/ScopedPlatformState.cs"/>
+    <ProjectReference Include="../../src/Apex.Desktop/Apex.Desktop.csproj"/>
+    <ProjectReference Include="../../tools/Apex.Okx.DemoAcceptance/Apex.Okx.DemoAcceptance.csproj"/>
+    <ProjectReference Include="../../tools/Apex.PlatformSimulator/Apex.PlatformSimulator.csproj"/>
+  </ItemGroup>
+</Project>

@@ -27,7 +27,9 @@ internal static class NavalFrontendEndpoints
                 ctx.Response.StatusCode = 503;
                 await ctx.Response.WriteAsync("<!doctype html><html lang=\"pl\"><head><meta charset=\"utf-8\"><title>Naval unavailable</title></head><body><h1>NAVAL_UI_NOT_BUILT</h1><a href=\"/\">Otwórz oryginalny panel operatora</a></body></html>"); return;
             }
-            await ctx.Response.SendFileAsync(index, ctx.RequestAborted);
+            string html = await File.ReadAllTextAsync(index, ctx.RequestAborted);
+            html = html.Replace("</body>", "<script src=\"/remote-controller.js\" defer></script></body>", StringComparison.Ordinal);
+            await ctx.Response.WriteAsync(html, ctx.RequestAborted);
         }
         app.MapGet("/naval/index.html", Index);
     }

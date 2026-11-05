@@ -162,7 +162,7 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
         }
         var p = desktopLocal != null && !ctx.Request.Headers.ContainsKey("Authorization") && string.IsNullOrEmpty(ctx.Request.Headers["X-Apex-Token"].ToString()) ? desktopLocal : Authenticate(ctx);
         string? path = ctx.Request.Path.Value;
-        bool naval = path == "/api/naval/snapshot" || path == "/api/naval/events";
+        bool naval = path == "/api/naval/snapshot" || path == "/api/naval/events" || Apex.Desktop.Okx.OkxRemoteControllerEndpoints.IsStatus(path);
         if (p == null)
         {
             if (desktopLocal == null) ctx.Response.Headers["WWW-Authenticate"] = naval ? "Bearer" : "Basic realm=\"APEX Local Operator\", charset=\"UTF-8\"";
@@ -178,7 +178,7 @@ internal sealed class NavalAccessPolicy : INavalAccessPolicy
         }
         if (ctx.Request.Path.StartsWithSegments("/api/naval"))
         {
-            bool control = Apex.Desktop.Okx.OkxControlEndpoints.IsPath(path);
+            bool control = Apex.Desktop.Okx.OkxControlEndpoints.IsPath(path) || Apex.Desktop.Okx.OkxRemoteControllerEndpoints.IsPath(path);
             if (!naval && !control) { await Error(ctx, 404); return false; }
             if (control) return true; // Same verified Operator; endpoint enforces JSON, CSRF and closed commands.
             if (!HttpMethods.IsGet(ctx.Request.Method)) { ctx.Response.Headers["Allow"] = "GET"; await Error(ctx, 405); return false; }

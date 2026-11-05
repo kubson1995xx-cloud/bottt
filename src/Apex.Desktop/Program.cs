@@ -141,6 +141,7 @@ namespace Apex.Desktop
             WebApplication? app = null;
             OkxNavalRuntime? okx = null;
             OkxOperatorControl? okxControl = null;
+            await using var remoteController = new OkxRemoteControllerControl();
             CancellationTokenRegistration stopping = default;
             void StopBackground()
             {
@@ -236,7 +237,7 @@ namespace Apex.Desktop
                     { ctx.Response.Redirect("/naval/"); return; }
                     string html = await File.ReadAllTextAsync(indexPath);
                     html = html.Replace("__APEX_TOKEN__", naval == null ? token : "");
-                    if (naval != null) html = html.Replace("</body>", "<script src=\"/okx-controls.js\" defer></script></body>");
+                    if (naval != null) html = html.Replace("</body>", "<script src=\"/okx-controls.js\" defer></script><script src=\"/remote-controller.js\" defer></script></body>");
                     ctx.Response.ContentType = "text/html; charset=utf-8";
                     ctx.Response.Headers["Cache-Control"] = "no-store";
                     await ctx.Response.WriteAsync(html);
@@ -248,6 +249,7 @@ namespace Apex.Desktop
                 {
                     NavalReadEndpoints.MapNavalReadEndpoints(app, new NavalReadService(new NavalPublicationReader(naval.PublicationPath, naval.Scope), naval.Scope), naval.Access);
                     OkxControlEndpoints.Map(app, okxControl);
+                    OkxRemoteControllerEndpoints.Map(app, remoteController, naval.Access, naval.Scope);
                     NavalFrontendEndpoints.MapNavalFrontendEndpoints(app);
                 }
 
