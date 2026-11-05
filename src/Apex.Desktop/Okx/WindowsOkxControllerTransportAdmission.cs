@@ -54,10 +54,10 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             var entries=Directory.GetFileSystemEntries(profile).Select(Path.GetFileName).OrderBy(x=>x,StringComparer.Ordinal).ToArray();
             if(!entries.SequenceEqual(new[]{"identity","known_hosts"}))throw Denied();
             string identity=Path.Combine(profile,"identity"),knownHosts=Path.Combine(profile,"known_hosts");
-            stage="IDENTITY";var key=lease.HoldFile(identity,true,65536);
+            stage="IDENTITY";var key=lease.HoldFile(identity,FileRole.PrivateData,65536);
             if(!Convert.ToHexString(SHA256.HashData(key.Stream)).Equals(config.IdentitySha256,StringComparison.OrdinalIgnoreCase))throw Denied();
             key.Stream.Position=0;
-            stage="HOST_PIN";var hosts=lease.HoldFile(knownHosts,true,1024);
+            stage="HOST_PIN";var hosts=lease.HoldFile(knownHosts,FileRole.PrivateData,1024);
             string expected=(config.Port==22?config.Host:"["+config.Host+"]:"+config.Port.ToString(System.Globalization.CultureInfo.InvariantCulture))+" ssh-ed25519 "+config.HostKey+"\n";
             byte[] bytes=new byte[checked((int)hosts.Stream.Length)];hosts.Stream.ReadExactly(bytes);hosts.Stream.Position=0;
             if(!bytes.AsSpan().SequenceEqual(Encoding.ASCII.GetBytes(expected)))throw Denied();
@@ -66,7 +66,9 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             if(n==0||n>=windows.Capacity||!Environment.Is64BitProcess)throw Denied();
             string exe=Path.Combine(ExactSyntax(windows.ToString()),"System32","OpenSSH","ssh.exe");
             lease.HoldDirectoryChain(Path.GetDirectoryName(exe)!,null,false);
-            lease.HoldFile(exe,false,64*1024*1024);
+            // Only this OS-composed protected executable may have servicing hard links.
+            // Private keys/pins never enter this role; its observed link count is pinned, not ignored.
+            lease.HoldFile(exe,FileRole.SystemSsh,64*1024*1024);
             lease.Spec=OkxControllerSshLaunchSpec.Build(new(config.Host,config.Port,config.User,identity,knownHosts),exe,"NUL");
             stage="CAPABILITY";lease.Capability=OkxControllerSshLaunchSpec.AdmittedTransportCapability.Issue(lease);
             return lease;
@@ -108,9 +110,10 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             finally{opened?.Dispose();}
         }
     }
-    private OpenedFile HoldFile(string path,bool privateFile,long maximum)
+    private enum FileRole { PrivateData, SystemSsh }
+    private OpenedFile HoldFile(string path,FileRole role,long maximum)
     {
-        var file=new OpenedFile(ExactSyntax(path),privateFile,maximum,sid);
+        var file=new OpenedFile(ExactSyntax(path),role,maximum,sid);
         files.Add(file);return file;
     }
     // The capability can request only this exact spec. Both validation and StartInfo construction
@@ -149,14 +152,15 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
     private sealed class OpenedFile:IDisposable
     {
         internal string Path {get;}
-        internal bool Private {get;}
+        private readonly FileRole role;
         internal FileStream Stream {get;}
         private readonly WindowsPathSecurity.FileInformation original;
+        private byte[]? originalSecurity;
         private readonly string owner;
         private readonly long maximum;
-        internal OpenedFile(string path,bool privateFile,long max,string sid)
+        internal OpenedFile(string path,FileRole role,long max,string sid)
         {
-            Path=path;Private=privateFile;owner=sid;maximum=max;
+            Path=path;this.role=role;owner=sid;maximum=max;
             var handle=CreateFileW(path,0x80020000,1 /* share read only */,IntPtr.Zero,3,0x00200000,IntPtr.Zero);
             if(handle.IsInvalid){handle.Dispose();throw Denied();}
             try
@@ -170,19 +174,26 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
         internal void Validate()
         {
             var handle=Stream.SafeFileHandle;
-            if(!GetFileInformationByHandle(handle,out var info)||info.Links!=1||(info.Attributes&(uint)(FileAttributes.Directory|FileAttributes.ReparsePoint))!=0||info.VolumeSerial!=original.VolumeSerial||info.IndexHigh!=original.IndexHigh||info.IndexLow!=original.IndexLow||Stream.Length is <=0||Stream.Length>maximum)throw Denied("FILE_IDENTITY");
+            if(!GetFileInformationByHandle(handle,out var info)||info.Links<1||info.Links!=original.Links||(role==FileRole.PrivateData&&info.Links!=1)||(info.Attributes&(uint)(FileAttributes.Directory|FileAttributes.ReparsePoint))!=0||info.VolumeSerial!=original.VolumeSerial||info.IndexHigh!=original.IndexHigh||info.IndexLow!=original.IndexLow||info.SizeHigh!=original.SizeHigh||info.SizeLow!=original.SizeLow||Stream.Length is <=0||Stream.Length>maximum)throw Denied("FILE_IDENTITY");
             var name=new StringBuilder(32768);uint n=GetFinalPathNameByHandleW(handle,name,(uint)name.Capacity,0);
             if(n==0||n>=name.Capacity||!name.ToString().Equals("\\\\?\\"+Path,StringComparison.OrdinalIgnoreCase))throw Denied();
             using(var view=new WindowsPathSecurity.NativeObject(new SafeFileHandle(handle.DangerousGetHandle(),false),Path,info))
-            {if(Private)WindowsPathSecurity.Validate(view,true);else ValidateSystemSecurity(handle,false);}
+            {
+                if(role==FileRole.PrivateData)WindowsPathSecurity.Validate(view,true);else ValidateSystemSecurity(handle,false);
+                using var current=WindowsPathSecurity.Open(Path);
+                if(!current.SameIdentity(view)||!current.Path.Equals(Path,StringComparison.OrdinalIgnoreCase))throw Denied("FILE_IDENTITY");
+            }
             if(GetSecurityInfo(handle,1,5,out _,out _,out _,out _,out var sd)!=0||sd==IntPtr.Zero)throw Denied();
             try
             {
                 uint size=GetSecurityDescriptorLength(sd);if(size is 0 or >65536)throw Denied();
                 byte[] bytes=new byte[size];Marshal.Copy(sd,bytes,0,bytes.Length);var acl=new RawSecurityDescriptor(bytes,0);
-                if(Private&&acl.Owner?.Value!=owner)throw Denied("FILE_OWNER");
-                // Non-private executable may be readable, never writable, by untrusted principals.
-                foreach(GenericAce a in acl.DiscretionaryAcl!)if(a is CommonAce ace&&ace.AceType==AceType.AccessAllowed&&ace.SecurityIdentifier.Value!=owner&&!ace.SecurityIdentifier.IsWellKnown(WellKnownSidType.LocalSystemSid)&&!ace.SecurityIdentifier.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)&&ace.SecurityIdentifier.Value!="S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"&&(ace.AccessMask&unchecked((int)0x500D0116))!=0)throw Denied();
+                if(role==FileRole.PrivateData&&acl.Owner?.Value!=owner)throw Denied("FILE_OWNER");
+                if(role==FileRole.SystemSsh)
+                {
+                    if(originalSecurity!=null&&!bytes.AsSpan().SequenceEqual(originalSecurity))throw Denied("SYSTEM_SECURITY_CHANGED");
+                    originalSecurity??=bytes;
+                }
             }
             finally{LocalFree(sd);}
         }
@@ -197,8 +208,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
         {
             uint size=GetSecurityDescriptorLength(sd);if(size is 0 or >65536)throw Denied("SYSTEM_SECURITY");
             byte[] bytes=new byte[size];Marshal.Copy(sd,bytes,0,bytes.Length);var descriptor=new RawSecurityDescriptor(bytes,0);
-            var me=WindowsIdentity.GetCurrent().User;
-            bool Trusted(SecurityIdentifier? s)=>s!=null&&(s==me||s.IsWellKnown(WellKnownSidType.LocalSystemSid)||s.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)||s.Value=="S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
+            bool Trusted(SecurityIdentifier? s)=>s!=null&&(s.IsWellKnown(WellKnownSidType.LocalSystemSid)||s.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)||s.Value=="S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
             if(!Trusted(descriptor.Owner)||(descriptor.ControlFlags&ControlFlags.DiscretionaryAclPresent)==0||descriptor.DiscretionaryAcl==null)throw Denied("SYSTEM_SECURITY");
             foreach(GenericAce entry in descriptor.DiscretionaryAcl)
             {

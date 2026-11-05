@@ -634,7 +634,7 @@ jobs:
             Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
             & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName!~Wrong_platform_refuses_before_accessing_any_path' --logger 'trx;LogFileName=admission.trx' --results-directory $e *> (Join-Path $e 'admission-tests.log')
             $code=$LASTEXITCODE
-            [ordered]@{exit=$code;sourceOnly=$true;sshStarted=$false;phase='os-identity-red'} | ConvertTo-Json | Set-Content (Join-Path $e 'admission-summary.json')
+            [ordered]@{exit=$code;sourceOnly=$true;sshStarted=$false;phase='os-identity-green'} | ConvertTo-Json | Set-Content (Join-Path $e 'admission-summary.json')
             if ($code -ne 0) { throw 'Native admission tests failed; retain original closure and TRX' }
           } finally { Pop-Location }
       - name: Existing native broker-store source gate only
