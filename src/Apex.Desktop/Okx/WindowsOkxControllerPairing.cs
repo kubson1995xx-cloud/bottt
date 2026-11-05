@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -13,6 +14,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Apex.Desktop.Services;
+using Microsoft.Win32.SafeHandles;
 namespace Apex.Desktop.Okx;
 
 // One-time, native, offline setup. Never imports private keys or broker credentials.
@@ -68,6 +70,7 @@ internal static class WindowsOkxControllerPairing
         // native callers also serialize provisioning with a CREATE_NEW pending marker.
         if(!OperatingSystem.IsWindows()||!trusted||ct.IsCancellationRequested||!Valid(host,port,user,key))return false;
         string stage="ROOT";
+        var systemDirectories=new List<WindowsPathSecurity.NativeObject>();
         try
         {
             using var lease=WindowsPrivateData.Open(root,AppContext.BaseDirectory);
@@ -80,9 +83,19 @@ internal static class WindowsOkxControllerPairing
             var windows=new StringBuilder(32768);uint n=GetSystemWindowsDirectoryW(windows,(uint)windows.Capacity);
             if(n==0||n>=windows.Capacity||!Environment.Is64BitProcess)return false;
             string exe=Path.Combine(windows.ToString(),"System32","OpenSSH","ssh-keygen.exe");
+            foreach(string path in WindowsPrivateData.Components(Path.GetDirectoryName(exe)!))
+            {
+                var opened=WindowsPathSecurity.Open(path);systemDirectories.Add(opened);
+                if(!opened.IsDirectory||!opened.Path.Equals(path,StringComparison.OrdinalIgnoreCase))return false;
+                ValidateKeygenSecurity(opened.Handle,true,path.Equals(Path.GetDirectoryName(exe),StringComparison.OrdinalIgnoreCase));
+            }
             stage="KEYGEN_ADMISSION";using var executable=WindowsPathSecurity.Open(exe);
             if(executable.IsDirectory||!executable.Path.Equals(exe,StringComparison.OrdinalIgnoreCase))return false;
-            WindowsPathSecurity.Validate(executable,false);
+            ValidateKeygenSecurity(executable.Handle,false,false);
+            using var executableRead=CreateFileW(exe,0x80020000,1,IntPtr.Zero,3,0x00200000,IntPtr.Zero);
+            if(executableRead.IsInvalid||!GetFileInformationByHandle(executableRead,out var executableIdentity))return false;
+            using var executableView=new WindowsPathSecurity.NativeObject(new SafeFileHandle(executableRead.DangerousGetHandle(),false),exe,executableIdentity);
+            if(!executableView.SameIdentity(executable))return false;
             stage="PENDING";using var marker=PrivateFile(pending);marker.WriteByte(1);marker.Flush(true);
             // A crash/failure deliberately leaves pending/partial state for explicit
             // investigation, never silent reenrollment or key replacement on restart.
@@ -122,6 +135,28 @@ internal static class WindowsOkxControllerPairing
             return true;
         }
         catch(Exception e) when(e is not OutOfMemoryException){Console.Error.WriteLine("CONTROLLER_PAIRING_REFUSED:"+stage+":"+(e is WindowsDataException w?w.Code:e.GetType().Name));return false;}
+        finally{foreach(var directory in systemDirectories.AsEnumerable().Reverse())directory.Dispose();}
+    }
+    // Same narrow OS-servicing trust as the accepted transport, confined here to
+    // the OS-selected ssh-keygen and its system ancestry; never used on private data.
+    private static void ValidateKeygenSecurity(SafeFileHandle handle,bool directory,bool closed)
+    {
+        if(GetSecurityInfo(handle,1,5,out _,out _,out _,out _,out var sd)!=0||sd==IntPtr.Zero)throw new IOException("KEYGEN_SECURITY");
+        try
+        {
+            uint size=GetSecurityDescriptorLength(sd);if(size is 0 or >65536)throw new IOException("KEYGEN_SECURITY");
+            var bytes=new byte[size];Marshal.Copy(sd,bytes,0,bytes.Length);var descriptor=new RawSecurityDescriptor(bytes,0);
+            bool Trusted(SecurityIdentifier? s)=>s!=null&&(s.IsWellKnown(WellKnownSidType.LocalSystemSid)||s.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)||s.Value=="S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
+            if(!Trusted(descriptor.Owner)||(descriptor.ControlFlags&ControlFlags.DiscretionaryAclPresent)==0||descriptor.DiscretionaryAcl==null)throw new IOException("KEYGEN_SECURITY");
+            foreach(GenericAce entry in descriptor.DiscretionaryAcl)
+            {
+                if(entry is not CommonAce ace||ace.IsCallback||ace.AceType is not(AceType.AccessAllowed or AceType.AccessDenied))throw new IOException("KEYGEN_SECURITY");
+                if(ace.AceType==AceType.AccessDenied||Trusted(ace.SecurityIdentifier)||(ace.AceFlags&AceFlags.InheritOnly)!=0)continue;
+                int rights=directory?(closed?unchecked((int)0x500D0156):unchecked((int)0x500D0150)):unchecked((int)0x500D0116);
+                if((ace.AccessMask&rights)!=0)throw new IOException("KEYGEN_SECURITY");
+            }
+        }
+        finally{LocalFree(sd);}
     }
     private static FileStream PrivateFile(string path)
     {
@@ -132,5 +167,10 @@ internal static class WindowsOkxControllerPairing
     private static async Task Drain(Stream stream)
     {byte[] buffer=new byte[4096];int total=0,n;while((n=await stream.ReadAsync(buffer))>0){total+=n;if(total>65536)throw new IOException("PAIRING_OUTPUT_LIMIT");}}
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern uint GetSystemWindowsDirectoryW(StringBuilder buffer,uint length);
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr attributes,uint creation,uint flags,IntPtr template);
+    [DllImport("kernel32.dll",SetLastError=true)]private static extern bool GetFileInformationByHandle(SafeFileHandle file,out WindowsPathSecurity.FileInformation info);
+    [DllImport("advapi32.dll")]private static extern uint GetSecurityInfo(SafeFileHandle file,uint type,uint information,out IntPtr owner,out IntPtr group,out IntPtr dacl,out IntPtr sacl,out IntPtr descriptor);
+    [DllImport("advapi32.dll")]private static extern uint GetSecurityDescriptorLength(IntPtr descriptor);
+    [DllImport("kernel32.dll")]private static extern IntPtr LocalFree(IntPtr pointer);
     [DllImport("user32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern int MessageBoxW(IntPtr window,string text,string caption,uint flags);
 }

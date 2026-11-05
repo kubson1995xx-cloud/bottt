@@ -21,7 +21,7 @@ try {
  $closure=Join-Path $e 'composition-closure';New-Item -ItemType Directory -Path $closure|Out-Null
  Copy-Item $testRoot (Join-Path $closure 'tests') -Recurse
  Copy-Item (Join-Path $repo 'src/Apex.Desktop/bin/Release/net8.0') (Join-Path $closure 'host') -Recurse
- $filter='FullyQualifiedName~Apex.ControllerComposition.Tests'
+ $filter='FullyQualifiedName~Apex.ControllerComposition.Tests.CompositionTests'
  $old=$ErrorActionPreference
  try {$ErrorActionPreference='Continue'; & dotnet test $project -c Release --no-build --no-restore --filter $filter --logger 'trx;LogFileName=composition.trx' --results-directory $e *> (Join-Path $e 'composition-tests.log');$code=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
  [ordered]@{phase=$Phase;exit=$code;sourceOnly=$true;privateBrokerTested=$false;vpsTested=$false}|ConvertTo-Json|Set-Content (Join-Path $e 'composition-summary.json')

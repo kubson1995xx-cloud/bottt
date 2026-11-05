@@ -43,6 +43,7 @@ public sealed class CompositionTests
         internal readonly HttpClient Http;
         private readonly Task<int> running;
         private readonly Process? child;
+        private bool disposed;
         internal Host(string root)
         {
             using var l=new TcpListener(IPAddress.Loopback,0);l.Start();int port=((IPEndPoint)l.LocalEndpoint).Port;l.Stop();
@@ -74,6 +75,7 @@ public sealed class CompositionTests
         {using var r=await Http.PostAsJsonAsync("/api/naval/controller/"+action,new{commandId="cmd-"+Guid.NewGuid().ToString("N")});r.EnsureSuccessStatusCode();return await r.Content.ReadFromJsonAsync<JsonElement>();}
         public async ValueTask DisposeAsync()
         {
+            if(disposed)return;disposed=true;
             Stop.Cancel();
             if(child!=null){if(!child.HasExited)child.Kill(true);await running.WaitAsync(TimeSpan.FromSeconds(20));child.Dispose();}
             else Assert.Equal(0,await running.WaitAsync(TimeSpan.FromSeconds(20)));
@@ -133,6 +135,19 @@ public sealed class CompositionTests
         else {var acl=new DirectoryInfo(root.Path_).GetAccessControl();acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid,null),FileSystemRights.Read,AccessControlType.Allow));new DirectoryInfo(root.Path_).SetAccessControl(acl);}
         var before=Inventory(root.Path_);var security=new DirectoryInfo(root.Path_).GetAccessControl().GetSecurityDescriptorBinaryForm();
         Assert.False(await Pair(root.Path_,peer.Config,true));Assert.Equal(before,Inventory(root.Path_));Assert.Equal(security,new DirectoryInfo(root.Path_).GetAccessControl().GetSecurityDescriptorBinaryForm());Assert.Empty(peer.Events);
+    }
+    [Fact] public async Task Pending_pairing_production_start_refuses_without_reset()
+    {
+        using var root=new Root();File.WriteAllBytes(Path.Combine(root.Path_,"apex.lock"),Array.Empty<byte>());
+        File.WriteAllText(Path.Combine(root.Path_,"controller-pairing.pending"),"incomplete");var before=Inventory(root.Path_);
+        Assert.Equal(2,await Program.Run(new[]{"--data",root.Path_,"--no-browser"},false));Assert.Equal(before,Inventory(root.Path_));
+    }
+    [Theory][InlineData("invalid-host")][InlineData("invalid-port")][InlineData("invalid-user")][InlineData("invalid-pin")]
+    public async Task Invalid_operator_metadata_never_creates_key_material(string kind)
+    {
+        await using var peer=await NativeSshFixture.Open();using var root=new Root();var c=peer.Config;
+        c=kind switch{"invalid-host"=>c with{Host="host;command"},"invalid-port"=>c with{Port=0},"invalid-user"=>c with{User="root -o"},_=>c with{HostKey=new string('A',68)}};
+        var before=Inventory(root.Path_);Assert.False(await Pair(root.Path_,c,true));Assert.Equal(before,Inventory(root.Path_));Assert.Empty(peer.Events);
     }
     internal static string[] Inventory(string root)=>Directory.GetFiles(root,"*",SearchOption.AllDirectories).Order().Select(p=>Path.GetRelativePath(root,p)+":"+Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p)))).ToArray();
     internal static void Owner(string p){var acl=new FileInfo(p).GetAccessControl();acl.SetOwner(WindowsIdentity.GetCurrent().User!);new FileInfo(p).SetAccessControl(acl);}
