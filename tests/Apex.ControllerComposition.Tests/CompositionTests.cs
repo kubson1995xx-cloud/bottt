@@ -54,6 +54,9 @@ public sealed class CompositionTests
             {
                 Assert.True(Path.IsPathFullyQualified(exe)&&File.Exists(exe),"EXPLICIT_PACKAGE_EXE_REQUIRED_NO_FALLBACK");
                 var start=new ProcessStartInfo(exe){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};foreach(var arg in args)start.ArgumentList.Add(arg);
+                foreach(string name in new[]{"DOTNET_ROOT","DOTNET_ROOT_X64","DOTNET_ROOT(x86)","DOTNET_SHARED_STORE"})start.Environment[name]=Path.Combine(root,"absent-runtime");
+                start.Environment["DOTNET_MULTILEVEL_LOOKUP"]="0";start.Environment["PATH"]=Environment.GetFolderPath(Environment.SpecialFolder.System);
+                foreach(string name in new[]{"DOTNET_STARTUP_HOOKS","DOTNET_ADDITIONAL_DEPS","APEX_DATA_DIR"})start.Environment.Remove(name);
                 child=Process.Start(start)!;_=child.StandardOutput.BaseStream.CopyToAsync(Stream.Null);_=child.StandardError.BaseStream.CopyToAsync(Stream.Null);
                 running=Observe(child);
             }

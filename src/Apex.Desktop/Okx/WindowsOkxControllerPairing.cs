@@ -74,6 +74,7 @@ internal static class WindowsOkxControllerPairing
         try
         {
             using var lease=WindowsPrivateData.Open(root,AppContext.BaseDirectory);
+            if(!root.Equals(lease.Path,StringComparison.OrdinalIgnoreCase))return false;
             root=lease.Path;
             // Refuse unexplained startup state; never normalize/reset a partial profile.
             stage="PRESENTATION";_=WindowsLocalSetup.Ensure(root,Path.Combine(AppContext.BaseDirectory,"presentation"));
@@ -115,7 +116,7 @@ internal static class WindowsOkxControllerPairing
             // owner. Existing files/roots are never repaired.
             stage="GENERATED_FILES";foreach(string p in new[]{identity,identity+".pub"})
             {
-                var file=new FileInfo(p);var acl=file.GetAccessControl();acl.SetOwner(WindowsIdentity.GetCurrent().User!);file.SetAccessControl(acl);
+                var file=new FileInfo(p);file.SetAccessControl(PrivateSecurity());
                 using var opened=WindowsPathSecurity.Open(p);WindowsPathSecurity.Validate(opened,true);
             }
             string publicKey=File.ReadAllText(identity+".pub");
@@ -158,12 +159,13 @@ internal static class WindowsOkxControllerPairing
         }
         finally{LocalFree(sd);}
     }
-    private static FileStream PrivateFile(string path)
+    private static FileSecurity PrivateSecurity()
     {
         var me=WindowsIdentity.GetCurrent().User!;var security=new FileSecurity();security.SetOwner(me);security.SetAccessRuleProtection(true,false);
         foreach(var sid in new[]{me,new SecurityIdentifier(WellKnownSidType.LocalSystemSid,null),new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null)})security.AddAccessRule(new FileSystemAccessRule(sid,FileSystemRights.FullControl,AccessControlType.Allow));
-        return FileSystemAclExtensions.Create(new FileInfo(path),FileMode.CreateNew,FileSystemRights.FullControl,FileShare.None,4096,FileOptions.WriteThrough,security);
+        return security;
     }
+    private static FileStream PrivateFile(string path)=>FileSystemAclExtensions.Create(new FileInfo(path),FileMode.CreateNew,FileSystemRights.FullControl,FileShare.None,4096,FileOptions.WriteThrough,PrivateSecurity());
     private static async Task Drain(Stream stream)
     {byte[] buffer=new byte[4096];int total=0,n;while((n=await stream.ReadAsync(buffer))>0){total+=n;if(total>65536)throw new IOException("PAIRING_OUTPUT_LIMIT");}}
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true)]private static extern uint GetSystemWindowsDirectoryW(StringBuilder buffer,uint length);

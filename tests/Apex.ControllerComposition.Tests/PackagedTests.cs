@@ -62,7 +62,11 @@ public sealed class PackagedTests
         Assert.NotNull(Environment.GetEnvironmentVariable("APEX_COMPOSITION_PACKAGE_EXE"));
         await using var peer=await NativeSshFixture.Open("composition-lost-start");using var root=new CompositionTests.Root();await InstallPublic(peer,root.Path_);
         await using var host=new CompositionTests.Host(root.Path_);await host.Status();
-        foreach(string a in new[]{"connect","connect-account","prepare","arm"})Assert.Equal("confirmed",(await host.Command(a)).GetProperty("outcome").GetString());
+        foreach(var (action,ready) in new[]{("connect","canConnectAccount"),("connect-account","canPrepare"),("prepare","canArm"),("arm","canStart")})
+        {
+            Assert.Equal("confirmed",(await host.Command(action)).GetProperty("outcome").GetString());
+            await WindowsTestHost.Until(async()=>{var state=await host.Status();return state.GetProperty(ready).GetBoolean()&&state.GetProperty("pending").GetInt32()==0;},"Fresh post-command readiness missing: "+action);
+        }
         var result=await host.Command("start");Assert.Equal("pending-or-unknown",result.GetProperty("outcome").GetString());
         var s=await host.Status();Assert.True(s.GetProperty("stale").GetBoolean());Assert.False(s.GetProperty("canStart").GetBoolean());
         Assert.Equal(1,peer.Events.Count(x=>x=="START"));Assert.DoesNotContain("STOP",peer.Events);
