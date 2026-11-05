@@ -24,6 +24,14 @@ internal sealed class NativeSshFixture:IAsyncDisposable
     internal static string Classify(string text)=>string.Join("|",new[]{"Permission denied","Host key verification failed","Bad owner or permissions","bad ownership","Accepted publickey","Failed publickey","CreateProcessW failed","CreateProcessAsUserW failed","unable to load","Could not load","not allowed","No such file","not recognized","Could not resolve","Connection closed","Connection reset","Server listening","Starting session","shell request","exec request","subsystem request","get_passwd","privsep","posix_spawn","cannot find","not found","not implemented"}.Where(s=>text.Contains(s,StringComparison.OrdinalIgnoreCase)));
     private async Task DrainDiagnostic(StreamReader input)
     {char[] b=new char[2048];int n;while((n=await input.ReadAsync(b))>0){lock(serverDiagnostic){if(serverDiagnostic.Length<65536)serverDiagnostic.Append(b,0,Math.Min(n,65536-serverDiagnostic.Length));}}}
+    internal static string SyntheticError(string text,string root)
+    {
+        // Independent synthetic OS control only, never the product transport. Redact fixture
+        // paths, current user, public-key-shaped strings and nonprintable bytes before assertion.
+        text=text.Replace(root,"[OWNED_ROOT]",StringComparison.OrdinalIgnoreCase).Replace(WindowsIdentity.GetCurrent().Name,"[SYNTHETIC_USER]",StringComparison.OrdinalIgnoreCase);
+        text=System.Text.RegularExpressions.Regex.Replace(text,@"[A-Za-z0-9+/=]{40,}","[REDACTED]");
+        text=new string(text.Where(c=>c is >= ' ' and <= '~').Take(384).ToArray());return text;
+    }
     internal string ServerCodes{get{lock(serverDiagnostic)return Classify(serverDiagnostic.ToString());}}
     private readonly List<Process> helpers=new();
     private string sshDirectory="";

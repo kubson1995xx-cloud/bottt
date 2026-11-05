@@ -18,7 +18,7 @@ public sealed class NativeTransportTests
         try
         {
             string? hello=await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("CONTROL_EOF exit="+child.ExitCode+" client="+NativeSshFixture.Classify(diagnostic)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
+            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("CONTROL_EOF exit="+child.ExitCode+" client="+NativeSshFixture.Classify(diagnostic)+" syntheticDiagnostic="+NativeSshFixture.SyntheticError(diagnostic,f.Root)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
             Assert.Equal(OkxControllerProtocol.Version,OkxControllerProtocol.DecodeHello(hello).Schema);
             Assert.Contains("AUTHENTICATED_FIXED_RELAY",f.Events);
         }
