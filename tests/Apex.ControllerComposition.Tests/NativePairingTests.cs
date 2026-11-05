@@ -42,8 +42,13 @@ public sealed class NativePairingTests
                 stage="COMPLETION";IntPtr done=IntPtr.Zero;
                 await WindowsTestHost.Until(()=>Task.FromResult((done=Window(child.Id,"APEX — konfiguracja kontrolera"))!=IntPtr.Zero),"Pairing completion modal missing");
                 Assert.True(File.Exists(Path.Combine(root,"controller-public-key.txt")),"NATIVE_PROVISIONING_DID_NOT_COMPLETE");
-                await WindowsTestHost.Until(()=>Task.FromResult(GetDlgItem(done,1)!=IntPtr.Zero&&IsWindowVisible(GetDlgItem(done,1))),"Pairing completion button not populated");
-                Click(GetDlgItem(done,1));
+                await WindowsTestHost.Until(()=>Task.FromResult(Children(done).Contains("Zapisano konfigurację bez sieci i handlu.",StringComparison.Ordinal)),"Pairing success text not populated");
+                var nativeControls=new List<object>();
+                EnumChildWindows(done,(h,_)=>{var cls=new StringBuilder(128);GetClassNameW(h,cls,cls.Capacity);nativeControls.Add(new{id=GetDlgCtrlID(h),className=cls.ToString(),visible=IsWindowVisible(h)});return true;},IntPtr.Zero);
+                WindowsTestHost.Evidence("native-completion-controls-"+child.Id,new{controls=nativeControls,successTextDisplayed=true});
+                // Acknowledge the real native default action; do not assume this OS
+                // message-box implementation gives its OK button child ID1.
+                Enter(done);
             }
             stage="EXIT";await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));await Task.WhenAll(stdout,stderr);Assert.Equal(trust?0:2,child.ExitCode);
             WindowsTestHost.Evidence("native-pairing-"+child.Id,new{extractedExe=true,invalidInputStaysOpen=true,fieldsAgree,parserAccepts,keyboardSubmit=true,hostFingerprintDisplayed=true,explicitTrust=trust,noNetworkOrBrokerConnect=true,processExited=true});
@@ -89,6 +94,8 @@ public sealed class NativePairingTests
     [DllImport("user32.dll",CharSet=CharSet.Unicode)]private static extern int GetWindowTextW(IntPtr w,StringBuilder text,int count);
     [DllImport("user32.dll",CharSet=CharSet.Unicode,EntryPoint="SendMessageW")]private static extern IntPtr SendText(IntPtr w,uint msg,IntPtr a,string text);
     [DllImport("user32.dll",CharSet=CharSet.Unicode,EntryPoint="SendMessageW")]private static extern IntPtr SendRead(IntPtr w,uint msg,IntPtr a,StringBuilder text);
+    [DllImport("user32.dll")]private static extern int GetDlgCtrlID(IntPtr w);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)]private static extern int GetClassNameW(IntPtr w,StringBuilder text,int count);
     [DllImport("user32.dll")]private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]private static extern IntPtr GetDlgItem(IntPtr w,int id);
     [DllImport("user32.dll")]private static extern bool IsWindowVisible(IntPtr w);
