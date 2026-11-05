@@ -28,6 +28,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
     private readonly HashSet<string> systemDirectories=new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> strictSystemDirectories=new(StringComparer.OrdinalIgnoreCase);
     private readonly List<OpenedFile> files=new();
+    private WindowsPathSecurity.NativeObject? commonDirectory;
     private readonly string sid;
     private readonly long issued=Stopwatch.GetTimestamp();
     private bool disposed;
@@ -79,9 +80,13 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
                 commonAppData=ExactSyntax(Marshal.PtrToStringUni(common)!);
             }
             finally{if(common!=IntPtr.Zero)Marshal.FreeCoTaskMem(common);}
-            // CommonAppData may allow new unrelated siblings. Pin its canonical root and
-            // protected ancestry, not a new closed-directory policy or inherited value.
-            lease.HoldDirectoryChain(commonAppData,null,false,false);
+            // This OS-known shared root is not a trusted config/input directory. Its normal
+            // ACL permits users to create children and set attributes; private/system-SSH
+            // policies do not apply. -F NUL and GlobalKnownHostsFile=NUL remain fixed.
+            // Pin the canonical native directory identity and reject reparse substitution.
+            WindowsPathSecurity.ValidateVolume(Path.GetPathRoot(commonAppData)!);
+            lease.commonDirectory=WindowsPathSecurity.Open(commonAppData);
+            if(!lease.commonDirectory.IsDirectory||!lease.commonDirectory.Path.Equals(commonAppData,StringComparison.OrdinalIgnoreCase))throw Denied();
             lease.Spec=OkxControllerSshLaunchSpec.BuildWindows(new(config.Host,config.Port,config.User,identity,knownHosts),exe,systemRoot,commonAppData);
             stage="CAPABILITY";lease.Capability=OkxControllerSshLaunchSpec.AdmittedTransportCapability.Issue(lease);
             return lease;
@@ -101,7 +106,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
         if(path==null||path.Any(c=>c is '$' or '"' or '`'))throw Denied();
         return WindowsPrivateData.ValidateSyntax(path);
     }
-    private void HoldDirectoryChain(string target,string? privateRoot,bool checkLocation,bool closedTarget=true)
+    private void HoldDirectoryChain(string target,string? privateRoot,bool checkLocation)
     {
         target=ExactSyntax(target);WindowsPathSecurity.ValidateVolume(Path.GetPathRoot(target)!);
         foreach(string path in WindowsPrivateData.Components(target))
@@ -114,10 +119,10 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             {
                 if(!opened.IsDirectory||!opened.Path.Equals(path,StringComparison.OrdinalIgnoreCase))throw Denied();
                 if(checkLocation)WindowsPathSecurity.Validate(opened,privateTarget);
-                else ValidateSystemSecurity(opened.Handle,true,closedTarget&&path.Equals(target,StringComparison.OrdinalIgnoreCase));
+                else ValidateSystemSecurity(opened.Handle,true,path.Equals(target,StringComparison.OrdinalIgnoreCase));
                 if(privateTarget)privateDirectories.Add(opened.Path);
                 if(!checkLocation)systemDirectories.Add(opened.Path);
-                if(!checkLocation&&closedTarget&&path.Equals(target,StringComparison.OrdinalIgnoreCase))strictSystemDirectories.Add(opened.Path);
+                if(!checkLocation&&path.Equals(target,StringComparison.OrdinalIgnoreCase))strictSystemDirectories.Add(opened.Path);
                 directories.Add(opened);opened=null!;
             }
             finally{opened?.Dispose();}
@@ -138,6 +143,11 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             if(disposed||!ReferenceEquals(spec,Spec)||Stopwatch.GetElapsedTime(issued)>TimeSpan.FromSeconds(30)||WindowsIdentity.GetCurrent().User?.Value!=sid)throw Denied();
             try
             {
+                if(commonDirectory!=null)
+                {
+                    using var common=WindowsPathSecurity.Open(commonDirectory.Path);
+                    if(!common.IsDirectory||!common.SameIdentity(commonDirectory)||!common.Path.Equals(commonDirectory.Path,StringComparison.OrdinalIgnoreCase))throw Denied();
+                }
                 foreach(var d in directories)
                 {
                     if(privateDirectories.Contains(d.Path))WindowsPathSecurity.Validate(d,true);
@@ -158,6 +168,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
         lock(gate)
         {
             if(disposed)return;disposed=true;
+            commonDirectory?.Dispose();commonDirectory=null;
             foreach(var f in files)f.Dispose();files.Clear();
             foreach(var d in directories.AsEnumerable().Reverse())d.Dispose();directories.Clear();
         }
