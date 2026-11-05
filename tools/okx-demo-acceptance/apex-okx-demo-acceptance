@@ -1,0 +1,17 @@
+#!/bin/sh
+# Finite APEX DEMO runner; no credential arguments or inherited secret channels.
+set -eu
+umask 077
+ulimit -c 0
+case "$#" in
+  0) ;;
+  1) case "$1" in --help|--identity|--offline-input-check|--offline-input-error|--save-credentials|--replace-credentials|--credentials-status|--forget-credentials|--check-connection|--check-obligations|--provision-funding-premise) ;; *) printf '%s\n' 'ARGUMENTS_REFUSED' >&2; exit 2;; esac ;;
+  *) printf '%s\n' 'ARGUMENTS_REFUSED' >&2; exit 2;;
+esac
+exec /usr/bin/env -i \
+  HOME=/home/ubuntu PATH=/usr/bin:/bin DOTNET_ROOT=/home/ubuntu/.dotnet \
+  DOTNET_EnableDiagnostics=0 COMPlus_EnableDiagnostics=0 LANG=C.UTF-8 \
+  TMPDIR=/home/ubuntu/.hermes/cache/scratch \
+  SSH_CONNECTION="${SSH_CONNECTION-}" SSH_TTY="${SSH_TTY-}" \
+  /home/ubuntu/.dotnet/dotnet \
+  /home/ubuntu/apex-deliveries/okx-demo-fee0/persistent-runner/runner/Apex.Okx.DemoAcceptance.dll "$@"

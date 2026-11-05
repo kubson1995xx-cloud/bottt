@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Symulator platformy (WYŁĄCZNIE do testów): udaje most cTrader/MT5 z syntetycznymi notowaniami i natychmiastowym wykonaniem. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Apex.PlatformSimulator</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Apex.Core\Apex.Core.csproj" />
+  </ItemGroup>
+</Project>

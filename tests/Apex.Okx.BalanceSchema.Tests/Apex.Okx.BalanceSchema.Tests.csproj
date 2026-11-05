@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <IsTestProject>true</IsTestProject><IsPackable>false</IsPackable>
+    <AssemblyName>Apex.Tests</AssemblyName><RootNamespace>Apex.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <ProjectReference Include="../../tools/Apex.Okx.DemoAcceptance/Apex.Okx.DemoAcceptance.csproj" />
+    <EmbeddedResource Include="Fixtures/okx-balance-current.json" LogicalName="Apex.Tests.Fixtures.okx-balance-current.json" />
+    <EmbeddedResource Include="../Apex.Adapters.Okx.Tests/Fixtures/ExecutionObservations/market-loans-official.json" LogicalName="Apex.Tests.Fixtures.market-loans-official.json" />
+  </ItemGroup>
+</Project>

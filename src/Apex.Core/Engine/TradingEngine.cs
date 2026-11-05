@@ -1,0 +1,1846 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Apex.Core.Adaptive;
+using Apex.Core.Execution;
+using Apex.Core.Indicators;
+using Apex.Core.Management;
+using Apex.Core.Model;
+using Apex.Core.Performance;
+using Apex.Core.Regime;
+using Apex.Core.Risk;
+using Apex.Core.Safety;
+using Apex.Core.Scanner;
+using Apex.Core.Strategies;
+
+namespace Apex.Core.Engine
+{
+    /// <summary>Informacja o zamkniętej pozycji przekazywana przez platformę.</summary>
+    public sealed class ClosedPositionInfo
+    {
+        /// <summary>Canonical SDK HistoricalTrade.ClosingDealId (positive Int32 widened to Int64).
+        /// Null is a legacy close hint, never an economic record.</summary>
+        public long? ClosingDealId { get; init; }
+        public long PositionId { get; init; }
+        public string Symbol { get; init; } = "";
+        public string Label { get; init; } = "";
+        public string Comment { get; init; } = "";
+        public TradeDirection Direction { get; init; }
+        public double Volume { get; init; }
+        public double EntryPrice { get; init; }
+        public double ExitPrice { get; init; }
+        public DateTime EntryTimeUtc { get; init; }
+        public DateTime ExitTimeUtc { get; init; }
+        public double GrossProfit { get; init; }
+        public double Commission { get; init; }
+        public double Swap { get; init; }
+        public double NetProfit { get; init; }
+        /// <summary>Powód po stronie platformy: StopLoss / TakeProfit / Closed / StopOut.</summary>
+        public string PlatformReason { get; init; } = "";
+    }
+
+    /// <summary>
+    /// Silnik handlowy APEX – ta sama klasa działa w cBocie cTrader, w backteście offline i w testach integracyjnych.
+    /// Cykl (OnTimer): połączenie → konto → limity ryzyka → zabezpieczenie pozycji → weryfikacja niepewnych zleceń →
+    /// zarządzanie pozycjami → skanowanie instrumentów → ranking okazji → wykonanie najlepszych → zapis stanu.
+    /// </summary>
+    public sealed partial class TradingEngine
+    {
+        private readonly EngineConfig _cfg;
+        private StrategyBook _book;
+        private readonly IBrokerGateway _broker;
+        private readonly IMarketData _market;
+        private readonly IFeatureProvider _features;
+        private readonly IKeyValueStore _store;
+        private readonly IEngineLog _log;
+        private readonly ITradeJournal _journal;
+        private readonly NewsCalendar? _news;
+
+        private readonly bool _simulation;
+        private readonly bool _trustedSimulation;
+        private EngineState _state = new();
+        private readonly ExecutionLedger _ledger = new();
+        private RiskManager _risk;
+        private readonly Dictionary<long, TradePlan> _plans = new();
+        private readonly List<UniverseEntry> _universe = new();
+        private readonly Dictionary<string, UniverseEntry> _universeBySymbol = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTime> _lastEval = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, PoolItem> _pool = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, PendingInfo> _pendingInfo = new(StringComparer.Ordinal);
+        private readonly Dictionary<long, string> _closeReasons = new();
+        private readonly Dictionary<long, CloseIntent> _pendingCloses = new();
+        private readonly HashSet<string> _suspended = new(StringComparer.Ordinal);
+        private readonly SpreadTracker _spreads = new();
+        private readonly RingLog _recentSignals = new(12);
+        private readonly RingLog _recentErrors = new(8);
+        private readonly StrategyHealthMonitor _health = new();
+        private readonly Dictionary<string, DateTime> _symbolCooldown = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTime> _dataWarned = new(StringComparer.OrdinalIgnoreCase);
+
+        private bool _initialized;
+        private bool _stateReadFault;
+        private bool _connected = true;
+        private bool _dirty;
+        private bool _persistenceHealthy = true;
+        private DateTime _lastSaveUtc;
+        private int _consecutiveErrors;
+        private int _consecutiveExceptions;
+        private AccountSnapshot? _lastAccount;
+        private DateTime _lastPruneUtc;
+        private string _historyGeneration = "";
+        private bool _projectionReconciled;
+        public bool HistoryReady { get; private set; }
+        public string HistoryMessage { get; private set; } = "oczekiwanie na historię";
+
+        private static readonly JsonSerializerOptions StateJson = new()
+        {
+            Converters = { new JsonStringEnumConverter() },
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        };
+
+        public TradingEngine(EngineConfig cfg, StrategyBook book, IBrokerGateway broker, IMarketData market, IFeatureProvider features,
+            IKeyValueStore store, IEngineLog log, ITradeJournal journal, NewsCalendar? news = null)
+        {
+            var err = cfg.Validate();
+            if (err != null) throw new ArgumentException("Nieprawidłowa konfiguracja: " + err);
+            _cfg = cfg;
+            _trustedSimulation = broker is ITrustedSimulationGateway trusted && trusted.TrustedSimulation;
+            _simulation = cfg.IsBacktest && _trustedSimulation; // immutable local authority, not mutable config
+            _book = book;
+            _broker = broker;
+            _market = market;
+            _features = features;
+            _store = store;
+            _log = log;
+            _journal = journal;
+            _news = news;
+            _risk = new RiskManager(cfg.Risk);
+        }
+
+        public EngineMode Mode => _state.Mode;
+        public string ModeReason => _state.ModeReason;
+        public bool GuardAllowed { get; private set; }
+        public bool GuardIsLive { get; private set; }
+        public string GuardMessage { get; private set; } = "Konto niezweryfikowane";
+        public IReadOnlyList<UniverseEntry> Universe => _universe;
+        public RiskManager Risk => _risk;
+        public ExecutionLedger Ledger => _ledger;
+        public IReadOnlyDictionary<long, TradePlan> Plans => _plans;
+        public IReadOnlyList<TradeRecord> RecentTrades => _state.RecentTrades;
+        public StrategyBook Book => _book;
+        public EngineConfig Config => _cfg;
+
+        /// <summary>
+        /// Opcjonalny, pasywny rejestrator decyzji (AI Decision Center). Silnik tylko zgłasza do niego zdarzenia;
+        /// błędy rejestratora są tłumione i nie mają wpływu na handel.
+        /// </summary>
+        public DecisionRecorder? Decisions { get; set; }
+
+        private void Trace(Action<DecisionRecorder> a)
+        {
+            var d = Decisions;
+            if (d == null) return;
+            try { a(d); }
+            catch (Exception) { /* wizualizacja nigdy nie może zatrzymać silnika */ }
+        }
+
+        private void TraceEval(UniverseEntry u, IStrategy strat, DateTime utc, DateTime barTime, DecisionStage stage, string outcome,
+            bool skipped, List<DecisionGate> gates, StrategyInput? input = null, SignalCandidate? c = null)
+        {
+            Trace(d => d.Add(new DecisionEvent
+            {
+                TimeUtc = utc,
+                Symbol = u.Symbol,
+                AssetClass = u.AssetClass,
+                Strategy = strat.Id,
+                SignalTf = strat.SignalTf.ToString(),
+                FilterTf = strat.FilterTf?.ToString(),
+                BarTime = barTime,
+                SignalId = c?.SignalId,
+                Stage = stage,
+                Verdict = c != null ? DecisionVerdict.Pending : DecisionVerdict.Wait,
+                Direction = c?.Direction.ToString(),
+                Outcome = outcome,
+                StrategyReason = c?.Reason,
+                SignalRegime = input != null ? RegimeSnapshot.From(input.SignalRegime, strat.SignalTf) : null,
+                FilterRegime = input != null ? RegimeSnapshot.From(input.FilterRegime, strat.FilterTf) : null,
+                ReferencePrice = c?.ReferencePrice,
+                StopDistance = c?.StopDistance,
+                TakeProfitDistance = c?.TakeProfitDistance,
+                PlannedRewardRisk = c?.PlannedRewardRisk,
+                Gates = gates,
+            }, skipped));
+        }
+
+        private void TraceUpdate(SignalCandidate c, DateTime utc, Action<DecisionEvent> change, Action<StrategyCounters>? counters = null) =>
+            Trace(d => d.Update(c.SignalId, change, counters, utc));
+
+        private sealed class PoolItem
+        {
+            public SignalCandidate Candidate = null!;
+            public DateTime FirstSeenUtc;
+        }
+
+        private sealed class PendingInfo
+        {
+            public SignalCandidate Candidate = null!;
+            public double RiskAmount;
+            public double Score;
+            public double Units;
+        }
+
+
+        // ------------------------------------------------------------------ konfiguracja
+
+        public void SetGuard(AccountGuardResult r)
+        {
+            GuardAllowed = r.Allowed && !r.IsLive;
+            GuardIsLive = r.IsLive;
+            GuardMessage = r.IsLive ? "Wersja DEMO – konto LIVE jest trwale zablokowane." : r.Reason;
+        }
+
+        public void SetUniverse(IEnumerable<UniverseEntry> entries)
+        {
+            _universe.Clear();
+            _universeBySymbol.Clear();
+            foreach (var e in entries)
+            {
+                if (e.AssetClass == AssetClass.Crypto || e.AssetClass == AssetClass.Unknown) continue; // podwójna blokada
+                if (_universeBySymbol.ContainsKey(e.Symbol)) continue;
+                _universe.Add(e);
+                _universeBySymbol[e.Symbol] = e;
+            }
+        }
+
+        public void ReplaceBook(StrategyBook book)
+        {
+            _book = book;
+            _lastEval.Clear();
+        }
+
+        private string StoreKey(long account)
+        {
+            var sb = new StringBuilder();
+            foreach (char c in _cfg.Label) if (char.IsLetterOrDigit(c)) sb.Append(c);
+            string key = $"APEX {sb} {account}";
+            return key.Length > 50 ? key.Substring(0, 50) : key;
+        }
+
+        // ------------------------------------------------------------------ start i odtwarzanie stanu
+
+        /// <summary>Wczytuje zapisany stan i uzgadnia go z faktycznymi pozycjami u brokera.</summary>
+        public void Initialize(DateTime utc)
+        {
+            var acc = _broker.GetAccount();
+            _lastAccount = acc;
+            if (!_simulation) LoadState(acc.Number);
+            _state.AccountNumber = acc.Number;
+            if (string.IsNullOrEmpty(_state.Broker)) { _state.Broker = acc.BrokerName; _state.Currency = acc.Currency; _state.Label = _cfg.Label; }
+            if (_state.Broker != acc.BrokerName || _state.Currency != acc.Currency || _state.Label != _cfg.Label)
+                BlockInvalidState(acc.Number, "zmiana tożsamości brokera/waluty/etykiety");
+            if (_state.Mode != EngineMode.EmergencyStopped)
+            {
+                _state.Mode = EngineMode.Stopped;
+                _state.ModeReason = "start/restart – wymagany jawny START użytkownika";
+            }
+            _risk = new RiskManager(_cfg.Risk, _state.Risk);
+            InterruptExecutionTest("restart – test nie jest wznawiany; rozliczenie i ochronne close pozostają aktywne", utc);
+            if (_state.RiskPerTradeOverride.HasValue)
+            {
+                _cfg.Risk.RiskPerTradePct = _state.RiskPerTradeOverride.Value;
+                if (_cfg.Risk.Validate() != null) { _cfg.Risk.RiskPerTradePct = 0.5; _state.RiskPerTradeOverride = null; }
+            }
+            foreach (var s in _state.Suspended) _suspended.Add(s);
+            _initialized = true;
+            Reconcile(utc, "start");
+            if (!_stateReadFault) ExportClosed(utc);
+            SynchronizeHistory(utc);
+            _risk.Update(acc, utc);
+            _dirty = true;
+            SaveState(utc, force: true);
+            _log.Info($"Silnik uruchomiony. Tryb: {ModeText(_state.Mode)}. Pozycje bota: {_plans.Count}. Wpisy rejestru: {_ledger.Entries.Count}.");
+        }
+
+        private void LoadState(long account)
+        {
+            string? json = null;
+            try { json = _store.Get(StoreKey(account)); }
+            catch (Exception ex) { BlockInvalidState(account, ex.Message); return; }
+            if (json == null)
+            {
+                if (_journal is IRecoveryJournal existing && existing.ClosedRecords.Count > 0)
+                { BlockInvalidState(account, "brak stanu księgowego przy istniejącym dzienniku – nieznany overlap legacy"); return; }
+                _state = new EngineState { AccountNumber = account };
+                return;
+            }
+            try
+            {
+                var st = JsonSerializer.Deserialize<EngineState>(json!, StateJson);
+                if (st == null || st.AccountNumber != account || st.SchemaVersion is < 1 or > 5 || !Enum.IsDefined(typeof(EngineMode), st.Mode)
+                    || st.Risk == null || st.Ledger == null || st.Plans == null || st.Suspended == null || st.RecentTrades == null
+                    || st.DisabledStrategies == null || st.DisabledClasses == null
+                    || st.Plans.Any(p => p == null) || st.Ledger.Any(e => e == null || string.IsNullOrWhiteSpace(e.SignalId)))
+                    throw new JsonException("Nieprawidłowy schemat lub tożsamość zapisanego stanu.");
+                _state = st;
+                if (st.AccountedPositions == null || st.ClosingDeals == null || st.ClosedRecords == null || st.ClosedOutbox == null || st.PendingCloses == null
+                    || st.PendingCloses.Any(x => x.Key <= 0 || x.Value == null || x.Value.Attempts < 0)
+                    || st.ClosingDeals.Any(x => !ValidDeal(x))
+                    || st.ClosingDeals.GroupBy(DealKey).Any(g => g.Count() != 1)
+                    || st.ClosedRecords.Any(x => x == null) || st.ClosedOutbox.Any(x => x == null))
+                    throw new JsonException("Uszkodzony rejestr odzyskiwania.");
+                ValidateFinancialState(st);
+                if (st.SchemaVersion >= 2)
+                {
+                    using var document = JsonDocument.Parse(json!);
+                    string[] required = { "SchemaVersion", "AccountNumber", "Broker", "Currency", "Label", "Mode", "Risk", "Ledger", "Plans", "PendingCloses",
+                        "ClosingDeals", "AccountedPositions", "ClosedRecords", "ClosedOutbox", "TradesTotal", "RealizedTotal" };
+                    if (required.Any(name => !document.RootElement.TryGetProperty(name, out _))
+                        || string.IsNullOrWhiteSpace(st.Broker) || string.IsNullOrWhiteSpace(st.Currency) || st.Label != _cfg.Label
+                        || st.TradesTotal != st.AccountedPositions.Count || st.ClosedRecords.Count != st.TradesTotal
+                        || !st.AccountedPositions.SetEquals(st.ClosedRecords.Select(x => x.PositionId))
+                        || st.ClosedOutbox.Any(x => !st.AccountedPositions.Contains(x.PositionId))
+                        || Math.Abs(st.RealizedTotal - FiniteSum(st.ClosingDeals.Select(x => x.NetProfit))) > 1e-7)
+                        throw new JsonException("Niespójny autorytatywny stan księgowy.");
+                }
+                else if (st.TradesTotal != 0 || st.RealizedTotal != 0 || st.RecentTrades.Count != 0
+                    || (_journal is IRecoveryJournal legacy && legacy.ClosedRecords.Count > 0))
+                {
+                    // Unknown legacy overlap must not be added to full replay. Preserve the original
+                    // state, emergency latch, reservations and plans for manual scoped migration.
+                    _stateReadFault = true; _persistenceHealthy = false;
+                    HistoryMessage = "migracja v1 z historycznymi wynikami wymaga ręcznego uzgodnienia";
+                }
+                else st.SchemaVersion = 2;
+                if (st.SchemaVersion < 3)
+                {
+                    // Preserve old accounting/latches, never bless an old namespace as fresh.
+                    st.SchemaVersion = 3; st.LegacyScopeQuarantine = true; st.Baseline = null;
+                    st.OpenAdmissions = new List<OpenAdmission>();
+                }
+                else
+                {
+                    using var scopeDocument = JsonDocument.Parse(json!);
+                    string[] requiredScope = { "DurableRevision", "Baseline", "OpenAdmissions", "LegacyScopeQuarantine", "ScopeConflict" };
+                    if (requiredScope.Any(n => !scopeDocument.RootElement.TryGetProperty(n, out _))) throw new JsonException("missing v3 scope fields");
+                    ValidateScopeDocument(scopeDocument.RootElement);
+                    ValidateScopeState(st);
+                }
+                if (st.SchemaVersion < 4) { st.ExecutionTest = null; st.SchemaVersion = 4; }
+                else
+                {
+                    using var certificateDocument = JsonDocument.Parse(json!);
+                    ValidateExecutionDocument(certificateDocument.RootElement);
+                    ValidateExecutionState(st);
+                }
+                MigrateAndValidatePartials(st, json!);
+                ScopedStatus = st.ScopeConflict.Length != 0 ? ScopedRecoveryStatus.Conflict
+                    : st.Baseline == null ? ScopedRecoveryStatus.Unestablished : ScopedRecoveryStatus.AwaitingEvidence;
+                ScopedMessage = st.ScopeConflict.Length != 0 ? st.ScopeConflict : "restart: fresh owner-authorized scoped receipt required";
+                _ledger.Restore(st.Ledger);
+                _plans.Clear();
+                foreach (var p in st.Plans) _plans[p.PositionId] = p;
+                foreach (var p in st.PendingCloses) { _pendingCloses[p.Key] = p.Value; _closeReasons[p.Key] = p.Value.Reason; }
+                _log.Info($"Wczytano stan z {st.SavedUtc:yyyy-MM-dd HH:mm} UTC.");
+            }
+            catch (Exception ex)
+            {
+                BlockInvalidState(account, ex.Message);
+            }
+        }
+
+        private void BlockInvalidState(long account, string reason)
+        {
+            _stateReadFault = true;
+            _persistenceHealthy = false;
+            _state = new EngineState { AccountNumber = account, Mode = EngineMode.Stopped, ModeReason = "błąd odczytu stanu – wymagane ręczne uzgodnienie" };
+            _log.Error("Nie można bezpiecznie odtworzyć stanu: " + reason + ". Wejścia zablokowane, oryginalny zapis nie będzie nadpisany.");
+        }
+
+        public void SaveState(DateTime utc, bool force = false)
+            => TrySaveState(utc, force);
+
+        private bool TrySaveState(DateTime utc, bool force = false)
+        {
+            if (_stateReadFault) return false; // Nie kasujemy dowodów uszkodzenia ani nie cofamy blokad/rejestru.
+            if (_simulation) return true;
+            if (!_dirty && !force) return _persistenceHealthy;
+            if (!force && (utc - _lastSaveUtc).TotalSeconds < 5) return _persistenceHealthy;
+            try
+            {
+                _state.Ledger = _ledger.Entries.ToList();
+                _state.Plans = _plans.Values.ToList();
+                _state.PendingCloses = _pendingCloses.ToDictionary(x => x.Key, x => x.Value);
+                _state.Risk = _risk.State;
+                _state.Suspended = _suspended.ToList();
+                _state.SavedUtc = utc;
+                if (_state.RecentTrades.Count > 300) _state.RecentTrades = _state.RecentTrades.Skip(_state.RecentTrades.Count - 300).ToList();
+                _state.DurableRevision = checked(_state.DurableRevision + 1);
+                _scopedPermit = null;
+                _store.Set(StoreKey(_state.AccountNumber), JsonSerializer.Serialize(_state, StateJson));
+                _store.Flush();
+                _dirty = false;
+                _lastSaveUtc = utc;
+                _persistenceHealthy = true;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AddError("Zapis stanu nieudany: " + ex.Message);
+                _persistenceHealthy = false;
+                _dirty = true;
+                if (_state.Mode != EngineMode.EmergencyStopped)
+                    SetMode(EngineMode.PausedNewEntries, "błąd trwałego zapisu – nowe wejścia zablokowane");
+                return false;
+            }
+        }
+
+        private bool IsOwn(PositionInfo p) => string.Equals(p.Label, _cfg.Label, StringComparison.Ordinal);
+
+        private List<PositionInfo> OwnPositions() => _broker.GetPositions().Where(IsOwn).ToList();
+
+        private bool CanOperate(out AccountSnapshot account, bool requireValidEquity = true)
+        {
+            account = _broker.GetAccount();
+            return _broker.IsConnected && GuardAllowed && !GuardIsLive && !account.IsLive && (!requireValidEquity || account.IsValid)
+                && account.Number == _state.AccountNumber;
+        }
+
+        private bool QuoteFresh(Quote q, DateTime utc) => q.IsValid && q.TimeUtc <= utc
+            && (_simulation || utc - q.TimeUtc <= TimeSpan.FromSeconds(_cfg.MaxQuoteAgeSeconds));
+
+        private static bool HasValidTarget(PositionInfo pos) => pos.TakeProfit is > 0
+            && double.IsFinite(pos.TakeProfit.Value) && (int)pos.Direction * (pos.TakeProfit.Value - pos.EntryPrice) > 0;
+
+        /// <summary>
+        /// Uzgodnienie stanu z brokerem: przejęcie własnych pozycji bez planu (odtworzenie), usunięcie planów pozycji,
+        /// które już nie istnieją. Pozycje innych botów i ręczne NIE są dotykane.
+        /// </summary>
+        public void Reconcile(DateTime utc, string why)
+        {
+            var own = ScopedManagedPositions(OwnPositions(), utc);
+            var ids = new HashSet<long>(own.Select(p => p.Id));
+            foreach (var pos in own)
+            {
+                if (_state.Baseline != null && !_state.OpenAdmissions.Any(a => a.Fill?.PositionId == pos.Id))
+                {
+                    LatchScopeConflict("LabelCollision: unknown exact-label position", utc);
+                    continue;
+                }
+                CloseOrphanTest(pos, utc);
+                if (_plans.ContainsKey(pos.Id)) continue;
+                var plan = ReconstructPlan(pos, utc);
+                _plans[pos.Id] = plan;
+                _log.Warn($"[{why}] Przejęto pozycję bota #{pos.Id} {pos.Symbol} {pos.Direction} bez zapisanego planu – plan odtworzony ({plan.Strategy}).");
+                if (ExecutionLedger.TryParseComment(pos.Comment, out _, out var sid) && _ledger.Get(sid) is { } e && e.State != SignalState.Executed)
+                    _ledger.MarkExecuted(sid, pos.Id, utc);
+                _dirty = true;
+                CloseOrphanTest(pos, utc);
+            }
+            foreach (var id in _plans.Keys.ToList())
+            {
+                if (ids.Contains(id)) continue;
+                // Absence is not economic evidence. Keep the entry plan and close intent
+                // until authoritative terminal history has been durably committed.
+                _log.Warn($"[{why}] Pozycja #{id} nieobecna – oczekiwanie na trwałe rozliczenie historii.");
+            }
+        }
+
+        /// <summary>Pozycja testu wykonania bez aktywnego testu (np. po restarcie) jest zamykana.</summary>
+        private void CloseOrphanTest(PositionInfo pos, DateTime utc)
+        {
+            if (_test != null || _pendingCloses.ContainsKey(pos.Id)) return;
+            if (ExecutionLedger.TryParseComment(pos.Comment, out var st, out _) && st == StrategyId.ExecutionTest && _initialized)
+            {
+                _log.Warn($"Osierocona pozycja testu wykonania #{pos.Id} {pos.Symbol} – zamykam.");
+                RequestClose(pos.Id, "osierocona pozycja testu wykonania", utc);
+            }
+        }
+
+        private TradePlan ReconstructPlan(PositionInfo pos, DateTime utc)
+        {
+            StrategyId sid = StrategyId.TrendPullback;
+            string signal = "";
+            if (ExecutionLedger.TryParseComment(pos.Comment, out var parsed, out var sg)) { sid = parsed; signal = sg; }
+            var cls = _universeBySymbol.TryGetValue(pos.Symbol, out var ue) ? ue.AssetClass : AssetClass.Unknown;
+            var strat = _book.ExitStrategyFor(sid, cls);
+            double stop = pos.StopLoss ?? 0;
+            double r = stop > 0 ? Math.Abs(pos.EntryPrice - stop) : 0;
+            return new TradePlan
+            {
+                PositionId = pos.Id,
+                SignalId = signal,
+                Symbol = pos.Symbol,
+                Strategy = sid,
+                Variant = "odtworzony",
+                Direction = pos.Direction,
+                SignalTf = strat.SignalTf,
+                EntryPrice = pos.EntryPrice,
+                InitialStop = stop,
+                InitialRisk = r,
+                InitialVolume = _state.OpenAdmissions.FirstOrDefault(a => a.Fill?.PositionId == pos.Id)?.Fill?.InitialVolumeUnits ?? pos.VolumeUnits,
+                EntryTimeUtc = pos.EntryTimeUtc,
+                BestPrice = pos.EntryPrice,
+                LastManagedBarTime = utc.AddHours(-1),
+                Exit = strat is StrategyBase sb ? sb.Exit : new ExitPlan(),
+                Reconstructed = true,
+            };
+        }
+
+        // ------------------------------------------------------------------ główny cykl
+
+        public void OnTimer(DateTime utc)
+        {
+            if (!_initialized) return;
+            try
+            {
+                Cycle(utc);
+                _consecutiveExceptions = 0;
+            }
+            catch (Exception ex)
+            {
+                _consecutiveExceptions++;
+                AddError($"Błąd cyklu silnika: {ex.GetType().Name}: {ex.Message}");
+                if (_consecutiveExceptions >= 5 && _state.Mode == EngineMode.Running)
+                    SetMode(EngineMode.PausedNewEntries, "powtarzające się błędy wewnętrzne");
+            }
+            SaveState(utc);
+            // The timer's ordinary risk-state save changes durable revision. Reconcile the
+            // still-current frozen receipt before publishing status, never extend its deadline.
+            if (_state.Baseline != null) SynchronizeHistory(utc);
+        }
+
+        private void Cycle(DateTime utc)
+        {
+            bool connected = _broker.IsConnected;
+            if (!connected)
+            {
+                if (_connected) AddError("Utracono połączenie z serwerem – wstrzymano wszystkie operacje.");
+                _connected = false;
+                InterruptExecutionTest("utrata połączenia – wymagany nowy jawny test po synchronizacji", utc);
+                BlockHistory("utracono połączenie");
+                return;
+            }
+            if (!_connected)
+            {
+                _connected = true;
+                BlockHistory("ponowne połączenie – wymagany START po uzgodnieniu");
+                _log.Info("Połączenie przywrócone – uzgadnianie stanu pozycji.");
+                Reconcile(utc, "ponowne połączenie");
+            }
+
+            var acc = _broker.GetAccount();
+            if (!acc.IsValid)
+            {
+                AddError("Nieprawidłowe dane konta – nowe wejścia zablokowane.");
+                if (_state.Mode == EngineMode.EmergencyStopped) CloseAllOwn(utc, "awaryjne zatrzymanie przy nieprawidłowym equity");
+                return;
+            }
+            if (acc.IsLive)
+            {
+                SetGuard(new AccountGuardResult { IsLive = true });
+                return;
+            }
+            if (_state.AccountNumber != 0 && acc.Number != _state.AccountNumber)
+            {
+                GuardAllowed = false;
+                GuardMessage = $"Zmiana konta ({_state.AccountNumber} → {acc.Number}) – handel zablokowany.";
+                AddError(GuardMessage);
+                return;
+            }
+            _lastAccount = acc;
+            if (!GuardAllowed) return;
+            SynchronizeHistory(utc);
+
+            foreach (var ev in _risk.Update(acc, utc))
+            {
+                _log.Warn(ev);
+                _journal.Event(ev);
+                _dirty = true;
+            }
+            // Także szczyt equity i granica dnia bez zdarzeń muszą przetrwać restart.
+            _dirty = true;
+            if (_risk.State.MaxDrawdownHit && _state.Mode != EngineMode.EmergencyStopped)
+            {
+                SetMode(EngineMode.EmergencyStopped, "przekroczone maksymalne obsunięcie kapitału");
+                TrySaveState(utc, true);
+            }
+            if (_risk.State.DailyLimitHit && _cfg.Risk.CloseAllOnDailyLimit && _plans.Count > 0)
+                CloseAllOwn(utc, "przekroczony dzienny limit straty");
+
+            var own = ScopedManagedPositions(OwnPositions(), utc);
+            EnsurePlans(own, utc);
+            if (_state.Mode == EngineMode.EmergencyStopped)
+            {
+                InterruptExecutionTest("awaryjne zatrzymanie", utc);
+                foreach (var pos in own)
+                    if (!_pendingCloses.ContainsKey(pos.Id)) RequestClose(pos.Id, "awaryjne zatrzymanie", utc);
+            }
+            ObserveTechnicalProtection(own);
+            ProtectPositions(own, utc);
+            ResolvePending(own, utc);
+            ProcessPendingCloses(utc);
+            ProcessExecutionTest(utc);
+
+            if (_state.Mode == EngineMode.Running || _state.Mode == EngineMode.PausedNewEntries)
+                ManagePositions(own, utc);
+
+            SampleSpreads(utc);
+
+            if (_state.Mode == EngineMode.Running && HistoryReady && !_risk.NewEntriesBlocked(out _))
+            {
+                ScanForSignals(utc);
+                ProcessPool(utc, acc);
+            }
+            else if (_pool.Count > 0)
+            {
+                foreach (var item in _pool.Values)
+                    TraceUpdate(item.Candidate, utc, e => { e.Verdict = DecisionVerdict.Wait; e.Outcome = "Sygnał porzucony: nowe wejścia są wstrzymane (tryb bota lub limit ryzyka). WAIT."; }, k => k.Filtered++);
+                _pool.Clear();
+            }
+            Trace(d => d.Cycle(utc));
+
+            if (utc - _lastPruneUtc > TimeSpan.FromHours(6))
+            {
+                _ledger.Prune(utc, TimeSpan.FromDays(10));
+                _lastPruneUtc = utc;
+            }
+        }
+
+        private void EnsurePlans(List<PositionInfo> own, DateTime utc)
+        {
+            foreach (var pos in own)
+            {
+                CloseOrphanTest(pos, utc); // retained plans must not hide a late post-restart test position
+                if (_plans.ContainsKey(pos.Id)) continue;
+                // Pozycja bota, której nie znamy: albo wynik niepewnego zlecenia (obsłuży ResolvePending), albo odtworzenie.
+                if (ExecutionLedger.TryParseComment(pos.Comment, out _, out var sid) && _pendingInfo.ContainsKey(sid)) continue;
+                _plans[pos.Id] = ReconstructPlan(pos, utc);
+                _log.Warn($"Wykryto pozycję bota #{pos.Id} {pos.Symbol} bez planu – przejęto zarządzanie.");
+                _dirty = true;
+                CloseOrphanTest(pos, utc);
+            }
+        }
+
+        // ------------------------------------------------------------------ bezpieczeństwo pozycji
+
+        private void ProtectPositions(List<PositionInfo> own, DateTime utc)
+        {
+            foreach (var pos in own)
+            {
+                if (_pendingCloses.ContainsKey(pos.Id)) continue;
+                if (!HasValidTarget(pos))
+                {
+                    AddError($"Pozycja #{pos.Id} {pos.Symbol} bez poprawnego TP – zamykam własną pozycję.");
+                    RequestClose(pos.Id, "brak poprawnego TP", utc);
+                    continue;
+                }
+                if (pos.StopLoss is > 0 && double.IsFinite(pos.StopLoss.Value)) continue;
+                if (!CanOperate(out _)) return;
+                var spec = _market.GetSpec(pos.Symbol);
+                var q = _market.GetQuote(pos.Symbol);
+                _plans.TryGetValue(pos.Id, out var plan);
+                double atr = plan?.EntryAtr ?? 0;
+                if (spec == null || q == null || !q.Value.IsValid)
+                {
+                    AddError($"Pozycja #{pos.Id} {pos.Symbol} bez SL i bez danych – próba zamknięcia.");
+                    RequestClose(pos.Id, "brak SL i brak danych rynkowych", utc);
+                    continue;
+                }
+                double sl = PositionManagerRules.EmergencyStop(plan, pos, spec, q.Value, atr);
+                var res = _broker.ModifyStopLoss(pos.Id, sl);
+                var protectedPosition = OwnPositions().FirstOrDefault(p => p.Id == pos.Id);
+                if (res.Status == OrderStatus.Filled && protectedPosition?.StopLoss is > 0 && double.IsFinite(protectedPosition.StopLoss.Value))
+                {
+                    _log.Warn($"Pozycja #{pos.Id} {pos.Symbol} nie miała SL – ustawiono SL {sl}.");
+                    if (plan != null && plan.InitialStop <= 0)
+                    {
+                        plan.InitialStop = sl;
+                        plan.InitialRisk = Math.Abs(pos.EntryPrice - sl);
+                        _dirty = true;
+                    }
+                }
+                else
+                {
+                    AddError($"Nie udało się ustawić SL dla #{pos.Id} {pos.Symbol} ({res.Message}) – zamykam pozycję.");
+                    RequestClose(pos.Id, "nie można ustawić SL", utc);
+                }
+            }
+        }
+
+        private OrderOutcome? RequestClose(long positionId, string reason, DateTime utc)
+        {
+            if (!CanOperate(out _, requireValidEquity: false) || !OwnPositions().Any(p => p.Id == positionId)) return null;
+            _closeReasons[positionId] = reason;
+            if (!_pendingCloses.TryGetValue(positionId, out var pc)) _pendingCloses[positionId] = pc = new CloseIntent { Reason = reason };
+            pc.Attempts++;
+            pc.NextTryUtc = utc.AddSeconds(Math.Min(300, 15 * pc.Attempts));
+            _dirty = true;
+            // Full reduction is the ONLY operation permitted when this write fails. Exact
+            // account/DEMO/owned-position checks above still apply on every attempt.
+            TrySaveState(utc, true);
+            var res = _broker.ClosePosition(positionId, null);
+            if (res.Status == OrderStatus.Filled || res.Error == BrokerErrorKind.EntityNotFound)
+            {
+                return res;
+            }
+            RegisterBrokerError(res);
+
+            AddError($"Zamknięcie #{positionId} nieudane ({res.Message}) – ponowię próbę.");
+            return res;
+        }
+
+        private void ProcessPendingCloses(DateTime utc)
+        {
+            if (_pendingCloses.Count == 0) return;
+            var existing = new HashSet<long>(OwnPositions().Select(p => p.Id));
+            foreach (var kv in _pendingCloses.ToList())
+            {
+                if (!existing.Contains(kv.Key)) continue;
+                if (utc < kv.Value.NextTryUtc) continue;
+                RequestClose(kv.Key, kv.Value.Reason, utc);
+            }
+        }
+
+        public void CloseAllOwn(DateTime utc, string reason)
+        {
+            if (!CanOperate(out _, requireValidEquity: false)) return;
+            foreach (var pos in OwnPositions())
+                RequestClose(pos.Id, reason, utc);
+            _log.Warn($"Zamykanie wszystkich pozycji bota: {reason}.");
+            _journal.Event($"Zamknięcie wszystkich pozycji bota: {reason}");
+        }
+
+        // ------------------------------------------------------------------ niepewne zlecenia
+
+        private void ResolvePending(List<PositionInfo> own, DateTime utc)
+        {
+            foreach (var e in _ledger.Pending)
+            {
+                var match = own.FirstOrDefault(p => ExecutionLedger.TryParseComment(p.Comment, out _, out var sid) && sid == e.SignalId);
+                if (match != null)
+                {
+                    _ledger.MarkExecuted(e.SignalId, match.Id, utc);
+                    if (!_plans.ContainsKey(match.Id))
+                    {
+                        if (_pendingInfo.TryGetValue(e.SignalId, out var info))
+                            _plans[match.Id] = CreatePlan(match, info.Candidate, info.RiskAmount, info.Score, utc);
+                        else
+                            _plans[match.Id] = ReconstructPlan(match, utc);
+                        _journal.TradeOpened(_plans[match.Id], match.VolumeUnits, "potwierdzona po weryfikacji");
+                    }
+                    _pendingInfo.Remove(e.SignalId);
+                    _log.Info($"Weryfikacja: zlecenie {e.SignalId} ({e.Symbol}) zostało wykonane – pozycja #{match.Id}.");
+                    _dirty = true;
+                }
+                // Absence in an available collection, regardless of elapsed time, cannot
+                // distinguish non-send from a fast fill/close. Keep the obligation forever.
+            }
+        }
+
+        // ------------------------------------------------------------------ zarządzanie pozycjami
+
+        private void ManagePositions(List<PositionInfo> own, DateTime utc)
+        {
+            foreach (var pos in own)
+            {
+                if (!_plans.TryGetValue(pos.Id, out var plan)) continue;
+                if (_pendingCloses.ContainsKey(pos.Id)) continue;
+                if (plan.Strategy == StrategyId.ExecutionTest) continue; // sterowane przez test wykonania
+                try
+                {
+                    ManageOne(pos, plan, utc);
+                }
+                catch (Exception ex)
+                {
+                    AddError($"Zarządzanie #{pos.Id} {pos.Symbol}: {ex.Message}");
+                }
+            }
+        }
+
+        private void ManageOne(PositionInfo pos, TradePlan plan, DateTime utc)
+        {
+            if (!_features.TryGet(pos.Symbol, plan.SignalTf, utc, out var fs, out int i) || i < 1) return;
+            var barTime = fs.Bars.Times[i];
+            if (barTime <= plan.LastManagedBarTime) return;
+            if (barTime < plan.EntryTimeUtc - plan.SignalTf.Duration()) return;
+
+            var spec = _market.GetSpec(pos.Symbol);
+            if (spec == null) return;
+            var q = _market.GetQuote(pos.Symbol) ?? new Quote(fs.Close[i], fs.Close[i], utc);
+            var cls = _universeBySymbol.TryGetValue(pos.Symbol, out var ue) ? ue.AssetClass : spec.AssetClass;
+            var strat = _book.ExitStrategyFor(plan.Strategy, cls);
+
+            if (plan.InitialRisk <= 0 && pos.StopLoss.HasValue)
+            {
+                plan.InitialStop = pos.StopLoss.Value;
+                plan.InitialRisk = Math.Abs(plan.EntryPrice - pos.StopLoss.Value);
+            }
+            if (plan.EntryAtr <= 0) plan.EntryAtr = Ta.At(fs.Atr(14), i);
+
+            var input = BuildInput(pos.Symbol, spec, strat, fs, i, utc);
+            var stratExit = input == null ? StrategyExit.None : strat.CheckExit(input, plan.Direction, plan.EntryPrice, plan.BarsHeld + 1);
+            int filterDir = input?.FilterRegime.TrendDirection ?? 0;
+            bool filterStrong = input != null && (input.FilterRegime.Regime == MarketRegime.StrongUptrend || input.FilterRegime.Regime == MarketRegime.StrongDowntrend);
+
+            var actions = PositionManagerRules.Evaluate(new ManagementInput
+            {
+                Plan = plan,
+                Position = pos,
+                Spec = spec,
+                Quote = q,
+                BarClose = fs.Close[i],
+                BarHigh = fs.High[i],
+                BarLow = fs.Low[i],
+                BarTime = barTime,
+                CurrentAtr = Ta.At(fs.Atr(14), i),
+                StrategyExit = stratExit,
+                FilterTrendDirection = filterDir,
+                FilterRegimeStrong = filterStrong,
+            });
+            _dirty = true;
+
+            foreach (var a in actions)
+            {
+                switch (a.Kind)
+                {
+                    case ManagementActionKind.Close:
+                        _log.Info($"#{pos.Id} {pos.Symbol}: zamknięcie – {a.Reason}");
+                        RequestClose(pos.Id, a.Reason, utc);
+                        return;
+                    case ManagementActionKind.PartialClose:
+                        {
+                            RequestPartialClose(pos, a.CloseUnits, utc);
+                            // Candidate commits replace plan objects; do not use the old instance.
+                            if (_plans.TryGetValue(pos.Id, out var currentPlan)) plan = currentPlan;
+                            break;
+                        }
+                    case ManagementActionKind.ModifyStop:
+                        {
+                            var r = _broker.ModifyStopLoss(pos.Id, a.NewStop!.Value);
+                            if (r.Status == OrderStatus.Filled) _log.Info($"#{pos.Id} {pos.Symbol}: {a}");
+                            else { RegisterBrokerError(r); AddError($"#{pos.Id} zmiana SL nieudana: {r.Message}"); }
+                            break;
+                        }
+                }
+            }
+        }
+
+        private StrategyInput? BuildInput(string symbol, InstrumentSpec spec, IStrategy strat, FeatureSet fs, int i, DateTime utc)
+        {
+            var sigRegime = MarketRegimeDetector.Assess(fs, i, _cfg.Regime);
+            FeatureSet? ff = null;
+            int fi = -1;
+            var filterRegime = RegimeAssessment.Unknown("brak filtra");
+            if (strat.FilterTf.HasValue)
+            {
+                if (!_features.TryGet(symbol, strat.FilterTf.Value, utc, out var f2, out fi)) return null;
+                ff = f2;
+                filterRegime = MarketRegimeDetector.Assess(f2, fi, _cfg.Regime);
+            }
+            return new StrategyInput
+            {
+                Symbol = symbol,
+                Spec = spec,
+                Signal = fs,
+                SignalIndex = i,
+                Filter = ff,
+                FilterIndex = fi,
+                SignalRegime = sigRegime,
+                FilterRegime = filterRegime,
+                DecisionTimeUtc = fs.Bars.Times[i] + fs.Bars.TimeFrame.Duration(),
+            };
+        }
+
+        // ------------------------------------------------------------------ skanowanie
+
+        private void SampleSpreads(DateTime utc)
+        {
+            if (_simulation) return;
+            foreach (var u in _universe)
+            {
+                var q = _market.GetQuote(u.Symbol);
+                if (q == null || !q.Value.IsValid) continue;
+                if (!_market.IsMarketOpen(u.Symbol, utc, out _)) continue;
+                _spreads.Add(u.Symbol, q.Value.Spread);
+            }
+        }
+
+        private void ScanForSignals(DateTime utc)
+        {
+            var ownSymbols = new HashSet<string>(_plans.Values.Select(p => p.Symbol), StringComparer.OrdinalIgnoreCase);
+            foreach (var u in _universe)
+            {
+                if (_state.DisabledClasses.Contains(u.AssetClass)) continue;
+                var strategies = _book.For(u.AssetClass);
+                if (strategies.Count == 0) continue;
+                for (int si = 0; si < strategies.Count; si++)
+                {
+                    var strat = strategies[si];
+                    if (_state.DisabledStrategies.Contains(strat.Id)) continue;
+                    if (_suspended.Contains(StrategyHealthMonitor.Key(strat.Id, u.AssetClass))) continue;
+                    // Strategie eksperymentalne – wyłącznie konta DEMO (druga warstwa ochrony obok StrategyBook).
+                    if (GuardIsLive && _book.IsExperimental(strat.Id, u.AssetClass)) continue;
+                    var last = _features.LastClosedBarTime(u.Symbol, strat.SignalTf, utc);
+                    if (last == null) continue;
+                    string key = u.Symbol + "|" + si + "|" + strat.SignalTf;
+                    if (_lastEval.TryGetValue(key, out var prev) && prev >= last.Value) continue;
+                    _lastEval[key] = last.Value;
+
+                    if (ownSymbols.Contains(u.Symbol) || _ledger.HasPendingFor(u.Symbol))
+                    {
+                        TraceEval(u, strat, utc, last.Value, DecisionStage.Data, "Pozycja bota na tym instrumencie już istnieje – nowe wejście pominięte (zarządzanie pozycją działa niezależnie).", true,
+                            new List<DecisionGate> { new() { Name = "Jedna pozycja na instrument", Passed = false, Detail = "pozycja lub niepotwierdzone zlecenie bota" } });
+                        continue;
+                    }
+                    try
+                    {
+                        EvaluateStrategy(u, strat, utc);
+                    }
+                    catch (Exception ex)
+                    {
+                        AddError($"Strategia {strat.Id} na {u.Symbol}: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        private void EvaluateStrategy(UniverseEntry u, IStrategy strat, DateTime utc)
+        {
+            var gates = new List<DecisionGate>();
+            var barTime = _features.LastClosedBarTime(u.Symbol, strat.SignalTf, utc) ?? utc;
+            if (!_features.TryGet(u.Symbol, strat.SignalTf, utc, out var fs, out int i))
+            {
+                gates.Add(new DecisionGate { Name = "Dane rynkowe", Passed = false, Detail = $"brak świec {strat.SignalTf}" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Brak danych świecowych – ocena pominięta.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Dane rynkowe", Passed = true, Detail = $"{i + 1} zamkniętych świec {strat.SignalTf}" });
+            if (i + 1 < strat.RequiredSignalBars)
+            {
+                gates.Add(new DecisionGate { Name = "Kompletność historii", Passed = false, Detail = $"{i + 1} < wymagane {strat.RequiredSignalBars}" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Za krótka historia do policzenia wskaźników – WAIT.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Kompletność historii", Passed = true, Detail = $"≥ {strat.RequiredSignalBars} świec" });
+            var decisionTime = fs.Bars.Times[i] + strat.SignalTf.Duration();
+            // Świeca sprzed długiej przerwy w danych (np. po rozłączeniu) – nie handlujemy starego sygnału.
+            if (utc - decisionTime > TimeSpan.FromMinutes(Math.Max(20, (int)strat.SignalTf / 2.0)) && !_simulation)
+            {
+                if (_market.IsMarketOpen(u.Symbol, utc, out _)) WarnData(u.Symbol, utc, $"dane {strat.SignalTf} nieaktualne (ostatnia świeca zamknięta {decisionTime:HH:mm} UTC)");
+                gates.Add(new DecisionGate { Name = "Aktualność danych", Passed = false, Detail = $"ostatnia świeca zamknięta {decisionTime:yyyy-MM-dd HH:mm} UTC" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Dane nieaktualne – stary sygnał nie jest handlowany.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Aktualność danych", Passed = true, Detail = $"świeca zamknięta {decisionTime:HH:mm} UTC" });
+            string? dataErr = ValidateRecentBars(fs, i, 30);
+            if (dataErr != null)
+            {
+                WarnData(u.Symbol, utc, dataErr);
+                gates.Add(new DecisionGate { Name = "Poprawność świec", Passed = false, Detail = dataErr });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Błędne dane – instrument pominięty.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Poprawność świec", Passed = true, Detail = "ostatnie 30 świec poprawne" });
+
+            var spec = _market.GetSpec(u.Symbol);
+            if (spec == null)
+            {
+                gates.Add(new DecisionGate { Name = "Specyfikacja instrumentu", Passed = false, Detail = "brak specyfikacji" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Data, "Brak specyfikacji instrumentu – WAIT.", true, gates);
+                return;
+            }
+            var input = BuildInput(u.Symbol, spec, strat, fs, i, utc);
+            if (input == null)
+            {
+                gates.Add(new DecisionGate { Name = "Interwał filtrujący", Passed = false, Detail = $"brak danych {strat.FilterTf}" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Indicators, "Brak danych interwału filtrującego – WAIT.", true, gates);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Wskaźniki i reżim", Passed = input.SignalRegime.IsTradeable, Detail = input.SignalRegime.PolishName + (strat.FilterTf.HasValue ? " / filtr: " + input.FilterRegime.PolishName : "") });
+            var c = strat.Evaluate(input);
+            if (c == null)
+            {
+                gates.Add(new DecisionGate { Name = "Warunki strategii", Passed = false, Detail = "reguły wejścia strategii nie są spełnione na tej świecy" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Strategy, "Brak sygnału – warunki strategii niespełnione. WAIT.", false, gates, input);
+                return;
+            }
+            gates.Add(new DecisionGate { Name = "Warunki strategii", Passed = true, Detail = c.Reason });
+            if (_ledger.IsKnown(c.SignalId) || _pool.ContainsKey(c.SignalId))
+            {
+                gates.Add(new DecisionGate { Name = "Unikalność sygnału", Passed = false, Detail = "ten sygnał był już obsłużony" });
+                TraceEval(u, strat, utc, barTime, DecisionStage.Strategy, "Sygnał już obsłużony (ochrona przed duplikacją) – WAIT.", true, gates, input);
+                return;
+            }
+            _pool[c.SignalId] = new PoolItem { Candidate = c, FirstSeenUtc = utc };
+            _journal.Signal($"{utc:yyyy-MM-dd HH:mm} SYGNAŁ {c.Symbol} {c.Direction} {c.Strategy} – {c.Reason}");
+            TraceEval(u, strat, utc, barTime, DecisionStage.Strategy, $"Sygnał {(c.Direction == TradeDirection.Long ? "KUPNA" : "SPRZEDAŻY")} – oczekuje na ranking i kontrolę ryzyka.", false, gates, input, c);
+        }
+
+        private static string? ValidateRecentBars(FeatureSet fs, int i, int n)
+        {
+            for (int j = Math.Max(0, i - n + 1); j <= i; j++)
+            {
+                if (!fs.Bars[j].IsValid) return $"niepoprawna świeca {fs.Bars.Times[j]:yyyy-MM-dd HH:mm}";
+                if (j > 0 && fs.Bars.Times[j] <= fs.Bars.Times[j - 1]) return "nieuporządkowane czasy świec";
+            }
+            return null;
+        }
+
+        private void WarnData(string symbol, DateTime utc, string msg)
+        {
+            if (_dataWarned.TryGetValue(symbol, out var t) && utc - t < TimeSpan.FromHours(1)) return;
+            _dataWarned[symbol] = utc;
+            AddError($"{symbol}: {msg} – instrument pominięty.");
+        }
+
+        // ------------------------------------------------------------------ ranking i wykonanie
+
+        private sealed class Ranked
+        {
+            public SignalCandidate C = null!;
+            public InstrumentSpec Spec = null!;
+            public Quote Quote;
+            public SizingResult Sizing = null!;
+            public ScoreBreakdown Score = null!;
+            public double MaxCorr = double.NaN;
+            public string? MaxCorrWith;
+            public UniverseEntry U = null!;
+        }
+
+        private void ProcessPool(DateTime utc, AccountSnapshot acc)
+        {
+            if (_pool.Count == 0) return;
+            if (!_simulation)
+            {
+                var oldest = _pool.Values.Min(p => p.FirstSeenUtc);
+                if ((utc - oldest).TotalSeconds < _cfg.CollectionWindowSeconds) return;
+            }
+
+            var own = OwnPositions();
+            var ranked = new List<Ranked>();
+            foreach (var kv in _pool.ToList())
+            {
+                var c = kv.Value.Candidate;
+                string? reject = Prequalify(c, utc, acc, own, out var r, out bool keep);
+                if (reject != null)
+                {
+                    if (!keep)
+                    {
+                        _pool.Remove(kv.Key);
+                        LogSignal(c, null, "odrzucony: " + reject);
+                        TraceUpdate(c, utc, e =>
+                        {
+                            e.Stage = DecisionStage.Ranking;
+                            e.Verdict = DecisionVerdict.Wait;
+                            e.Outcome = "Odrzucony przez filtry przed wejściem: " + reject + ". WAIT.";
+                            e.Gates.Add(new DecisionGate { Name = "Filtry przed wejściem", Passed = false, Detail = reject });
+                        }, k => k.Filtered++);
+                    }
+                    else
+                    {
+                        Trace(d => d.SetOutcome(c.SignalId, "Sygnał czeka: " + reject + " (w oknie ważności sygnału).", utc));
+                    }
+                    continue;
+                }
+                TraceUpdate(c, utc, e =>
+                {
+                    e.Stage = DecisionStage.Ranking;
+                    e.Score = r!.Score;
+                    e.Units = r.Sizing.Units;
+                    e.RiskAmount = r.Sizing.RiskAmount;
+                    e.CostToRisk = r.Sizing.CostToRisk;
+                    e.Gates.Add(new DecisionGate { Name = "Filtry przed wejściem", Passed = true, Detail = $"rynek otwarty, spread i koszt OK (koszt {r.Sizing.CostToRisk:P0} ryzyka), wolumen {r.Sizing.Units:G6}, ryzyko {r.Sizing.RiskAmount:F2}" });
+                });
+                ranked.Add(r!);
+                _pool.Remove(kv.Key);
+            }
+
+            int opened = 0;
+            foreach (var r in ranked.OrderByDescending(x => x.Score.Total))
+            {
+                if (opened >= _cfg.MaxNewPositionsPerCycle)
+                {
+                    LogSignal(r.C, r.Score, "pominięty: limit nowych pozycji w cyklu");
+                    TraceUpdate(r.C, utc, e => { e.Verdict = DecisionVerdict.Wait; e.Outcome = "Pominięty: limit nowych pozycji w jednym cyklu (lepsze okazje miały pierwszeństwo). WAIT."; e.Gates.Add(new DecisionGate { Name = "Limit nowych pozycji w cyklu", Passed = false, Detail = $"{_cfg.MaxNewPositionsPerCycle} na cykl" }); }, k => k.Filtered++);
+                    continue;
+                }
+                own = OwnPositions();
+                var openRisks = BuildOpenRisks(own);
+                // Korelacja liczona względem aktualnych pozycji (także otwartych w tym cyklu).
+                (r.MaxCorr, r.MaxCorrWith) = MaxCorrelation(r.C, own, utc);
+                if (!double.IsNaN(r.MaxCorr))
+                    r.Score = OpportunityScorer.Score(r.C, r.Sizing.CostToRisk, r.MaxCorr, _cfg.Scoring);
+                var scoreNow = r.Score;
+                TraceUpdate(r.C, utc, e => { e.Score = scoreNow; e.MinScore = _cfg.Scoring.MinScore; e.Gates.Add(new DecisionGate { Name = "Ocena okazji (ranking)", Passed = scoreNow.Total >= _cfg.Scoring.MinScore, Detail = $"{scoreNow.Total:F1} / min. {_cfg.Scoring.MinScore:F0}" + (double.IsNaN(r.MaxCorr) ? "" : $", korelacja {r.MaxCorr:F2} z {r.MaxCorrWith}") }); });
+                if (r.Score.Total < _cfg.Scoring.MinScore)
+                {
+                    LogSignal(r.C, r.Score, $"odrzucony: ocena {r.Score.Total:F1} < {_cfg.Scoring.MinScore}");
+                    TraceUpdate(r.C, utc, e => { e.Verdict = DecisionVerdict.Wait; e.Outcome = $"Ocena okazji {scoreNow.Total:F1} poniżej progu {_cfg.Scoring.MinScore:F0}. WAIT."; }, k => k.Filtered++);
+                    continue;
+                }
+
+                double margin = _broker.EstimateMargin(r.C.Symbol, r.C.Direction, r.Sizing.Units);
+                var proposal = new TradeProposal
+                {
+                    Symbol = r.C.Symbol,
+                    AssetClass = r.U.AssetClass,
+                    Direction = r.C.Direction,
+                    RiskAmount = r.Sizing.RiskAmount,
+                    Notional = r.Sizing.Notional,
+                    EstimatedMargin = margin,
+                    BaseCurrency = r.U.BaseCurrency,
+                    QuoteCurrency = r.U.QuoteCurrency,
+                    MaxSignedCorrelation = r.MaxCorr,
+                    MaxCorrelationWith = r.MaxCorrWith,
+                };
+                var check = _risk.EvaluateNewTrade(proposal, acc, openRisks);
+                var failures = check.Failures.ToList();
+                TraceUpdate(r.C, utc, e =>
+                {
+                    e.Stage = DecisionStage.Risk;
+                    e.RiskFailures = failures;
+                    e.Gates.Add(new DecisionGate { Name = "RiskEngine", Passed = failures.Count == 0, Detail = failures.Count == 0 ? $"wszystkie limity spełnione (depozyt {margin:F2}, wartość {proposal.Notional:F0})" : string.Join("; ", failures) });
+                    if (failures.Count > 0) { e.Verdict = DecisionVerdict.Wait; e.Outcome = "Zablokowany przez RiskEngine: " + string.Join("; ", failures) + ". WAIT."; }
+                }, failures.Count > 0 ? k => k.RiskBlocked++ : null);
+                if (!check.Allowed) { LogSignal(r.C, r.Score, "zablokowany przez ryzyko: " + check); continue; }
+                if (Execute(r, utc)) opened++;
+                acc = _broker.GetAccount();
+            }
+        }
+
+        private string? Prequalify(SignalCandidate c, DateTime utc, AccountSnapshot acc, List<PositionInfo> own, out Ranked? ranked, out bool keep)
+        {
+            ranked = null;
+            keep = false;
+            if (_ledger.Pending.Count > 0) return "niepewne zlecenie – portfel wymaga uzgodnienia";
+            if (_pendingCloses.Count > 0 || own.Any(p => !HasValidTarget(p))) return "pozycja bota bez poprawnego TP lub oczekujące zamknięcie";
+            if (utc > c.DecisionTimeUtc + c.Validity) return "sygnał wygasł";
+            if (_ledger.IsKnown(c.SignalId)) return "sygnał już wykorzystany";
+            if (own.Any(p => string.Equals(p.Symbol, c.Symbol, StringComparison.OrdinalIgnoreCase)) || _ledger.HasPendingFor(c.Symbol))
+                return "pozycja bota już istnieje";
+            if (_symbolCooldown.TryGetValue(c.Symbol, out var cd) && utc < cd) return "instrument w okresie karencji po błędzie";
+            if (!_universeBySymbol.TryGetValue(c.Symbol, out var u)) return "instrument poza listą";
+            if (u.AssetClass == AssetClass.Crypto) return "kryptowaluty wykluczone";
+            var spec = _market.GetSpec(c.Symbol);
+            if (spec == null) return "brak specyfikacji instrumentu";
+            if (spec.AssetClass == AssetClass.Crypto || InstrumentClassifier.IsCrypto(spec.Name, spec.Description, spec.BaseAsset, spec.QuoteAsset))
+                return "kryptowaluty wykluczone";
+            var specErr = spec.Validate();
+            if (specErr != null) return "specyfikacja: " + specErr;
+
+            if (!_market.IsMarketOpen(c.Symbol, utc, out var ttc))
+            {
+                keep = c.SignalTf >= Tf.H4; // sygnały D1/H4 mogą poczekać na otwarcie rynku (w oknie ważności)
+                return "rynek zamknięty";
+            }
+            if (ttc < TimeSpan.FromMinutes(_cfg.NoEntryMinutesBeforeClose)) return "zbyt blisko zamknięcia sesji";
+
+            var qn = _market.GetQuote(c.Symbol);
+            if (qn == null || !qn.Value.IsValid) return "brak poprawnych notowań";
+            var q = qn.Value;
+            if (!QuoteFresh(q, utc)) return "notowania nieaktualne lub z przyszłości";
+
+            if (_cfg.News.Enabled)
+            {
+                if (_cfg.News.RequireCalendar && (_news == null || !_news.IsFresh(utc, _cfg.News))) return "brak aktualnego kalendarza wiadomości";
+                if (_news != null && _news.IsBlackout(spec, utc, _cfg.News, out var evt))
+                    return $"okno wiadomości: {evt!.Currency} {evt.Title} {evt.TimeUtc:HH:mm} UTC";
+            }
+
+            double entry = q.EntryPrice(c.Direction);
+            if (c.Atr <= 0) return "brak ATR";
+            double drift = Math.Abs(entry - c.ReferencePrice) / c.Atr;
+            if (drift > c.MaxDriftAtr) return $"cena odeszła od sygnału o {drift:F2} ATR";
+
+            double spread = q.Spread;
+            if (spread > _cfg.Risk.MaxSpreadToAtr * c.Atr) return $"spread {spread / c.Atr:P0} ATR – zbyt wysoki";
+            if (_spreads.Count(c.Symbol) >= 20)
+            {
+                double med = _spreads.Median(c.Symbol);
+                if (med > 0 && spread > _cfg.Risk.SpreadSpikeMultiple * med) return $"anomalia spreadu ({spread / med:F1}× mediany)";
+            }
+
+            double slip = _cfg.Risk.SlippageAllowanceAtr * c.Atr;
+            double budget = _risk.RiskBudget(acc);
+            // Ryzyko dla dokładnie tej odległości SL, którą wyślemy (0,1 pipsa).
+            double sentStop = spec.PipsToPrice(Math.Round(spec.PriceToPips(c.StopDistance), 1));
+            var sizing = PositionSizer.Size(spec, budget, sentStop, entry, spread, slip);
+            if (!sizing.Ok) return "wielkość pozycji: " + sizing.Reason;
+            if (sizing.CostToRisk > _cfg.Risk.MaxCostToRisk) return $"koszt transakcji {sizing.CostToRisk:P0} ryzyka > {_cfg.Risk.MaxCostToRisk:P0}";
+
+            var score = OpportunityScorer.Score(c, sizing.CostToRisk, double.NaN, _cfg.Scoring);
+            ranked = new Ranked { C = c, Spec = spec, Quote = q, Sizing = sizing, Score = score, U = u };
+            return null;
+        }
+
+        private (double, string?) MaxCorrelation(SignalCandidate c, List<PositionInfo> own, DateTime utc)
+        {
+            if (own.Count == 0) return (double.NaN, null);
+            if (!_features.TryGet(c.Symbol, _cfg.CorrelationTf, utc, out var fa, out int ia)) return (double.NaN, null);
+            double best = double.NaN;
+            string? with = null;
+            foreach (var p in own)
+            {
+                if (!_features.TryGet(p.Symbol, _cfg.CorrelationTf, utc, out var fb, out int ib)) continue;
+                double corr = CorrelationCalculator.Compute(fa, ia, fb, ib, _cfg.CorrelationLookback);
+                if (double.IsNaN(corr)) continue;
+                double signed = corr * (int)c.Direction * (int)p.Direction;
+                if (double.IsNaN(best) || signed > best) { best = signed; with = p.Symbol; }
+            }
+            return (best, with);
+        }
+
+        private List<OpenRisk> BuildOpenRisks(List<PositionInfo> own)
+        {
+            var list = new List<OpenRisk>();
+            foreach (var p in own)
+            {
+                var spec = _market.GetSpec(p.Symbol);
+                var q = _market.GetQuote(p.Symbol);
+                _universeBySymbol.TryGetValue(p.Symbol, out var u);
+                double price = q != null && q.Value.IsValid ? q.Value.ExitPrice(p.Direction) : p.CurrentPrice;
+                double worst = spec != null ? RiskManager.WorstCaseLoss(spec, p, price) : double.PositiveInfinity;
+                double commission = spec != null ? spec.CommissionOneSide(p.VolumeUnits, price) : 0;
+                list.Add(new OpenRisk
+                {
+                    Symbol = p.Symbol,
+                    AssetClass = u?.AssetClass ?? spec?.AssetClass ?? AssetClass.Unknown,
+                    Direction = p.Direction,
+                    WorstCaseLoss = worst + (double.IsNaN(commission) ? 0 : commission),
+                    Notional = spec != null ? PositionSizer.Notional(spec, p.VolumeUnits, price) : 0,
+                    BaseCurrency = u?.BaseCurrency,
+                    QuoteCurrency = u?.QuoteCurrency,
+                    HasStopLoss = p.StopLoss.HasValue,
+                });
+            }
+            return list;
+        }
+
+        private bool Execute(Ranked r, DateTime utc)
+        {
+            if (_state.Mode != EngineMode.Running || !HistoryReady || !_persistenceHealthy || _ledger.Pending.Count > 0 || !CanOperate(out _)) return false;
+            if (_pendingCloses.Count > 0 || OwnPositions().Any(p => !HasValidTarget(p))) return false;
+            var c = r.C;
+            string sid = c.SignalId;
+            if (!_ledger.TryReserve(sid, c.Symbol, utc)) return false;
+            _dirty = true;
+            // Zapis z wyprzedzeniem: rezerwacja sygnału trafia na dysk PRZED wysłaniem zlecenia,
+            // więc awaria tuż po wysłaniu nie pozwoli wysłać tego samego sygnału ponownie po restarcie.
+            if (_state.Baseline == null && !TrySaveState(utc, force: true)) return false;
+
+            double slPips = Math.Round(r.Spec.PriceToPips(c.StopDistance), 1);
+            // Ochronny TP 3R dla strategii wychodzących regułą/trailingiem; reguły wejścia bez zmian.
+            double tpPips = c.TakeProfitDistance.HasValue ? Math.Round(r.Spec.PriceToPips(c.TakeProfitDistance.Value), 1) : 3 * slPips;
+            double? maxSlip = _cfg.MaxEntrySlippageAtr > 0 ? Math.Max(1, Math.Round(r.Spec.PriceToPips(_cfg.MaxEntrySlippageAtr * c.Atr), 1)) : (double?)null;
+            var req = new OrderRequest
+            {
+                Symbol = c.Symbol,
+                Direction = c.Direction,
+                VolumeUnits = r.Sizing.Units,
+                StopLossPips = slPips,
+                TakeProfitPips = tpPips,
+                Label = _cfg.Label,
+                Comment = ExecutionLedger.BuildComment(c.Strategy, sid),
+                SignalId = sid,
+                MaxSlippagePips = maxSlip,
+            };
+            if (!(slPips > 0) || !(tpPips > 0) || !double.IsFinite(slPips) || !double.IsFinite(tpPips))
+            { _ledger.MarkConsumed(sid, "nieprawidłowy SL/TP", utc); _dirty = true; return false; }
+
+            _pendingInfo[sid] = new PendingInfo { Candidate = c, RiskAmount = r.Sizing.RiskAmount, Score = r.Score.Total, Units = r.Sizing.Units };
+            var outcome = SendAdmittedOpen(req, new TradePlan
+            {
+                SignalId = sid, Symbol = c.Symbol, Strategy = c.Strategy, Variant = c.StrategyVariant, Direction = c.Direction,
+                SignalTf = c.SignalTf, InitialVolume = r.Sizing.Units, InitialRisk = c.StopDistance,
+                EntryAtr = c.Atr, RiskAmount = r.Sizing.RiskAmount, Score = r.Score.Total, EntryReason = c.Reason,
+                Regime = c.PrimaryRegimeName, LastManagedBarTime = c.SignalBarTime, Exit = c.Exit,
+            }, utc);
+            switch (outcome.Status)
+            {
+                case OrderStatus.Filled:
+                    {
+                        _consecutiveErrors = 0;
+                        _ledger.MarkExecuted(sid, outcome.PositionId ?? 0, utc);
+                        var pos = OwnPositions().FirstOrDefault(p => p.Id == outcome.PositionId);
+                        if (pos == null)
+                        {
+                            // Serwer potwierdził, ale pozycji nie widać – sprawdzimy w kolejnym cyklu.
+                            _ledger.Get(sid)!.State = SignalState.PendingVerification;
+                            AddError($"{c.Symbol}: zlecenie potwierdzone, ale pozycja niewidoczna – weryfikacja.");
+                            return true;
+                        }
+                        var plan = CreatePlan(pos, c, r.Sizing.RiskAmount, r.Score.Total, utc);
+                        _plans[pos.Id] = plan;
+                        TraceUpdate(c, utc, e =>
+                        {
+                            e.Stage = DecisionStage.Execution;
+                            e.Verdict = c.Direction == TradeDirection.Long ? DecisionVerdict.Buy : DecisionVerdict.Sell;
+                            e.PositionId = pos.Id;
+                            e.Outcome = $"{(c.Direction == TradeDirection.Long ? "BUY" : "SELL")} wykonane: pozycja #{pos.Id}, wolumen {pos.VolumeUnits:G6}, wejście {pos.EntryPrice}, SL {(pos.StopLoss.HasValue ? pos.StopLoss.Value.ToString(CultureInfo.InvariantCulture) : "ustawiany")}.";
+                            e.Gates.Add(new DecisionGate { Name = "Wykonanie zlecenia", Passed = true, Detail = $"potwierdzone u brokera, ryzyko {r.Sizing.RiskAmount:F2}" });
+                        }, k => k.Executed++);
+                        _pendingInfo.Remove(sid);
+                        LogSignal(c, r.Score, $"WYKONANY #{pos.Id} wol. {pos.VolumeUnits} SL {slPips} pips ryzyko {r.Sizing.RiskAmount:F2}");
+                        _journal.TradeOpened(plan, pos.VolumeUnits, $"ocena {r.Score.Total:F1}; {r.Score.Describe()}");
+                        if (!pos.StopLoss.HasValue || !HasValidTarget(pos))
+                        {
+                            AddError($"#{pos.Id} {c.Symbol} otwarta bez SL – natychmiastowe zabezpieczenie.");
+                            ProtectPositions(new List<PositionInfo> { pos }, utc);
+                        }
+                        _dirty = true;
+                        SaveState(utc, force: true);
+                        return true;
+                    }
+                case OrderStatus.Rejected:
+                    _ledger.MarkConsumed(sid, outcome.Message, utc);
+                    _pendingInfo.Remove(sid);
+                    RegisterBrokerError(outcome);
+                    _symbolCooldown[c.Symbol] = utc.AddMinutes(30);
+                    _dirty = true;
+                    SaveState(utc, force: true);
+                    LogSignal(c, r.Score, $"ODRZUCONY przez serwer: {outcome.Error} {outcome.Message}");
+                    TraceUpdate(c, utc, e => { e.Stage = DecisionStage.Execution; e.Verdict = DecisionVerdict.Wait; e.Outcome = $"Serwer odrzucił zlecenie ({outcome.Error}). WAIT."; e.Gates.Add(new DecisionGate { Name = "Wykonanie zlecenia", Passed = false, Detail = $"{outcome.Error}: {outcome.Message}" }); }, k => k.ExecutionFailed++);
+                    return false;
+                default:
+                    RegisterBrokerError(outcome);
+                    LogSignal(c, r.Score, $"NIEPEWNA odpowiedź ({outcome.Error}) – weryfikuję stan przed kolejnym działaniem");
+                    TraceUpdate(c, utc, e => { e.Stage = DecisionStage.Execution; e.Outcome = $"Niepewna odpowiedź serwera ({outcome.Error}) – silnik weryfikuje faktyczny stan pozycji przed kolejnym działaniem."; e.Gates.Add(new DecisionGate { Name = "Wykonanie zlecenia", Passed = false, Detail = "stan niepewny – weryfikacja" }); });
+                    return false;
+            }
+        }
+
+        private TradePlan CreatePlan(PositionInfo pos, SignalCandidate c, double riskAmount, double score, DateTime utc)
+        {
+            double stop = pos.StopLoss ?? (pos.EntryPrice - (int)c.Direction * c.StopDistance);
+            return new TradePlan
+            {
+                PositionId = pos.Id,
+                SignalId = c.SignalId,
+                Symbol = c.Symbol,
+                Strategy = c.Strategy,
+                Variant = c.StrategyVariant,
+                Direction = c.Direction,
+                SignalTf = c.SignalTf,
+                EntryPrice = pos.EntryPrice,
+                InitialStop = stop,
+                InitialRisk = Math.Abs(pos.EntryPrice - stop),
+                InitialVolume = _state.OpenAdmissions.FirstOrDefault(a => a.Fill?.PositionId == pos.Id)?.Fill?.InitialVolumeUnits ?? pos.VolumeUnits,
+                RiskAmount = riskAmount,
+                EntryTimeUtc = pos.EntryTimeUtc == default ? utc : pos.EntryTimeUtc,
+                EntryAtr = c.Atr,
+                Score = score,
+                EntryReason = c.Reason,
+                Regime = c.PrimaryRegimeName,
+                BestPrice = pos.EntryPrice,
+                LastManagedBarTime = c.SignalBarTime,
+                Exit = c.Exit,
+            };
+        }
+
+        private void RegisterBrokerError(OrderOutcome o)
+        {
+            if (o.Status == OrderStatus.Filled) return;
+            bool technical = OrderOutcome.IsUncertainError(o.Error);
+            if (!technical) return;
+            _consecutiveErrors++;
+            if (_consecutiveErrors >= _cfg.MaxConsecutiveErrors && _state.Mode == EngineMode.Running)
+                SetMode(EngineMode.PausedNewEntries, $"{_consecutiveErrors} kolejnych błędów serwera");
+        }
+
+        private void LogSignal(SignalCandidate c, ScoreBreakdown? s, string outcome)
+        {
+            string line = $"{c.DecisionTimeUtc:MM-dd HH:mm} {c.Symbol} {(c.Direction == TradeDirection.Long ? "KUP" : "SPRZEDAJ")} {c.Strategy.Code()} " +
+                          (s != null ? $"ocena {s.Total:F0} " : "") + "– " + outcome;
+            _recentSignals.Add(line);
+            _journal.Signal(line + (s != null ? " | " + s.Describe() : "") + " | " + c.Reason);
+        }
+
+        // ------------------------------------------------------------------ zamknięcia pozycji
+
+        private TradeRecord BuildClosedRecord(ClosedPositionInfo info)
+        {
+            _plans.TryGetValue(info.PositionId, out var plan);
+            string reason;
+            if (_closeReasons.TryGetValue(info.PositionId, out var r)) reason = r;
+            else reason = info.PlatformReason switch
+            {
+                "StopLoss" => plan != null && (plan.BreakEvenDone || (plan.Exit?.TrailAtrMultiple ?? 0) > 0 && plan.MfeR >= (plan.Exit?.TrailStartR ?? 99))
+                    ? "SL (break-even/trailing)" : "Stop Loss",
+                "TakeProfit" => "Take Profit",
+                "StopOut" => "Stop-out (brak marginu)",
+                _ => "zamknięta ręcznie lub poza botem",
+            };
+
+
+            var cls = _universeBySymbol.TryGetValue(info.Symbol, out var u) ? u.AssetClass : AssetClass.Unknown;
+            StrategyId recordedStrategy = plan?.Reconstructed == false ? plan.Strategy
+                : ExecutionLedger.TryParseComment(info.Comment, out var parsedStrategy, out _) ? parsedStrategy : StrategyId.Unknown;
+            var rec = new TradeRecord
+            {
+                PositionId = info.PositionId,
+                SignalId = plan?.SignalId ?? "",
+                Symbol = info.Symbol,
+                AssetClass = cls,
+                Strategy = recordedStrategy,
+                Variant = plan?.Variant ?? "",
+                TimeFrame = plan?.SignalTf ?? Tf.H1,
+                Direction = info.Direction,
+                EntryTimeUtc = info.EntryTimeUtc,
+                ExitTimeUtc = info.ExitTimeUtc,
+                EntryPrice = info.EntryPrice,
+                ExitPrice = info.ExitPrice,
+                Volume = plan?.Reconstructed == false ? plan.InitialVolume : info.Volume,
+                InitialRiskMoney = plan?.Reconstructed == false ? plan.RiskAmount : 0,
+                GrossProfit = info.GrossProfit,
+                Commission = info.Commission,
+                Swap = info.Swap,
+                NetProfit = info.NetProfit,
+                EntryReason = plan?.EntryReason ?? "",
+                ExitReason = reason,
+                Regime = plan?.Regime ?? "",
+                Score = plan?.Score ?? 0,
+                Parameters = plan?.Exit?.Describe() ?? "",
+                BarsHeld = plan?.BarsHeld ?? 0,
+            };
+            return rec;
+        }
+
+        // ------------------------------------------------------------------ polecenia panelu
+
+        private void SetMode(EngineMode m, string reason)
+        {
+            if (_state.Mode == m && _state.ModeReason == reason) return;
+            _state.Mode = m;
+            _state.ModeReason = reason;
+            _dirty = true;
+            string msg = $"Tryb: {ModeText(m)} – {reason}";
+            if (m == EngineMode.EmergencyStopped || m == EngineMode.PausedNewEntries) _log.Warn(msg); else _log.Info(msg);
+            _journal.Event(msg);
+        }
+
+        public string CmdStart(DateTime? ownerUtc = null)
+        {
+            var utc = ownerUtc ?? _broker.GetAccount().TimeUtc;
+            if (!GuardAllowed) return "Nie można uruchomić: " + GuardMessage;
+            if (!_trustedSimulation && !CertificateMatchesCurrent()) return "Nie można uruchomić: START strategii zablokowany: " + GetExecutionReadiness(utc).Message;
+            if (_initialized) SynchronizeHistory(utc);
+            if (!_initialized || !HistoryReady || !_persistenceHealthy || !CanOperate(out _)) return "Nie można uruchomić: brak bezpiecznego konta/połączenia, historii lub trwałego zapisu. " + HistoryMessage;
+            if (_state.Mode == EngineMode.EmergencyStopped) return "Najpierw zresetuj awaryjne zatrzymanie.";
+            if (_risk.State.MaxDrawdownHit) return "Najpierw zresetuj blokadę maksymalnego obsunięcia.";
+            _risk.Update(_broker.GetAccount(), utc);
+            if (_risk.NewEntriesBlocked(out var blocked)) return "START zablokowany: " + blocked;
+            if (_test != null) return "START zablokowany: trwa test wykonania.";
+            _consecutiveErrors = 0;
+            SetMode(EngineMode.Running, "uruchomiono przez użytkownika");
+            return "Bot uruchomiony.";
+        }
+
+        public string CmdStop()
+        {
+            if (_state.Mode == EngineMode.EmergencyStopped) return "Bot jest w stanie awaryjnego zatrzymania.";
+            SetMode(EngineMode.Stopped, "zatrzymano przez użytkownika");
+            return "Bot zatrzymany (pozycje chronione przez SL/TP u brokera).";
+        }
+
+        public string CmdPauseEntries()
+        {
+            if (_state.Mode != EngineMode.Running) return "Wstrzymanie możliwe tylko w trybie pracy.";
+            SetMode(EngineMode.PausedNewEntries, "wstrzymano nowe transakcje (użytkownik)");
+            return "Nowe transakcje wstrzymane, zarządzanie pozycjami aktywne.";
+        }
+
+        public string CmdEmergencyStop(DateTime utc, string reason)
+        {
+            _pool.Clear();
+            SetMode(EngineMode.EmergencyStopped, reason);
+            SaveState(utc, true);
+            CloseAllOwn(utc, "AWARYJNE ZATRZYMANIE: " + reason);
+            return "AWARYJNE ZATRZYMANIE – zamykanie pozycji bota.";
+        }
+
+        public string CmdResetEmergency(DateTime utc)
+        {
+            if (_state.Mode != EngineMode.EmergencyStopped) return "Bot nie jest w stanie awaryjnym.";
+            if (!CanOperate(out _, requireValidEquity: false) || OwnPositions().Count > 0 || _ledger.Pending.Count > 0)
+                return "Reset zablokowany: najpierw potwierdź zamknięcie własnych pozycji i uzgodnienie zleceń.";
+            if (_risk.State.MaxDrawdownHit && _lastAccount != null) _risk.ResetDrawdownLatch(_lastAccount.Equity);
+            SetMode(EngineMode.Stopped, "zresetowano stan awaryjny – naciśnij START");
+            SaveState(utc, true);
+            return "Stan awaryjny zresetowany. Bot zatrzymany – naciśnij START, aby wznowić.";
+        }
+
+        public string CmdCloseAllOwn(DateTime utc)
+        {
+            CloseAllOwn(utc, "polecenie użytkownika");
+            return "Zamykanie wszystkich pozycji bota (pozycje ręczne i innych botów nie są dotykane).";
+        }
+
+        public string CmdSetRisk(double pct)
+        {
+            var copy = _cfg.Risk.Clone();
+            copy.RiskPerTradePct = Math.Round(pct, 2);
+            var err = copy.Validate();
+            if (err != null) return "Odrzucono: " + err;
+            _cfg.Risk.RiskPerTradePct = copy.RiskPerTradePct;
+            _state.RiskPerTradeOverride = copy.RiskPerTradePct;
+            _dirty = true;
+            _journal.Event($"Zmieniono ryzyko na transakcję: {copy.RiskPerTradePct:F2}%");
+            return $"Ryzyko na transakcję: {copy.RiskPerTradePct:F2}%";
+        }
+
+        public string CmdToggleStrategy(StrategyId id, bool enabled)
+        {
+            if (enabled) _state.DisabledStrategies.Remove(id);
+            else if (!_state.DisabledStrategies.Contains(id)) _state.DisabledStrategies.Add(id);
+            _dirty = true;
+            return $"{id.PolishName()}: {(enabled ? "włączona" : "wyłączona")}";
+        }
+
+        public string CmdToggleClass(AssetClass c, bool enabled)
+        {
+            if (c == AssetClass.Crypto) return "Kryptowaluty są trwale wykluczone.";
+            if (enabled) _state.DisabledClasses.Remove(c);
+            else if (!_state.DisabledClasses.Contains(c)) _state.DisabledClasses.Add(c);
+            _dirty = true;
+            return $"{c.PolishName()}: {(enabled ? "włączone" : "wyłączone")}";
+        }
+
+        public string CmdResumeSuspended()
+        {
+            int n = _suspended.Count;
+            _suspended.Clear();
+            _dirty = true;
+            return $"Przywrócono {n} wstrzymanych par strategia/klasa.";
+        }
+
+        public bool IsStrategyEnabled(StrategyId id) => !_state.DisabledStrategies.Contains(id);
+        public bool IsClassEnabled(AssetClass c) => !_state.DisabledClasses.Contains(c);
+
+        // ------------------------------------------------------------------ test wykonania (tylko DEMO)
+
+        private sealed class ExecTest
+        {
+            public string Symbol = "";
+            public string SignalId = "";
+            public long PositionId;
+            public int Step;
+            public DateTime StepTime;
+            public DateTime Started;
+            public double InitialStop;
+            public TradeDirection Direction;
+            public bool Failed;
+            public readonly List<string> Log = new();
+        }
+
+        private ExecTest? _test;
+        public IReadOnlyList<string> LastExecutionTest { get; private set; } = Array.Empty<string>();
+
+        /// <summary>
+        /// Test ścieżki zleceń na koncie DEMO: otwarcie minimalnej pozycji z SL i TP → przesunięcie SL → zamknięcie.
+        /// Każdy krok jest weryfikowany na podstawie faktycznego stanu pozycji u brokera. Niedostępny na koncie LIVE.
+        /// </summary>
+        public string CmdExecutionTest(DateTime utc, string? symbol)
+        {
+            if (GuardIsLive) return "Test wykonania jest dostępny WYŁĄCZNIE na koncie DEMO.";
+            if (!GuardAllowed) return "Test niedostępny: " + GuardMessage;
+            if (_initialized) SynchronizeHistory(utc);
+            if (!_initialized || !HistoryReady || !_persistenceHealthy || !CanOperate(out var acc)) return "Test niedostępny: brak bezpiecznego konta/połączenia, historii lub zapisu.";
+            _risk.Update(acc, utc);
+            _dirty = true;
+            if (_risk.NewEntriesBlocked(out var blocked)) { TrySaveState(utc, true); return "Test zablokowany: " + blocked; }
+            if (_state.Mode == EngineMode.EmergencyStopped) return "Bot w stanie awaryjnym.";
+            if (_test != null) return "Test już trwa.";
+            if (_ledger.Pending.Count > 0) return "Test zablokowany: niepewne zlecenie wymaga uzgodnienia portfela.";
+            var own = OwnPositions();
+            if (_pendingCloses.Count > 0 || own.Any(p => !HasValidTarget(p))) return "Test zablokowany: brak poprawnego TP lub oczekujące zamknięcie.";
+            var candidates = string.IsNullOrWhiteSpace(symbol)
+                ? _universe.OrderBy(u => u.AssetClass == AssetClass.Forex ? 0 : 1).Select(u => u.Symbol)
+                : new[] { symbol!.Trim() };
+            foreach (var sym in candidates)
+            {
+                if (own.Any(p => string.Equals(p.Symbol, sym, StringComparison.OrdinalIgnoreCase)) || _ledger.HasPendingFor(sym)) continue;
+                if (!_universeBySymbol.TryGetValue(sym, out var universe)) continue;
+                var spec = _market.GetSpec(sym);
+                var q = _market.GetQuote(sym);
+                if (spec == null || spec.Validate() != null || q == null || !q.Value.IsValid) continue;
+                if (spec.AssetClass == AssetClass.Crypto || InstrumentClassifier.IsCrypto(spec.Name, spec.Description, spec.BaseAsset, spec.QuoteAsset)) continue;
+                if (!QuoteFresh(q.Value, utc)) continue;
+                if (!_market.IsMarketOpen(sym, utc, out var timeToClose) || timeToClose < TimeSpan.FromMinutes(_cfg.NoEntryMinutesBeforeClose)) continue;
+                if (_cfg.News.Enabled && (_cfg.News.RequireCalendar && (_news == null || !_news.IsFresh(utc, _cfg.News)) || _news != null && _news.IsBlackout(spec, utc, _cfg.News, out _))) continue;
+                double atr = 0;
+                if (_features.TryGet(sym, Tf.H1, utc, out var fs, out int i)) atr = Ta.At(fs.Atr(14), i);
+                if (!(atr > 0)) atr = q.Value.Mid * 0.002;
+                double slPips = Math.Max(spec.MinStopDistancePips + 1, Math.Round(spec.PriceToPips(1.5 * atr), 1));
+                double tpPips = Math.Round(slPips * 2, 1);
+                double stop = spec.PipsToPrice(slPips);
+                double slip = _cfg.Risk.SlippageAllowanceAtr * atr;
+                if (!double.IsFinite(atr) || q.Value.Spread > _cfg.Risk.MaxSpreadToAtr * atr) continue;
+                var size = PositionSizer.Size(spec, _risk.RiskBudget(acc), stop, q.Value.Ask, q.Value.Spread, slip);
+                if (!size.Ok || size.CostToRisk > _cfg.Risk.MaxCostToRisk) continue;
+                // Minimum brokera nie zwalnia testu z limitów ryzyka i portfela.
+                double units = spec.VolumeMin;
+                double risk = units * (stop + slip) * spec.ValuePerPricePerUnit + 2 * spec.CommissionOneSide(units, q.Value.Ask);
+                var check = _risk.EvaluateNewTrade(new TradeProposal
+                {
+                    Symbol = sym, AssetClass = universe.AssetClass, Direction = TradeDirection.Long,
+                    RiskAmount = risk, Notional = PositionSizer.Notional(spec, units, q.Value.Ask),
+                    EstimatedMargin = _broker.EstimateMargin(sym, TradeDirection.Long, units),
+                    BaseCurrency = universe.BaseCurrency, QuoteCurrency = universe.QuoteCurrency,
+                    MaxSignedCorrelation = MaxCorrelation(new SignalCandidate { Symbol = sym, Direction = TradeDirection.Long }, own, utc).Item1,
+                }, acc, BuildOpenRisks(own));
+                if (!check.Allowed) continue;
+                string sid = SignalIdGenerator.Create(sym, StrategyId.ExecutionTest, TradeDirection.Long, utc);
+                var t = new ExecTest { Symbol = sym, SignalId = sid, Started = utc, StepTime = utc, Direction = TradeDirection.Long };
+                t.Log.Add($"{utc:HH:mm:ss} START testu na {sym}: wolumen min. {spec.VolumeMin}, SL {slPips} pips, TP {tpPips} pips");
+                if (!_ledger.TryReserve(sid, sym, utc)) return "Test z tym identyfikatorem już był wykonany – spróbuj za minutę.";
+                _pool.Clear();
+                SetMode(EngineMode.Stopped, "jawny test techniczny – strategie pozostają STOP do osobnego START");
+                _dirty = true;
+                // Scoped dispatch atomically commits this ledger reservation WITH the complete
+                // admission before sending. A preliminary save would consume its current permit.
+                if (_state.Baseline == null && !TrySaveState(utc, true)) return "Test zablokowany: zapis rezerwacji nieudany.";
+                _test = t; // procedure authority is present only for this explicit command
+                var res = SendAdmittedOpen(new OrderRequest
+                {
+                    Symbol = sym, Direction = TradeDirection.Long, VolumeUnits = spec.VolumeMin, StopLossPips = slPips, TakeProfitPips = tpPips,
+                    Label = _cfg.Label, Comment = ExecutionLedger.BuildComment(StrategyId.ExecutionTest, sid), SignalId = sid,
+                }, new TradePlan { SignalId = sid, Symbol = sym, Strategy = StrategyId.ExecutionTest, Direction = TradeDirection.Long,
+                    InitialVolume = units, InitialRisk = stop, RiskAmount = risk, EntryAtr = atr, EntryReason = "test wykonania", Exit = new ExitPlan() }, utc);
+                if (res.Status == OrderStatus.Rejected)
+                {
+                    SaveExecutionEvidence(c => c with { Outcome = ExecutionTestOutcome.Failed, CompletedUtc = utc, Message = res.Message }, utc);
+                    _test = null;
+                    _ledger.MarkConsumed(sid, res.Message, utc);
+                    _dirty = true;
+                    TrySaveState(utc, true);
+                    t.Log.Add($"{utc:HH:mm:ss} BŁĄD: serwer odrzucił zlecenie ({res.Error}: {res.Message})");
+                    LastExecutionTest = t.Log.ToList();
+                    return "Test nieudany: zlecenie odrzucone – " + res.Message;
+                }
+                t.Step = 1;
+                t.Failed = !_trustedSimulation && res.Status != OrderStatus.Filled; // recovery may account, never certify an uncertain original open
+                t.PositionId = res.PositionId ?? 0;
+                t.Log.Add($"{utc:HH:mm:ss} Krok 1: odpowiedź serwera {res.Status} (pozycja #{t.PositionId}) – weryfikuję stan.");
+                _test = t;
+                LastExecutionTest = t.Log.ToList();
+                _journal.Event("TEST WYKONANIA: start na " + sym);
+                return $"Test wykonania rozpoczęty na {sym}. Postęp w panelu.";
+            }
+            return "Brak instrumentu spełniającego warunki testu (otwarty rynek, poprawna specyfikacja, brak pozycji bota).";
+        }
+
+        private void ProcessExecutionTest(DateTime utc)
+        {
+            var t = _test;
+            if (t == null) return;
+            var own = OwnPositions();
+            var pos = own.FirstOrDefault(p => ExecutionLedger.TryParseComment(p.Comment, out var sidStrat, out var sid) && sidStrat == StrategyId.ExecutionTest && sid == t.SignalId);
+            if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds)
+            {
+                if (pos != null) RequestClose(pos.Id, "test: przekroczony czas kroku", utc);
+                Finish("TEST NIEZALICZONY – przekroczony czas kroku; brak lub spóźnione dowody. Ochronne close i rozliczenie pozostają aktywne."); return;
+            }
+            if (_state.Baseline != null && _state.OpenAdmissions.Any(a => a.Request.SignalId == t.SignalId && a.Fill == null && a.Stage == AdmissionStage.OutcomeUnknown))
+            {
+                if ((utc - t.Started).TotalSeconds <= _cfg.VerificationTimeoutSeconds) return;
+                Finish("TEST NIEZALICZONY – brak pozytywnego dowodu pierwotnego fill; rezerwacja pozostaje"); return;
+            }
+            void Finish(string verdict)
+            {
+                if (_state.ExecutionTest?.Outcome == ExecutionTestOutcome.InProgress)
+                    SaveExecutionEvidence(c => c with { Outcome = verdict.Contains("PRZERWANY") ? ExecutionTestOutcome.Interrupted : ExecutionTestOutcome.Failed, CompletedUtc = utc, Message = verdict }, utc);
+                t.Log.Add($"{utc:HH:mm:ss} {verdict} (czas {(utc - t.Started).TotalSeconds:F0} s)");
+                LastExecutionTest = t.Log.ToList();
+                _journal.Event("TEST WYKONANIA: " + verdict);
+                _log.Info("Test wykonania: " + verdict);
+                _test = null;
+            }
+            switch (t.Step)
+            {
+                case 1:
+                    if (pos != null)
+                    {
+                        _ledger.MarkExecuted(t.SignalId, pos.Id, utc);
+                        t.PositionId = pos.Id;
+                        if (!_plans.ContainsKey(pos.Id))
+                            _plans[pos.Id] = new TradePlan { PositionId = pos.Id, SignalId = t.SignalId, Symbol = pos.Symbol, Strategy = StrategyId.ExecutionTest, Direction = pos.Direction, EntryPrice = pos.EntryPrice, InitialStop = pos.StopLoss ?? 0, InitialRisk = pos.StopLoss.HasValue ? Math.Abs(pos.EntryPrice - pos.StopLoss.Value) : 0, InitialVolume = pos.VolumeUnits, EntryTimeUtc = pos.EntryTimeUtc, EntryReason = "test wykonania", Exit = new ExitPlan() };
+                        _dirty = true;
+                        if (t.Failed || !TechnicalPositionMatches(pos, t, true)) { RequestClose(pos.Id, "test: brak SL/TP lub zgodnego fill", utc); Finish("TEST NIEZALICZONY – pozycja otwarta bez poprawnego SL/TP lub zgodnego fill"); return; }
+                        if (!SaveExecutionEvidence(c => c with { PositionId = pos.Id, InitialStop = pos.StopLoss!.Value, TakeProfit = pos.TakeProfit!.Value, ProtectionObservedUtc = utc }, utc))
+                        { RequestClose(pos.Id, "test: błąd trwałego dowodu ochrony", utc); Finish("TEST NIEZALICZONY – błąd zapisu dowodu ochrony"); return; }
+                        t.InitialStop = pos.StopLoss!.Value;
+                        t.Log.Add($"{utc:HH:mm:ss} Krok 1 OK: pozycja #{pos.Id} otwarta po {pos.EntryPrice}, SL {pos.StopLoss}, TP {pos.TakeProfit}, wolumen {pos.VolumeUnits}");
+                        t.Step = 2;
+                        t.StepTime = utc;
+                    }
+                    else if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds)
+                    {
+                        // Timeout ends the UI run, never discharges the uncertain open obligation.
+                        Finish("TEST NIEZALICZONY – pozycja nie pojawiła się po otwarciu");
+                    }
+                    break;
+                case 2:
+                    if (pos == null) { Finish("TEST PRZERWANY – pozycja zniknęła przed zmianą SL (np. trafiony SL/TP lub zamknięta ręcznie)"); return; }
+                    if (t.Failed || !TechnicalPositionMatches(pos, t, true)) { RequestClose(pos.Id, "test: zmieniona ochrona/tożsamość", utc); Finish("TEST NIEZALICZONY – zmieniona ochrona/tożsamość"); return; }
+                    if ((utc - t.StepTime).TotalSeconds < 20) return;
+                    {
+                        double newSl = pos.EntryPrice - 0.75 * (pos.EntryPrice - t.InitialStop);
+                        var spec = _market.GetSpec(pos.Symbol);
+                        if (spec != null) newSl = spec.RoundPrice(newSl);
+                        var quote = _market.GetQuote(pos.Symbol);
+                        if (spec == null || quote == null || !QuoteFresh(quote.Value, utc) || !double.IsFinite(newSl)
+                            || newSl <= t.InitialStop || newSl >= quote.Value.Bid - spec.MinStopDistancePips * spec.PipSize)
+                        {
+                            RequestClose(pos.Id, "test: brak poprawnej ciaśniejszej ceny SL", utc);
+                            Finish("TEST NIEZALICZONY – nie można bezpiecznie zacieśnić SL");
+                            return;
+                        }
+                        if (!SaveExecutionEvidence(c => c with { TightenedStop = newSl, ModifyRequestedUtc = utc }, utc))
+                        { RequestClose(pos.Id, "test: zapis modify nieudany", utc); Finish("TEST NIEZALICZONY – zapis modify nieudany"); return; }
+                        var r = _broker.ModifyStopLoss(pos.Id, newSl);
+                        if (r.Status == OrderStatus.Rejected)
+                        {
+                            RequestClose(pos.Id, "test: zmiana SL odrzucona", utc);
+                            Finish("TEST NIEZALICZONY – zmiana SL odrzucona, zamykanie pozycji");
+                            return;
+                        }
+                        t.Log.Add($"{utc:HH:mm:ss} Krok 2: zmiana SL {t.InitialStop} → {newSl}: {r.Status} {r.Message}");
+                        t.InitialStop = newSl;
+                        t.Step = 3;
+                        t.StepTime = utc;
+                    }
+                    break;
+                case 3:
+                    if (pos == null) { Finish("TEST PRZERWANY – pozycja zniknęła przed weryfikacją SL"); return; }
+                    if (!t.Failed && TechnicalPositionMatches(pos, t, false) && StopMatches(pos.Symbol, pos.StopLoss, t.InitialStop))
+                    {
+                        if (!SaveExecutionEvidence(c => c with { ModifyObservedUtc = utc }, utc))
+                        { RequestClose(pos.Id, "test: zapis obserwacji modify nieudany", utc); Finish("TEST NIEZALICZONY – zapis obserwacji modify nieudany"); return; }
+                        t.Log.Add($"{utc:HH:mm:ss} Krok 2 OK: SL potwierdzony u brokera ({pos.StopLoss}).");
+                        t.Step = 4;
+                        t.StepTime = utc;
+                    }
+                    else if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds)
+                    {
+                        t.Log.Add($"{utc:HH:mm:ss} UWAGA: SL u brokera = {pos.StopLoss}, oczekiwano {t.InitialStop} – zamykam pozycję.");
+                        t.Failed = true;
+                        t.Step = 4;
+                    }
+                    break;
+                case 4:
+                    if (pos == null) { Finish(t.Failed ? "TEST NIEZALICZONY – nie potwierdzono zmiany SL" : "TEST PRZERWANY – pozycja zniknęła przed wysłaniem polecenia zamknięcia; ścieżka close niezweryfikowana"); return; }
+                    if ((utc - t.StepTime).TotalSeconds < 20) return;
+                    if (!TechnicalPositionMatches(pos, t, false) || !StopMatches(pos.Symbol, pos.StopLoss, t.InitialStop)) t.Failed = true;
+                    if (!SaveExecutionEvidence(c => c with { CloseRequestedUtc = utc }, utc)) t.Failed = true;
+                    t.Log.Add($"{utc:HH:mm:ss} Krok 3: zamykanie pozycji #{pos.Id}.");
+                    var closeResult = RequestClose(pos.Id, "test wykonania – zamknięcie", utc);
+                    if (closeResult?.Status != OrderStatus.Filled || closeResult.PositionId != pos.Id) t.Failed = true;
+                    else if (!SaveExecutionEvidence(c => c with { CloseConfirmedUtc = utc }, utc)) t.Failed = true;
+                    t.Step = 5;
+                    t.StepTime = utc;
+                    break;
+                case 5:
+                    if (t.Failed) Finish("TEST NIEZALICZONY – nie potwierdzono wszystkich poleceń zmiany SL i zamknięcia");
+                    else if (pos == null && _trustedSimulation) Finish("TEST ZALICZONY – wyłącznie symulacja; bez certyfikatu produkcyjnego");
+                    else if (pos == null && PublishExecutionPass(utc)) Finish("TEST ZALICZONY – trwały PASS po pełnym rozliczeniu ekonomicznym");
+                    else if ((utc - t.StepTime).TotalSeconds > _cfg.VerificationTimeoutSeconds) Finish("TEST NIEZALICZONY – pozycja nadal otwarta po próbie zamknięcia (ponawiam zamykanie w tle)");
+                    break;
+            }
+            if (_test != null) LastExecutionTest = t.Log.ToList();
+        }
+
+        // ------------------------------------------------------------------ status
+
+        public static string ModeText(EngineMode m) => m switch
+        {
+            EngineMode.Running => "PRACA",
+            EngineMode.PausedNewEntries => "WSTRZYMANE NOWE WEJŚCIA",
+            EngineMode.Stopped => "ZATRZYMANY",
+            EngineMode.EmergencyStopped => "AWARYJNE ZATRZYMANIE",
+            _ => m.ToString(),
+        };
+
+        public EngineStatus GetStatus(DateTime utc)
+        {
+            var acc = _lastAccount;
+            var own = new List<string>();
+            double lev = 0;
+            try
+            {
+                var positions = OwnPositions();
+                foreach (var p in positions)
+                {
+                    _plans.TryGetValue(p.Id, out var plan);
+                    double rNow = plan != null && plan.InitialRisk > 0 ? (int)p.Direction * (p.CurrentPrice - plan.EntryPrice) / plan.InitialRisk : 0;
+                    own.Add($"{p.Symbol} {(p.Direction == TradeDirection.Long ? "KUP" : "SPRZ")} {p.VolumeUnits:G6} | {p.NetProfit:F2} ({rNow:F2}R) | {(plan != null ? plan.Strategy.Code() : "?")} | SL {(p.StopLoss.HasValue ? p.StopLoss.Value.ToString("G8", CultureInfo.InvariantCulture) : "BRAK!")}");
+                }
+                if (acc != null && acc.Equity > 0) lev = BuildOpenRisks(positions).Sum(o => Math.Abs(o.Notional)) / acc.Equity;
+            }
+            catch (Exception ex)
+            {
+                own.Add("błąd odczytu pozycji: " + ex.Message);
+            }
+
+            var rs = _risk.State;
+            double equity = acc?.Equity ?? 0;
+            double daily = rs.DayStartEquity > 0 ? equity - rs.DayStartEquity : 0;
+            double total = rs.InitialEquity > 0 ? equity - rs.InitialEquity : 0;
+            string news = _news == null || !_cfg.News.Enabled ? "wyłączony"
+                : _news.LastUpdateUtc == DateTime.MinValue ? "brak danych"
+                : $"{_news.Events.Count} wydarzeń, aktualizacja {_news.LastUpdateUtc:MM-dd HH:mm} UTC" + (_news.IsFresh(utc, _cfg.News) ? "" : " (NIEAKTUALNY)");
+            var next = _news?.Upcoming(utc, 1, _cfg.News.MinImpact).FirstOrDefault();
+            if (next != null) news += $"; następne: {next.Currency} {next.Title} {next.TimeUtc:MM-dd HH:mm} UTC";
+
+            return new EngineStatus
+            {
+                HistoryReady = HistoryReady, HistoryMessage = HistoryMessage,
+                Mode = _state.Mode,
+                ModeReason = _state.ModeReason,
+                IsLive = GuardIsLive,
+                GuardAllowed = GuardAllowed,
+                GuardMessage = GuardMessage,
+                Connected = _connected,
+                AccountNumber = acc?.Number ?? 0,
+                Broker = acc?.BrokerName ?? "",
+                Currency = acc?.Currency ?? "",
+                Balance = acc?.Balance ?? 0,
+                Equity = equity,
+                DailyPnl = daily,
+                DailyPnlPct = rs.DayStartEquity > 0 ? daily / rs.DayStartEquity * 100 : 0,
+                TotalPnl = total,
+                TotalPnlPct = rs.InitialEquity > 0 ? total / rs.InitialEquity * 100 : 0,
+                DrawdownPct = _risk.DrawdownPct,
+                RiskPerTradePct = _cfg.Risk.RiskPerTradePct,
+                MaxDailyLossPct = _cfg.Risk.MaxDailyLossPct,
+                MaxDrawdownPct = _cfg.Risk.MaxDrawdownPct,
+                EffectiveLeverage = lev,
+                MaxEffectiveLeverage = _cfg.Risk.MaxEffectiveLeverage,
+                DailyLimitHit = rs.DailyLimitHit,
+                MaxDrawdownHit = rs.MaxDrawdownHit,
+                OpenPositions = own,
+                OwnPositionCount = own.Count,
+                MaxPositions = _cfg.Risk.MaxOpenPositions,
+                UniverseByClass = _universe.GroupBy(x => x.AssetClass).ToDictionary(g => g.Key, g => g.Count()),
+                RecentSignals = _recentSignals.Items,
+                RecentErrors = _recentErrors.Items,
+                ActiveStrategies = _book.Classes.SelectMany(c => _book.For(c).Select(s => $"{c.PolishName()}: {s.Id.PolishName()} ({s.SignalTf}{(s.FilterTf.HasValue ? "/" + s.FilterTf : "")})")).ToList(),
+                Suspended = _suspended.ToList(),
+                DisabledStrategies = _state.DisabledStrategies.ToList(),
+                DisabledClasses = _state.DisabledClasses.ToList(),
+                NewsStatus = news,
+                TradesTotal = _state.TradesTotal,
+                RealizedTotal = _state.RealizedTotal,
+            };
+        }
+
+        private void AddError(string msg)
+        {
+            _recentErrors.Add($"{DateTime.UtcNow:HH:mm:ss} {msg}");
+            _log.Error(msg);
+        }
+    }
+}

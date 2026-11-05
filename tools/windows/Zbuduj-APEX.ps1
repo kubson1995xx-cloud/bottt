@@ -1,0 +1,279 @@
+#Requires -Version 5.1
+<# Frontend-first builder. No test bypass, deployment, provisioning or broker smoke. #>
+param([string]$Wyjscie = '', [ValidateSet('win-x64','linux-x64')][string]$Target='win-x64', [switch]$Offline, [string]$UiOnlyReuseRoot='')
+$ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'TestEvidence.ps1')
+$repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+if ([string]::IsNullOrWhiteSpace($Wyjscie)) { $Wyjscie=Join-Path $repo 'dist' }
+$Wyjscie=[IO.Path]::GetFullPath($Wyjscie)
+if ((Test-Path -LiteralPath $Wyjscie) -and @(Get-ChildItem -LiteralPath $Wyjscie -Force).Count -gt 0) { throw 'Katalog Wyjscie nie jest pusty; wymagany NOWY katalog.' }
+if ((Test-Path -LiteralPath ($Wyjscie+'.zip')) -or (Test-Path -LiteralPath ($Wyjscie+'.zip.sha256'))) { throw 'ZIP juz istnieje; wybierz NOWY katalog.' }
+if ($Target -eq 'linux-x64' -and ($PSVersionTable.PSVersion.Major -lt 7 -or -not $IsLinux -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -ne 'X64')) { throw 'linux-x64 requires PowerShell7 on Linux x64' }
+if ($Target -eq 'win-x64' -and $env:OS -ne 'Windows_NT') { throw 'Windows target requires native Windows; no cross-publish acceptance' }
+function Sprawdz([string]$co) { if ($LASTEXITCODE -ne 0) { throw "$co failed ($LASTEXITCODE); no accepted package" } }
+function Hash([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Json([string]$p,$o) { [IO.File]::WriteAllText($p,($o|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false)) }
+# Select SDK8 for every CLI invocation, including nested producer/package gates.
+$scratch=Join-Path ([IO.Path]::GetTempPath()) ('apex-build-'+[Guid]::NewGuid().ToString('N'));New-ApexPrivateBuildDirectory $scratch
+$dotnetExecutable=(Get-Command dotnet).Source
+$selectedSdk=(& $dotnetExecutable --list-sdks | Where-Object { $_ -match '^8\.0\.[0-9]+ ' } | Select-Object -Last 1).Split(' ')[0]
+if ($selectedSdk -notmatch '^8\.0\.[0-9]+$') { throw 'Installed SDK8 required' }
+$sdkSelection=Join-Path $scratch 'sdk-selection';New-Item -ItemType Directory -Path $sdkSelection | Out-Null
+Json (Join-Path $sdkSelection 'global.json') @{sdk=@{version=$selectedSdk;rollForward='disable'}}
+function Invoke-ApexBuildDotnet {
+    $cliArgs=@($args|ForEach-Object { if ($_ -is [string] -and $_ -match '\.(sln|csproj|dll)$' -and -not [IO.Path]::IsPathRooted($_)) { Join-Path $repo $_ } else { $_ } })
+    Push-Location $sdkSelection
+    try { & $dotnetExecutable @cliArgs } finally { Pop-Location }
+}
+$node=(& node --version);Sprawdz 'Node';if ($node -notmatch '^v26\.') { throw 'Use tested Node26 toolchain' }
+$npm=(& npm --version);Sprawdz 'npm';$sdk=(Invoke-ApexBuildDotnet --version);Sprawdz 'SDK';if ($sdk -cne $selectedSdk) { throw '.NET8 SDK selection failed' }
+$commit=(& git -C $repo rev-parse HEAD);Sprawdz 'git HEAD'
+$dirty=[bool](& git -C $repo status --porcelain)
+$evidence=Join-Path $Wyjscie 'Weryfikacja';New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+# External temporary install/test plumbing is never copied into the package.
+$oldDotnetHost=$env:DOTNET_HOST_PATH;$env:DOTNET_HOST_PATH=$dotnetExecutable
+$emptyFeed=Join-Path $scratch 'empty-feed';New-Item -ItemType Directory -Path $emptyFeed|Out-Null
+$oldPackage=$env:APEX_PACKAGE_ROOT;$oldEvidence=$env:NAVAL_HOST_EVIDENCE_DIR
+$env:APEX_PACKAGE_ROOT=$null;$env:NAVAL_HOST_EVIDENCE_DIR=$null
+function Inputs {
+    $names=@(& git -C $repo ls-files) + @(& git -C $repo ls-files --others --exclude-standard)
+    $items=@($names|Sort-Object -Unique|Where-Object { $_ -match '^(src/|tests/|tools/|frontend/|config/|docs/|reports/|\.github/|\.gitattributes$|package.*\.json$|APEX.*\.sln$|README\.md$|PRZECZYTAJ\.md$|Directory\.|global\.json$|NuGet\.)' }|ForEach-Object {
+        $p=Join-Path $repo $_
+        if (-not (Test-Path -LiteralPath $p -PathType Leaf) -or ((Get-Item -LiteralPath $p -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Source input missing/link' }
+        [ordered]@{path=$_;bytes=(Get-Item -LiteralPath $p).Length;sha256=(Hash $p)}
+    })
+    return [ordered]@{schema='apex-source-inputs-v1';files=$items}
+}
+function NodeGate([string]$name,[string[]]$arguments) {
+    $log=Join-Path $evidence ($name+'.txt')
+    # TAP is selected explicitly so counts derive from actual node runner output.
+    $oldNodeOptions=$env:NODE_OPTIONS
+    try {
+        $env:NODE_OPTIONS=($oldNodeOptions+' --test-reporter=tap').Trim()
+        & npm --prefix frontend/naval @arguments 2>&1 | Tee-Object -FilePath $log | Write-Host
+        Sprawdz $name
+    } finally { $env:NODE_OPTIONS=$oldNodeOptions }
+    $text=[IO.File]::ReadAllText($log)
+    $values=@{}
+    foreach ($n in @('tests','pass','fail','skipped','cancelled','todo')) { $m=[regex]::Match($text,('(?m)^# '+$n+' (\d+)\r?$'));if (-not $m.Success) { throw "Missing TAP counter $n" };$values[$n]=[int]$m.Groups[1].Value }
+    if ($values.tests -le 0 -or $values.pass -ne $values.tests -or $values.fail+$values.skipped+$values.cancelled+$values.todo -ne 0) { throw 'Incomplete frontend tests' }
+    return [ordered]@{total=$values.tests;passed=$values.pass;failed=$values.fail;log=($name+'.txt');logSha256=(Hash $log)}
+}
+$buildEvidence=$Wyjscie+'-build-evidence';New-Item -ItemType Directory -Path $buildEvidence | Out-Null
+Copy-Item (Join-Path $sdkSelection 'global.json') (Join-Path $buildEvidence 'sdk-global.json')
+$before=Inputs;Json (Join-Path $evidence 'source-inputs.json') $before
+$reuse=$null
+if ($UiOnlyReuseRoot) {
+    if ($Target -cne 'win-x64') { throw 'UI-only evidence reuse is Windows-only' }
+    & (Join-Path $UiOnlyReuseRoot 'Sprawdz-Pakiet.ps1') -Pakiet $UiOnlyReuseRoot
+    $priorMeta=Get-Content (Join-Path $UiOnlyReuseRoot 'apex-build.json') -Raw|ConvertFrom-Json
+    if ($priorMeta.sourceCommit -cne 'd1f928e6d272fd5e4f0c5570685f91802a8c1d9f') { throw 'Unapproved reuse source' }
+    $priorInputs=Get-Content (Join-Path $UiOnlyReuseRoot 'Weryfikacja/source-inputs.json') -Raw|ConvertFrom-Json
+    $old=@{};foreach ($f in $priorInputs.files) { $old[$f.path]=$f.sha256 }
+    $now=@{};foreach ($f in $before.files) { $now[$f.path]=$f.sha256 }
+    $allowed='\A(?:frontend/naval/src/ui/Shell\.tsx|frontend/naval/src/styles/naval\.css|src/Apex\.Desktop/Apex\.Desktop\.csproj|src/Apex\.Desktop/Okx/(?:okx-controls\.(?:js|css)|OkxControlEndpoints\.cs|OkxExecutionCredentials\.cs|OkxNavalRuntime\.cs|OkxOperatorControl\.cs|OkxDemoBalanceTest\.cs|WindowsOkxApprovalProvider\.cs|WindowsOkxDialog\.cs|WindowsOkxProvisioning\.cs)|tests/Apex\.Tests/(?:OkxNativeWaitTests|OkxNativeControlTests|OkxDemoBalanceTests|OkxEnrollmentBoundaryTests)\.cs|tests/Apex\.Windows\.Tests/(?:WindowsUiRepairTests|WindowsOkxEnrollmentTests|WindowsNativeUi|WindowsCdpBrowser|WindowsBrowserAcceptanceTests|WindowsTestHost)\.cs|tests/panel/okx-ui\.test\.cjs|tests/package/safe_extract\.py|tools/windows/(?:Zbuduj-APEX|Test-OkxEnrollment|Test-UiRepairOriginal|Test-UiRepairDelivery|Test-UiRepairAcceptance)\.ps1|tools/windows/PRZECZYTAJ-WINDOWS\.md|\.github/workflows/windows-demo\.yml|src/Apex\.Adapters\.Okx/(?:Execution/(?:OkxEnrollmentDiscoveryClient|OkxExecutionObservationClient)\.cs|OkxEeaDemoReadClient\.cs)|src/Apex\.Desktop/Okx/(?:WindowsOkxReadStore|WindowsOkxSimpleConnect|WindowsOkxCredentialStore|OkxReadCommit)\.cs|tests/Apex\.Adapters\.Okx\.Tests/OkxEnrollmentDiscoveryTests\.cs|tests/Apex\.Windows\.Tests/(?:WindowsOkxSimpleConnectTests|WindowsOkxAuthApiTests|WindowsOkxCommitFenceTests|WindowsOkxCommitIntegrationTests)\.cs|tools/windows/Test-OkxSimpleConnect\.ps1|\.github/workflows/okx-simple-connect\.yml)\z'
+    $delta=@();$same=@()
+    foreach ($name in @(@($old.Keys)+@($now.Keys)|Sort-Object -Unique)) {
+        if ($old[$name] -ceq $now[$name]) { $same+=@{path=$name;sha256=$now[$name]};continue }
+        if ($name -cnotmatch $allowed -or -not $now.ContainsKey($name)) { throw ('UI reuse refused changed engine/unapproved input: '+$name) }
+        $delta+=@{path=$name;prior=$old[$name];current=$now[$name]}
+    }
+    $suiteBindings=@{};foreach ($suite in @('bot','platform','backtester')) {
+        $p=Join-Path $UiOnlyReuseRoot ('Weryfikacja/'+$suite+'.trx');Read-ApexTestCounts $p|Out-Null
+        $suiteBindings[$suite]=@{execution='reused-not-rerun';sha256=(Hash $p);sourceCommit=$priorMeta.sourceCommit}
+    }
+    $reuse=@{kind='ui-only-unchanged-engine-evidence';sourceCommit=$priorMeta.sourceCommit;zipSha256='87deacbf67fd9de196511951ed95c50ff3c1f2595e8c769037824252d8732005';sourceInputsSha256=$priorMeta.sourceInputsSha256;unchangedCount=$same.Count;delta=$delta;suites=$suiteBindings;legacyFlags='TestsRun flags mean retained passing evidence; these three suites were NOT executed in this build'}
+    Json (Join-Path $buildEvidence 'engine-evidence-reuse.json') @{reuse=$reuse;unchangedInputs=$same;priorSourceInputs=$priorInputs}
+}
+Copy-Item (Join-Path $evidence 'source-inputs.json') $buildEvidence
+function Save-BinaryMap([string]$Name) {
+    $paths=@('src/Apex.Desktop/bin/Release/net8.0','tests/Apex.Tests/bin/Release/net8.0','tests/Apex.Windows.Tests/bin/Release/net8.0','tests/Apex.Backtester.Tests/bin/Release/net8.0','src/Platforms/cTrader/Tests/bin/Release/net8.0','tools/Apex.Backtester/bin/Release/net8.0')
+    $files=@(foreach ($path in $paths) { $full=Join-Path $repo $path;if (Test-Path -LiteralPath $full) { Get-ChildItem -LiteralPath $full -File -Recurse | ForEach-Object { [ordered]@{path=$_.FullName.Substring($repo.Length+1).Replace('\','/');bytes=$_.Length;sha256=(Hash $_.FullName)} } } })
+    Json (Join-Path $buildEvidence $Name) @{reason='Before executable gate';sdk=(Invoke-ApexBuildDotnet --version);files=$files}
+}
+$rootHashes=@{};foreach ($f in @('index.html','app.js','app.css','decision-center.js')) { $rootHashes[$f]=Hash (Join-Path $repo ('src/Apex.Desktop/wwwroot/'+$f)) }
+Push-Location $repo
+try {
+    $install=@('--ignore-scripts','--no-audit','--no-fund');if ($Offline) { $install+=@('--offline') }
+    # Existing DOM tests consume root-pinned linkedom; install it before frontend tests.
+    & npm ci @install;Sprawdz 'Root test dependency npm ci'
+    & npm --prefix frontend/naval ci @install;Sprawdz 'Clean Naval npm ci'
+    & npm --prefix frontend/naval run typecheck;Sprawdz 'Naval strict typecheck'
+    # npm test command is the same node runner, with an explicit TAP reporter for sealed evidence.
+    $frontendTests=NodeGate 'frontend-tests' @('test','--','--test-reporter=tap')
+    & npm --prefix frontend/naval run build;Sprawdz 'Naval production build and staging'
+    $frontendBuild=NodeGate 'frontend-build-tests' @('run','test:build','--','--test-reporter=tap')
+    $naval=Test-ApexNavalAssets (Join-Path $repo 'frontend/naval/dist')
+    $stage=Test-ApexNavalAssets (Join-Path $repo 'src/Apex.Desktop/wwwroot/naval')
+    if ($stage.sha256 -cne $naval.sha256) { throw 'dist/staging parity failed' }
+    if ($Offline) { Invoke-ApexBuildDotnet restore APEX.Trading.Demo.sln --source $emptyFeed -p:NuGetAudit=false;Sprawdz 'Cache-only solution restore' }
+    else { Invoke-ApexBuildDotnet restore APEX.Trading.Demo.sln;Sprawdz 'Solution restore' }
+    if ($Target -eq 'win-x64') {
+        $restore=@('restore','src/Apex.Desktop/Apex.Desktop.csproj','-r','win-x64','-p:SelfContained=true','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; Invoke-ApexBuildDotnet @restore;Sprawdz 'Windows runtime restore'
+    }
+    Invoke-ApexBuildDotnet build APEX.Trading.Demo.sln -c Release --no-restore;Sprawdz 'Solution Release build'
+    $built=Test-ApexNavalAssets (Join-Path $repo 'src/Apex.Desktop/bin/Release/net8.0/wwwroot/naval');if ($built.sha256 -cne $naval.sha256) { throw 'Build/Naval parity failed' }
+    Save-BinaryMap 'before-product-tests.json'
+    foreach ($suite in @(@('bot','tests/Apex.Tests/Apex.Tests.csproj'),@('platform','src/Platforms/cTrader/Tests/Apex.Platform.Tests.csproj'),@('backtester','tests/Apex.Backtester.Tests/Apex.Backtester.Tests.csproj'))) {
+        if ($reuse) { Copy-Item (Join-Path $UiOnlyReuseRoot ('Weryfikacja/'+$suite[0]+'.trx')) $evidence }
+        else { Invoke-ApexBuildDotnet test $suite[1] -c Release --no-build --no-restore --logger ('trx;LogFileName='+$suite[0]+'.trx') --results-directory $evidence;Sprawdz $suite[0] }
+    }
+    $testCounts=[ordered]@{bot=(Read-ApexTestCounts (Join-Path $evidence 'bot.trx'));platform=(Read-ApexTestCounts (Join-Path $evidence 'platform.trx'));backtester=(Read-ApexTestCounts (Join-Path $evidence 'backtester.trx'))}
+    & npm test;Sprawdz 'Root panel and packaging tests'
+    & npm run check;Sprawdz 'Original panel JS syntax'
+    try { & (Join-Path $repo 'tests/package/Test-BacktesterGate.ps1') -Source $repo -Scratch (Join-Path $scratch 'fixtures') }
+    finally { $result=Join-Path $scratch 'fixtures/results.json';if (Test-Path $result) { Copy-Item $result (Join-Path $buildEvidence 'controlled-results.json') };$staticResult=Join-Path $scratch 'fixtures/static-host-controls/results.json';if (Test-Path $staticResult) { Copy-Item $staticResult (Join-Path $buildEvidence 'static-host-controls.json') } }
+    try { & (Join-Path $repo 'tests/package/Test-NavalNotices.ps1') -Source $repo -Scratch (Join-Path $scratch 'notice-fixtures') }
+    finally { $result=Join-Path $scratch 'notice-fixtures/results.json';if (Test-Path $result) { Copy-Item $result (Join-Path $buildEvidence 'notice-results.json') } }
+    if ($Target -eq 'win-x64') {
+        # Genuine build-time CLI only. Authority/result/logs stay in private external scratch.
+        $presentationBuild=Join-Path $scratch 'presentation-build'
+        New-ApexPresentation -Source $repo -Scratch $presentationBuild | Out-Null
+        $restore=@('restore','tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; Invoke-ApexBuildDotnet @restore;Sprawdz 'Presentation Source restore'
+        Invoke-ApexBuildDotnet build tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-restore;Sprawdz 'Presentation Source build'
+        $oldPresentation=$env:APEX_PRESENTATION_TEST_DIRECTORY
+        try {
+            $env:APEX_PRESENTATION_TEST_DIRECTORY=Join-Path $presentationBuild 'presentation'
+            # Program.Run intentionally reads its real app-base presentation, not
+            # the helper-only test environment override. Match the accepted Task3
+            # lane's genuine two-file prerequisite before native source execution.
+            $nativePresentation=Join-Path $repo 'tests/Apex.Windows.Tests/bin/Release/net8.0/presentation'
+            New-Item -ItemType Directory -Force -Path $nativePresentation | Out-Null
+            foreach ($name in @('naval-publication.json','presentation.json')) { Copy-Item -LiteralPath (Join-Path $env:APEX_PRESENTATION_TEST_DIRECTORY $name) -Destination (Join-Path $nativePresentation $name) -Force }
+            Save-BinaryMap 'before-windows-source.json'
+            Invoke-ApexBuildDotnet test tests/Apex.Windows.Tests/Apex.Windows.Tests.csproj -c Release --no-build --no-restore --filter 'Gate=Source' --logger 'trx;LogFileName=windows.trx' --results-directory $evidence;Sprawdz 'All native Windows Source tests'
+            $testCounts.windows=Read-ApexTestCounts (Join-Path $evidence 'windows.trx')
+        } finally { $env:APEX_PRESENTATION_TEST_DIRECTORY=$oldPresentation }
+        $restore=@('restore','src/Apex.Desktop/Apex.Desktop.csproj','-r','win-x64','-p:SelfContained=true','-p:NuGetAudit=false');if ($Offline) { $restore+=@('--source',$emptyFeed) }; Invoke-ApexBuildDotnet @restore;Sprawdz 'Final Windows publish restore'
+    }
+    $desktop=Join-Path $Wyjscie 'APEX-Desktop'
+    if ($Target -eq 'linux-x64') {
+        Invoke-ApexBuildDotnet publish src/Apex.Desktop/Apex.Desktop.csproj -c Release --no-restore --self-contained false -p:UseAppHost=false -p:IsTransformWebConfigDisabled=true -o $desktop
+    } else {
+        $publishArgv=@('publish','src/Apex.Desktop/Apex.Desktop.csproj','-c','Release','--no-restore','-r','win-x64','--self-contained','true','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:PublishTrimmed=false','-p:PublishReadyToRun=false','-p:IsTransformWebConfigDisabled=true','-o',$desktop)
+        Invoke-ApexBuildDotnet @publishArgv
+    }
+    Sprawdz 'Publish'
+    if ($Target -eq 'win-x64') {
+        $presentationPublish=Join-Path $desktop 'presentation'
+        New-Item -ItemType Directory -Path $presentationPublish | Out-Null
+        foreach ($name in @('naval-publication.json','presentation.json')) { Copy-Item -LiteralPath (Join-Path $presentationBuild ('presentation/'+$name)) -Destination (Join-Path $presentationPublish $name) }
+        Test-ApexPresentation $presentationPublish | Out-Null
+        # Read actual unbundled publish intermediate, then retain its exact UTF8 bytes.
+        $runtimePath=Join-Path $repo 'src/Apex.Desktop/bin/Release/net8.0/win-x64/ApexDesktop.runtimeconfig.json'
+        $runtimeText=[IO.File]::ReadAllText($runtimePath);$runtime=$runtimeText|ConvertFrom-Json
+        $assetsPath=Join-Path $repo 'src/Apex.Desktop/obj/project.assets.json'
+        $assets=Get-Content -LiteralPath $assetsPath -Raw|ConvertFrom-Json
+        $packs=@();$nativeLibraries=@();$runtimeListPath=$null
+        foreach ($framework in $runtime.runtimeOptions.includedFrameworks) {
+            $name=$framework.name+'.Runtime.win-x64';$version=$framework.version
+            $packDirectory=$null
+            foreach ($folder in $assets.packageFolders.PSObject.Properties.Name) {
+                $candidate=Join-Path $folder ($name.ToLowerInvariant()+'/'+$version)
+                if (Test-Path -LiteralPath $candidate -PathType Container) { $packDirectory=$candidate;break }
+            }
+            if (-not $packDirectory) { throw 'Actual Windows runtime pack not found' }
+            $packs+=@{name=$name;version=$version;sha512=[IO.File]::ReadAllText((Join-Path $packDirectory ($name.ToLowerInvariant()+'.'+$version+'.nupkg.sha512'))).Trim()}
+            if ($framework.name -ceq 'Microsoft.NETCore.App') { $runtimeListPath=Join-Path $packDirectory 'data/RuntimeList.xml' }
+            $native=Join-Path $packDirectory 'runtimes/win-x64/native'
+            if (Test-Path -LiteralPath $native) { foreach ($file in Get-ChildItem -LiteralPath $native -File -Filter '*.dll') { $nativeLibraries+=@{name=$file.Name;pack=$name;bytes=$file.Length;sha256=(Hash $file.FullName)} } }
+        }
+        # Resolve the ACTUAL SDK-selected static host, rather than invent DLL loading.
+        $hostResolve=@('msbuild','src/Apex.Desktop/Apex.Desktop.csproj','-t:_GetAppHostPaths','-p:Configuration=Release','-p:RuntimeIdentifier=win-x64','-p:SelfContained=true','-p:PublishSingleFile=true','-getProperty:SingleFileHostSourcePath')
+        $hostPath=(Invoke-ApexBuildDotnet @hostResolve)
+        if ($LASTEXITCODE -ne 0) { throw ('Resolve actual singlefilehost source failed: '+($hostPath -join ' ')) }
+        $hostFile=Get-Item -LiteralPath ([string]$hostPath).Trim()
+        if ($hostFile.Name -cne 'singlefilehost.exe' -or $hostFile.Directory.Parent.Parent.Parent.Parent.Name -ine 'Microsoft.NETCore.App.Host.win-x64') { throw 'Unexpected SDK singlefilehost source' }
+        $dropped=@('coreclr.dll','clrjit.dll','hostfxr.dll','hostpolicy.dll')
+        [xml]$runtimeList=[IO.File]::ReadAllText($runtimeListPath)
+        foreach ($component in $dropped) {
+            $entry=@($runtimeList.FileList.File|Where-Object { $_.Path -ceq ('runtimes/win-x64/native/'+$component) })
+            if ($entry.Count -ne 1 -or $entry[0].DropFromSingleFile -cne 'true') { throw 'Actual runtime list does not prove static host component' }
+        }
+        $staticHost=@{pack='Microsoft.NETCore.App.Host.win-x64';version=$hostFile.Directory.Parent.Parent.Parent.Name;templateSha256=(Hash $hostFile.FullName);runtimeListSha256=(Hash $runtimeListPath);codeSections=@(Read-ApexPeExecutableSections $hostFile.FullName);droppedNativeComponents=$dropped}
+        $publishArgv[1]=Join-Path $repo 'src/Apex.Desktop/Apex.Desktop.csproj'
+        Json (Join-Path $evidence 'windows-publish.json') ([ordered]@{schema='apex-windows-publish-v1';rid='win-x64';sdkVersion=$sdk;exeSha256=(Hash (Join-Path $desktop 'ApexDesktop.exe'));runtimeConfigUtf8=$runtimeText;runtimeConfigSha256=(Hash $runtimePath);assetsSha256=(Hash $assetsPath);publishArgv=$publishArgv;runtimePacks=$packs;nativeLibraries=$nativeLibraries;staticHost=$staticHost})
+        Json (Join-Path $buildEvidence 'publish-layout.json') @{files=@(Get-ChildItem -LiteralPath $desktop -File -Recurse|ForEach-Object {@{path=$_.FullName.Substring($desktop.Length+1).Replace('\','/');bytes=$_.Length;sha256=(Hash $_.FullName)}})}
+        Test-ApexWindowsPublish $desktop (Join-Path $evidence 'windows-publish.json') | Out-Null
+        Copy-Item (Join-Path $PSScriptRoot 'PRZECZYTAJ-WINDOWS.md') (Join-Path $Wyjscie 'PRZECZYTAJ.md')
+    }
+    $published=Test-ApexNavalAssets (Join-Path $desktop 'wwwroot/naval');if ($published.sha256 -cne $naval.sha256) { throw 'Publish/Naval parity failed' }
+    foreach ($f in $rootHashes.Keys) { foreach ($tree in @('src/Apex.Desktop/wwwroot','src/Apex.Desktop/bin/Release/net8.0/wwwroot')) { if ((Hash (Join-Path $repo ($tree+'/'+$f))) -cne $rootHashes[$f]) { throw 'Original panel changed' } };if ((Hash (Join-Path $desktop ('wwwroot/'+$f))) -cne $rootHashes[$f]) { throw 'Published original panel differs' } }
+    $ctrader=Join-Path $Wyjscie 'cTrader';New-Item -ItemType Directory -Path $ctrader|Out-Null
+    Copy-Item 'src/Platforms/cTrader/ApexBridge/ApexBridge/bin/Release/net6.0/ApexBridge.algo' $ctrader
+    Copy-Item 'src/Platforms/cTrader/ApexTradingAI/ApexTradingAI/bin/Release/net6.0/ApexTradingAI.algo' $ctrader
+    $mt5=Join-Path $Wyjscie 'MT5-opcjonalny';New-Item -ItemType Directory -Path $mt5|Out-Null;Copy-Item 'src/Platforms/MT5/ApexBridge.mq5' $mt5
+    $docs=Join-Path $Wyjscie 'Dokumentacja';New-Item -ItemType Directory -Path $docs|Out-Null
+    foreach ($name in @('INSTALACJA_WINDOWS.md','PROCEDURA_DEMO_PEPPERSTONE.md','PODLACZENIE_PLATFORM.md','INSTRUKCJA_PANELU.md','KONFIGURACJA.md','OGRANICZENIA_I_STATUS.md','WYNIKI_TESTOW.md','PRZEGLAD_BEZPIECZENSTWA.md','METODOLOGIA_TESTOW.md','BACKTESTER.md','NAVAL_READ_PUBLICATION.md','NAVAL_DELIVERY_VPS.md','NAVAL_OFFLINE.md','NAVAL_SHARED_OFFLINE.md')) { Copy-Item (Join-Path 'docs' $name) $docs }
+    Copy-Item 'README.md' $docs;Copy-Item 'reports/RAPORT_BADAN.md' $docs;Copy-Item 'frontend/naval/README.md' (Join-Path $docs 'NAVAL_FRONTEND.md')
+    # Genuine installed runtime closure; include complete upstream license/notice texts.
+    $queue=New-Object Collections.Generic.Queue[string];$seen=@{};$notices=New-Object Text.StringBuilder
+    $direct=Get-Content 'frontend/naval/package.json' -Raw|ConvertFrom-Json
+    foreach ($p in $direct.dependencies.PSObject.Properties) { $queue.Enqueue($p.Name) }
+    while ($queue.Count -gt 0) {
+        $name=$queue.Dequeue();if ($seen.ContainsKey($name)) { continue };$seen[$name]=$true
+        $dir=Join-Path $repo ('frontend/naval/node_modules/'+$name);$manifest=Get-Content (Join-Path $dir 'package.json') -Raw|ConvertFrom-Json
+        $license=@(Get-ChildItem -LiteralPath $dir -File|Where-Object {$_.Name -match '^(LICENSE|COPYING|NOTICE)'})
+        $upstream=$false
+        if ($license.Count -eq 0) {
+            if ($name -cne '@react-three/fiber') { throw "Required genuine license notice absent: $name" }
+            # Parent-authorized exception ONLY for this exact installed artifact and reviewed provenance.
+            if ($manifest.name -cne '@react-three/fiber' -or $manifest.version -cne '9.6.1' -or $manifest.license -cne 'MIT' -or $manifest.repository.type -cne 'git' -or $manifest.repository.url -cne 'git+https://github.com/pmndrs/react-three-fiber.git' -or (Hash (Join-Path $dir 'package.json')) -cne 'a4d04c276030b69da8e45a15459f817fcc467d242a58cb0c40f8ba6aea273bf5') { throw 'Fiber upstream fallback refused: installed manifest identity/hash' }
+            $third=Join-Path $repo 'docs/third-party';$provenance=Join-Path $third 'provenance.json';$notice=Join-Path $third 'react-three-fiber-9.6.1-LICENSE.txt'
+            foreach ($p in @((Join-Path $repo 'docs'),$third,$provenance,$notice)) {
+                if (-not (Test-Path -LiteralPath $p) -or ((Get-Item -LiteralPath $p -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Fiber upstream fallback refused: missing/linked source' }
+            }
+            # Provenance cannot redefine any expected value, URL, hash or version binding.
+            if ((Hash $provenance) -cne '001a151cd91d29855b314cfa85878d922f5e82a67a47dbac0693176ece491911') { throw 'Fiber upstream fallback refused: provenance hash' }
+            $pr=Get-Content -LiteralPath $provenance -Raw|ConvertFrom-Json
+            if ($pr.schema_version -ne 1 -or $pr.package -cne '@react-three/fiber' -or $pr.version -cne '9.6.1' -or $pr.artifact_kind -cne 'upstream_repository_license_not_npm_package_file' -or $pr.npm_git_head -cne '2a528745e9aa7c9e6cca41e404b59d45cf0d0cc7' -or $pr.license_sha256 -cne '9c35b5de7b7493a707fffe4eb23bd2f7f449153c1911f7c6eefb4e591fd5349a' -or $pr.license_byte_length -ne 1072 -or $pr.installed_manifest_sha256 -cne 'a4d04c276030b69da8e45a15459f817fcc467d242a58cb0c40f8ba6aea273bf5') { throw 'Fiber upstream fallback refused: provenance identity' }
+            if ((Get-Item -LiteralPath $notice).Length -ne 1072 -or (Hash $notice) -cne '9c35b5de7b7493a707fffe4eb23bd2f7f449153c1911f7c6eefb4e591fd5349a') { throw 'Fiber upstream fallback refused: notice length/hash' }
+            $license=@(Get-Item -LiteralPath $notice);$upstream=$true
+        }
+        [void]$notices.AppendLine(('=== '+$manifest.name+' '+$manifest.version+' ('+$manifest.license+') ==='))
+        if ($upstream) { [void]$notices.AppendLine('Source: upstream repository; NOT npm-shipped. npm gitHead 2a528745e9aa7c9e6cca41e404b59d45cf0d0cc7; https://raw.githubusercontent.com/pmndrs/react-three-fiber/2a528745e9aa7c9e6cca41e404b59d45cf0d0cc7/LICENSE') }
+        foreach ($f in $license) { [void]$notices.AppendLine($f.Name);[void]$notices.AppendLine([IO.File]::ReadAllText($f.FullName)) }
+        if ($null -ne $manifest.dependencies) { foreach ($p in $manifest.dependencies.PSObject.Properties) { $queue.Enqueue($p.Name) } }
+    }
+    [IO.File]::WriteAllText((Join-Path $docs 'THIRD_PARTY_NAVAL.txt'),$notices.ToString(),[Text.UTF8Encoding]::new($false))
+    foreach ($name in @('Sprawdz-Pakiet.ps1','TestEvidence.ps1')) { Copy-Item (Join-Path $PSScriptRoot $name) $Wyjscie }
+    Copy-Item (Join-Path $PSScriptRoot 'Smoke-Windows.ps1') $evidence
+    if ($Target -eq 'linux-x64') {
+        $launcher=@'
+#!/bin/sh
+set -eu
+case "${APEX_DATA_DIR:-}" in /*) ;; *) printf '%s\n' 'Set external absolute private APEX_DATA_DIR first' >&2; exit 2;; esac
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+data=$(realpath -e -- "$APEX_DATA_DIR")
+case "$data/" in "$here/"*) printf '%s\n' 'Data must be outside immutable package' >&2; exit 2;; esac
+exec dotnet "$here/APEX-Desktop/ApexDesktop.dll" --data "$data" --no-browser
+'@
+        [IO.File]::WriteAllText((Join-Path $Wyjscie 'Uruchom APEX.sh'),($launcher.Replace("`r`n","`n")+"`n"),[Text.Encoding]::ASCII)
+        $mode='framework-dependent';$runtime='Microsoft.AspNetCore.App 8'
+    } else {
+        [IO.File]::WriteAllText((Join-Path $Wyjscie 'Uruchom APEX.cmd'),"@echo off`r`nstart `"`" `"%~dp0APEX-Desktop\ApexDesktop.exe`"`r`n",[Text.Encoding]::ASCII)
+        $mode='self-contained';$runtime='included'
+    }
+    Json (Join-Path $evidence 'frontend-results.json') ([ordered]@{schema='apex-frontend-tests-v1';tests=$frontendTests;build=$frontendBuild;typecheckExit=0;buildExit=0})
+    $after=Inputs
+    if (($before|ConvertTo-Json -Depth 12 -Compress) -cne ($after|ConvertTo-Json -Depth 12 -Compress)) { throw 'Source inputs changed during build; preserve evidence, rebind before promotion' }
+    $info=[ordered]@{schema='apex-build-v2';product='APEX Trading AI DEMO';sourceCommit="$commit".Trim();sourceDirty=$dirty;builtUtc=[DateTime]::UtcNow.ToString('o');target=$Target;deploymentMode=$mode;requiredRuntime=$runtime;demoOnly=$true;botTestsRun=$true;platformTestsRun=$true;backtesterTestsRun=$true;testCounts=$testCounts;panelTestsRun=$true;frontendTestsRun=$true;frontendBuildVerified=$true;brokerTested=$false;windowsRuntimeTested=$false;navalReadDefaultEnabled=$false;task7Acceptance='accepted-local-linux';sourceInputsSha256=(Hash (Join-Path $evidence 'source-inputs.json'));rootLockSha256=(Hash 'package-lock.json');navalLockSha256=(Hash 'frontend/naval/package-lock.json');navalManifestSha256=$naval.sha256;frontendResultsSha256=(Hash (Join-Path $evidence 'frontend-results.json'));tools=@{node=$node;npm=$npm;dotnet=$sdk;powershell=$PSVersionTable.PSVersion.ToString()};originalPanelSha256=$rootHashes}
+    if ($reuse) { $info.evidenceReuse=$reuse }
+    if ($Target -eq 'win-x64') { $info.navalReadDefaultEnabled=$true;$info.firstRunProfile='windows-local-presentation-v1';$info.existingConfigPolicy='preserve';$info.task7Acceptance='pending' }
+    Json (Join-Path $Wyjscie 'apex-build.json') $info
+    $base=$Wyjscie.TrimEnd([IO.Path]::DirectorySeparatorChar)+[IO.Path]::DirectorySeparatorChar
+    $hashes=@(Get-ChildItem -LiteralPath $Wyjscie -Force -Recurse -File|Sort-Object FullName|ForEach-Object {(Hash $_.FullName)+'  '+$_.FullName.Substring($base.Length).Replace('\','/')})
+    [IO.File]::WriteAllLines((Join-Path $Wyjscie 'manifest.sha256'),$hashes,[Text.UTF8Encoding]::new($false))
+    & (Join-Path $PSScriptRoot 'Sprawdz-Pakiet.ps1') -Pakiet $Wyjscie
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory($Wyjscie,($Wyjscie+'.zip'),[IO.Compression.CompressionLevel]::Optimal,$false)
+    $zipHash=Hash ($Wyjscie+'.zip');[IO.File]::WriteAllText(($Wyjscie+'.zip.sha256'),($zipHash+'  '+[IO.Path]::GetFileName($Wyjscie)+".zip`n"),[Text.Encoding]::ASCII)
+    # Independent safe extraction, CRC and native packaged tests. Evidence remains external/sealed ZIP unchanged.
+    Push-Location $sdkSelection
+    try { & (Join-Path $repo 'tests/package/Test-NavalPackage.ps1') -Source $repo -Pakiet ($Wyjscie+'-extracted') -Evidence ($Wyjscie+'-package-evidence') -Zip ($Wyjscie+'.zip') } finally { Pop-Location }
+    Write-Host "Local package gates PASS: $Wyjscie.zip SHA256 $zipHash. No broker, Windows/Linux deployment or device acceptance."
+} finally {
+    Pop-Location;$env:DOTNET_HOST_PATH=$oldDotnetHost;$env:APEX_PACKAGE_ROOT=$oldPackage;$env:NAVAL_HOST_EVIDENCE_DIR=$oldEvidence
+    # Keep private authority/result and failed evidence outside the immutable payload.
+    Write-Host ('Private build scratch retained outside package: '+$scratch)
+}

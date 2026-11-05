@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <StartupObject>Apex.Tests.SyntheticHostEntry</StartupObject>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Apex.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures/okx-old-v1-*.json" />
+    <EmbeddedResource Include="Fixtures/okx-pre-r1-broker-baseline.json" />
+    <Compile Include="../../src/Platforms/cTrader/Shared/CommandJournal.cs" Link="Production/CommandJournal.cs" />
+    <Compile Include="../../src/Platforms/cTrader/Shared/ScopedPlatformState.cs" Link="Production/ScopedPlatformState.cs" />
+    <ProjectReference Include="..\..\src\Apex.Adapters.Okx\Apex.Adapters.Okx.csproj" />
+    <ProjectReference Include="..\..\src\Apex.Core\Apex.Core.csproj" />
+    <ProjectReference Include="..\..\src\Apex.Desktop\Apex.Desktop.csproj" />
+    <ProjectReference Include="../../tools/Apex.Okx.DemoAcceptance/Apex.Okx.DemoAcceptance.csproj" />
+    <ProjectReference Include="..\..\tools\Apex.PlatformSimulator\Apex.PlatformSimulator.csproj" />
+  </ItemGroup>
+</Project>

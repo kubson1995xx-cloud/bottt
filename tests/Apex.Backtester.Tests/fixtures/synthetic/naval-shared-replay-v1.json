@@ -1,0 +1,35 @@
+{
+  "schema": "naval-shared-replay-v1",
+  "portfolio": {"portfolioId":"synthetic-shared-10000","reportingCurrency":"USD"},
+  "members": [{"account":{"venue":"SYNTHETIC","environment":"Offline","accountId":"cash-A","quoteCurrency":"USD"},"allocation":10000}],
+  "catalog": [
+    {"instrument":"BTC","baseCurrency":"BTC","quoteCurrency":"USD","quantum":0.001,"minimumQuantity":0.001,"tickSize":0.01},
+    {"instrument":"ETH","baseCurrency":"ETH","quoteCurrency":"USD","quantum":0.001,"minimumQuantity":0.001,"tickSize":0.01},
+    {"instrument":"SOL","baseCurrency":"SOL","quoteCurrency":"USD","quantum":0.001,"minimumQuantity":0.001,"tickSize":0.01},
+    {"instrument":"XRP","baseCurrency":"XRP","quoteCurrency":"USD","quantum":0.001,"minimumQuantity":0.001,"tickSize":0.01}
+  ],
+  "fees":{"entryRate":0.001,"exitRate":0.001},
+  "clockUtc":"2026-01-01T12:00:00Z",
+  "signals":[
+    {"signalId":"synthetic-alpha-btc","accountId":"cash-A","fleet":"Alpha","instrument":"BTC","ruleIdentity":"SYNTHETIC_ELIGIBLE_NOT_RESEARCH","earliestUtc":"2026-01-01T12:00:00Z","expiresUtc":"2026-01-02T12:00:00Z"},
+    {"signalId":"synthetic-bravo-btc","accountId":"cash-A","fleet":"Bravo","instrument":"BTC","ruleIdentity":"SYNTHETIC_ELIGIBLE_NOT_RESEARCH","earliestUtc":"2026-01-01T12:00:00Z","expiresUtc":"2026-01-02T12:00:00Z"},
+    {"signalId":"synthetic-bravo-eth","accountId":"cash-A","fleet":"Bravo","instrument":"ETH","ruleIdentity":"SYNTHETIC_ELIGIBLE_NOT_RESEARCH","earliestUtc":"2026-01-01T12:00:00Z","expiresUtc":"2026-01-02T12:00:00Z"},
+    {"signalId":"synthetic-bravo-sol","accountId":"cash-A","fleet":"Bravo","instrument":"SOL","ruleIdentity":"SYNTHETIC_ELIGIBLE_NOT_RESEARCH","earliestUtc":"2026-01-01T12:00:00Z","expiresUtc":"2026-01-02T12:00:00Z"},
+    {"signalId":"synthetic-bravo-xrp","accountId":"cash-A","fleet":"Bravo","instrument":"XRP","ruleIdentity":"SYNTHETIC_ELIGIBLE_NOT_RESEARCH","earliestUtc":"2026-01-01T12:00:00Z","expiresUtc":"2026-01-02T12:00:00Z"}
+  ],
+  "marks":{"BTC":100,"ETH":100,"SOL":100,"XRP":100},
+  "steps":[
+    {"op":"reconcile"},{"op":"start"},
+    {"op":"reserve","accountId":"cash-A","fleet":"Alpha","commandId":"alpha-btc","signalId":"synthetic-alpha-btc","instrument":"BTC","quantity":4,"entryPriceCeiling":100,"stopPrice":90,"takeProfitPrice":130},
+    {"op":"reserve","accountId":"cash-A","fleet":"Bravo","commandId":"bravo-btc","signalId":"synthetic-bravo-btc","instrument":"BTC","quantity":4,"entryPriceCeiling":100,"stopPrice":90,"takeProfitPrice":130},
+    {"op":"reserve","accountId":"cash-A","fleet":"Bravo","commandId":"bravo-eth","signalId":"synthetic-bravo-eth","instrument":"ETH","quantity":1,"entryPriceCeiling":100,"stopPrice":90,"takeProfitPrice":130},
+    {"op":"reserve","accountId":"cash-A","fleet":"Bravo","commandId":"bravo-sol","signalId":"synthetic-bravo-sol","instrument":"SOL","quantity":1,"entryPriceCeiling":100,"stopPrice":90,"takeProfitPrice":130},
+    {"op":"reserve","accountId":"cash-A","fleet":"Bravo","commandId":"bravo-xrp","signalId":"synthetic-bravo-xrp","instrument":"XRP","quantity":1,"entryPriceCeiling":100,"stopPrice":90,"takeProfitPrice":130},
+    {"op":"confirm","fills":[{"referenceCommand":"alpha-btc","tradeId":"buy-partial","quantity":2,"price":100,"fee":0.2,"feeCurrency":"USD","tradeUtc":"2026-01-01T12:00:00Z"}]},
+    {"op":"timeout","referenceCommand":"alpha-btc"},{"op":"restart"},{"op":"reconcile"},{"op":"start"},
+    {"op":"confirm","fills":[{"referenceCommand":"alpha-btc","tradeId":"buy-1","quantity":2,"price":100,"fee":0.2,"feeCurrency":"USD","tradeUtc":"2026-01-01T12:00:00Z"}]},
+    {"op":"reject","referenceCommand":"bravo-eth"},{"op":"reject","referenceCommand":"bravo-sol"},
+    {"op":"confirm","fills":[{"referenceCommand":"alpha-btc","tradeId":"sell-1","reduction":true,"quantity":4,"price":110,"fee":0.44,"feeCurrency":"USD","tradeUtc":"2026-01-01T12:00:00Z"}]},
+    {"op":"terminal","referenceCommand":"alpha-btc"},{"op":"restart"},{"op":"reconcile"},{"op":"start"}
+  ]
+}

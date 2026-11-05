@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><AssemblyName>Apex.Tests</AssemblyName></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../tools/Apex.Okx.PrivateSchemaProbe/Apex.Okx.PrivateSchemaProbe.csproj" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="../../tests/Apex.Okx.BalanceSchema.Tests/Fixtures/okx-balance-current.json" /><EmbeddedResource Include="../../tests/Apex.Adapters.Okx.Tests/Fixtures/ExecutionObservations/baseline-schema.json" /></ItemGroup>
+</Project>

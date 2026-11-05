@@ -1,0 +1,84 @@
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Apex.Adapters.Okx.Execution;
+using Apex.Core.Naval;
+namespace Apex.Desktop.Okx;
+internal sealed partial class OkxOperationalTradingService
+{
+    private DateTimeOffset Deadline()=>DateTimeOffset.FromUnixTimeMilliseconds(clock.GetUtcNow().AddSeconds(10).ToUnixTimeMilliseconds());
+    private async Task<NavalRiskResult> DispatchMutation(string id,string reservation,OkxPreparedRequest request,bool reduction,CancellationToken ct)
+    {
+        var state=session.ReadState();var x=state.NavalBroker!.Operational!;
+        if(x.Intents.Any(i=>i.Id==id))return Refuse("ORIGINAL_MUTATION_ALREADY_PREPARED_NO_RETRY");
+        var i=new NavalBrokerIntent(id,reservation,Enum.Parse<NavalExecutionOperation>(request.Operation.ToString()),request.Instrument,request.OriginalClientId,request.OrderId,request.CopyBody(),request.Digest,request.Deadline,
+            SessionId,state.Naval!.Generation,state.Naval.Sequence,x.StopEpoch,state.DurableRevision+1,NavalExecutionStage.Prepared){Reduction=reduction};
+        var stored=session.Prepare(i);if(stored.Status!=NavalMutationStatus.Applied)return stored;
+        current=id;
+        var outcome=request.Operation switch
+        {
+            OkxExecutionOperation.Submit=>await client.SubmitAsync(request,ct).ConfigureAwait(false),
+            OkxExecutionOperation.Cancel=>await client.CancelAsync(request,ct).ConfigureAwait(false),
+            OkxExecutionOperation.CancelProtection=>await client.CancelProtectionAsync(request,ct).ConfigureAwait(false),
+            _=>throw new InvalidOperationException("CLOSED_MUTATION_REQUIRED")
+        };
+        var disposition=outcome.Disposition==OkxWriteDisposition.Acknowledged?NavalDispatchDisposition.Acknowledged:outcome.Disposition==OkxWriteDisposition.ProvenNotSent?NavalDispatchDisposition.NotSent:NavalDispatchDisposition.Unknown;
+        return session.Outcome(id,new(disposition,outcome.OriginalClientId,outcome.OrderId,disposition==NavalDispatchDisposition.Acknowledged?"TRANSPORT_ACK":disposition==NavalDispatchDisposition.NotSent?"TRANSPORT_NOT_SENT":"TRANSPORT_UNKNOWN",outcome.Code,outcome.SCode,outcome.SubCode));
+    }
+    internal async Task<NavalRiskResult> CancelEntryAsync(string reservationId,CancellationToken ct)
+    {
+        session.RevokeStrategyContinuation();
+        await lane.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if(!CanExecute)return Refuse("EXECUTE_ARMING_REQUIRED");
+            var state=session.ReadState();var parent=state.NavalBroker!.Operational?.Intents.SingleOrDefault(i=>i.ReservationId==reservationId&&!i.Reduction&&i.Operation==NavalExecutionOperation.Submit&&i.DispatchRevision!=null);
+            if(parent==null)return Refuse("EXACT_OWNED_PARENT_REQUIRED");
+            return await DispatchMutation("cancel-"+parent.Id,reservationId,OkxPreparedRequest.Cancel(account.ExecutionScope!,parent.Instrument,parent.Outcome?.OrderId,parent.ClientId,Deadline()),false,ct).ConfigureAwait(false);
+        }
+        finally{current=null;lane.Release();}
+    }
+    internal async Task<NavalRiskResult> ExitAsync(string reservationId,CancellationToken ct)
+    {
+        session.RevokeStrategyContinuation();
+        await lane.WaitAsync(ct).ConfigureAwait(false);
+        try{return await ExitOwned(reservationId,ct).ConfigureAwait(false);}
+        catch(Exception error) when(error is System.IO.IOException or System.Net.Http.HttpRequestException or InvalidOperationException or ArgumentException or System.Text.Json.JsonException or OverflowException or OperationCanceledException)
+        {return session.Coordinator.Stop("EXIT_INCOMPLETE_UNPROTECTED_RESIDUAL_CHECK_OBLIGATIONS");}
+        finally{current=null;lane.Release();}
+    }
+    private async Task<NavalRiskResult> ExitOwned(string reservationId,CancellationToken ct,string? strategySignal=null)
+    {
+        if(!CanExecute)return Refuse("EXECUTE_ARMING_REQUIRED");
+        var state=session.ReadState();var r=state.Naval!.Reservations.SingleOrDefault(r=>r.Id==reservationId);
+        if(r==null||r.Inventory<=0)return Refuse("EXACT_OWNED_INVENTORY_REQUIRED");
+        var x=state.NavalBroker!.Operational!;
+        if(x.Intents.Any(i=>i.ReservationId==r.Id&&i.Reduction&&i.Stage!=NavalExecutionStage.NotSent&&!x.SettledIntents.Contains(i.Id)))return Refuse("ORIGINAL_EXIT_ALREADY_PREPARED_NO_RETRY");
+        var requested=strategySignal==null?session.RequestExit(reservationId):session.RequestStrategyExit(reservationId,strategySignal);if(requested.Status==NavalMutationStatus.Refused)return requested;
+        foreach(var p in NavalBrokerProtectionOwnership.Competing(state,r).Where(p=>p.State=="live"&&NavalBrokerProtectionOwnership.Reservation(x,p)==r.Id))
+        {
+            var cancel=OkxPreparedRequest.CancelProtection(account.ExecutionScope!,p.Instrument,p.AlgoId,p.AttachmentClientId,Deadline());
+            var result=await DispatchMutation("cancel-protection-"+p.AlgoId,r.Id,cancel,false,ct).ConfigureAwait(false);
+            if(result.Status!=NavalMutationStatus.Applied)return result;
+        }
+        // Cancellation ACK is never used as cancellation, inventory or fee proof.
+        await CollectEconomicsAsync(ct).ConfigureAwait(false);state=session.ReadState();x=state.NavalBroker!.Operational!;r=state.Naval!.Reservations.Single(r=>r.Id==reservationId);
+        if(x.Obligations.Any(o=>!o.StartsWith("PROTECTION_GAP:",StringComparison.Ordinal))||NavalBrokerProtectionOwnership.Competing(state,r).Any(p=>!NavalBrokerProtectionOwnership.Settled(p)))return Refuse("EXIT_COMPETING_OR_UNKNOWN_OBLIGATIONS");
+        var definition=NavalOrdinaryCatalogPolicy.Definition(state.NavalBroker);var spec=definition.Catalog.Single(i=>i.Instrument==r.Intent.Instrument);var quote=await feed.ReadQuoteAsync(spec,ct).ConfigureAwait(false);
+        decimal quantity=decimal.Floor(r.Inventory/(definition.Fees.ExitInBase?1+definition.Fees.ExitRate:1)/spec.Quantum)*spec.Quantum;
+        if(quantity<spec.MinimumQuantity)return Refuse("OWNED_DUST_RETAINED");
+        int preceding=x.Intents.Count(i=>i.ReservationId==r.Id&&i.Reduction);
+        string command="exit-"+r.Id+(preceding==0?"":"-recovery-"+preceding.ToString(System.Globalization.CultureInfo.InvariantCulture));var ids=session.ReserveIds(r.Id,command,true);if(ids.Result.Status is not (NavalMutationStatus.Applied or NavalMutationStatus.Duplicate))return ids.Result;
+        decimal price=decimal.Floor(quote.Bid/spec.TickSize)*spec.TickSize;
+        var marked=session.UpdateQuote(quote);if(marked.Status!=NavalMutationStatus.Applied)return marked;
+        if(Conditional)
+        {
+            await RefreshLimitReferences(spec,quote,ct).ConfigureAwait(false);
+            if(!WithinPrivateMaxima(spec.Instrument,quantity,price,false))return Refuse("PRIVATE_MAXIMUM_OR_UNIT_UNPROVEN");
+        }
+        if(account.IsFiniteDemo)demoBand=await feed.ReadPriceBandAsync(spec,ct).ConfigureAwait(false);
+        var request=OkxPreparedRequest.Submit(account.ExecutionScope!,spec.Instrument,"sell","fok",N(quantity),N(price),ids.Ids[0].ClientId,Deadline());
+        return await DispatchMutation(command,r.Id,request,true,ct).ConfigureAwait(false);
+    }
+}

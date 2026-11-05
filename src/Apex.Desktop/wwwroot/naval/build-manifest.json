@@ -1,0 +1,25 @@
+{
+  "schema": "naval-build-v1",
+  "artifacts": [
+    {
+      "path": "assets/chunk-DtQf_wxN.js",
+      "bytes": 633206,
+      "sha256": "8b32290bbf2a83011ddc06dc08657c457a5c8aa96f4e7a2a7bc38e8d5f088925"
+    },
+    {
+      "path": "assets/index-CLPD1tTM.js",
+      "bytes": 246093,
+      "sha256": "049acea8f305259dc3d1409c3c564d7370cfd755853ba170ec8f7c30ff2f6a93"
+    },
+    {
+      "path": "assets/index-PWNfzfBi.css",
+      "bytes": 10106,
+      "sha256": "1cbce4c6b6b607ab85f18480d072b4b9f6734462ed6b08a248f76b388117dc53"
+    },
+    {
+      "path": "index.html",
+      "bytes": 677,
+      "sha256": "d6982373d3fab80d9b87bf5b7000a651becbe9ff866f5273c790e772719b2d24"
+    }
+  ]
+}

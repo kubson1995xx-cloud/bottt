@@ -1,0 +1,12 @@
+{
+  "name": "apex-desktop-panel-tests",
+  "private": true,
+  "description": "Testy panelu APEX; Node nie jest potrzebny do uruchomienia aplikacji Windows.",
+  "scripts": {
+    "test": "node --test tests/panel/*.test.cjs",
+    "check": "node --check src/Apex.Desktop/wwwroot/app.js && node --check src/Apex.Desktop/wwwroot/decision-center.js"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.12"
+  }
+}

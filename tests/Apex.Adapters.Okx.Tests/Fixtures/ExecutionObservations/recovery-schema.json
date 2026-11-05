@@ -1,0 +1,3862 @@
+{
+  "source": "https://my.okx.com/docs-v5/en/",
+  "sourceSha256": "e13a741caf003cd48150d1a7ba8ce9e467f8dc7b2fe04db2879af591209f6da8",
+  "requirednessPolicy": "Local raw-observation policy, not upstream guarantee. String null/number/bool refuses. Discarded strings validated recursively, complete row digest preserves presence/text. Decimals/times absent Raw=null Value=null; empty Raw=empty Value=null; exact zero known. Attachments absent null, present empty array distinct; cap32. No identity/quote/fee/time financial promotion.",
+  "literalQueries": [
+    "/api/v5/trade/order?clOrdId=Ab9&instId=BTC-USDC&ordId=987654",
+    "/api/v5/trade/orders-pending?after=900&instType=SPOT&limit=1",
+    "/api/v5/trade/orders-history?after=900&begin=1793448000000&end=1793534400000&instType=SPOT&limit=100",
+    "/api/v5/trade/fills-history?before=700&begin=1793448000000&end=1793534400000&instId=BTC-USDC&instType=SPOT&limit=100&ordId=987654",
+    "/api/v5/account/bills-archive?after=700&begin=1793448000000&end=1793534400000&limit=100"
+  ],
+  "endpoints": {
+    "order": {
+      "endpoint": "/api/v5/trade/order",
+      "kind": "order",
+      "requestAnchor": "R:7484-7492",
+      "requestTable": "#### Request Parameters  \n| Parameter  | Type  | Required  | Description  |  \n| --- | --- | --- | --- |  \n| instId  | String  | Yes  | Instrument ID, e.g. `BTC-USDT`  \nOnly applicable to live instruments  |  \n| ordId  | String  | Conditional  | Order ID   \nEither `ordId` or `clOrdId` is required, if both are passed, `ordId` will be used  |  \n| clOrdId  | String  | Conditional  | Client Order ID as assigned by the client  \nIf the `clOrdId` is associated with multiple orders, only the latest one will be returned.  |  ",
+      "responseAnchor": "R:7567-7723",
+      "exampleAnchor": "R:7499-7560",
+      "originalExampleText": "{\n    \"code\": \"0\",\n    \"data\": [\n        {\n            \"accFillSz\": \"0.00192834\",\n            \"algoClOrdId\": \"\",\n            \"algoId\": \"\",\n            \"attachAlgoClOrdId\": \"\",\n            \"attachAlgoOrds\": [],\n            \"avgPx\": \"51858\",\n            \"cTime\": \"1708587373361\",\n            \"cancelSource\": \"\",\n            \"cancelSourceReason\": \"\",\n            \"category\": \"normal\",\n            \"ccy\": \"\",\n            \"clOrdId\": \"\",\n            \"fee\": \"-0.00000192834\",\n            \"feeCcy\": \"BTC\",\n            \"fillPx\": \"51858\",\n            \"fillSz\": \"0.00192834\",\n            \"fillTime\": \"1708587373361\",\n            \"instId\": \"BTC-USDT\",\n            \"instType\": \"SPOT\",\n            \"isTpLimit\": \"false\",\n            \"lever\": \"\",\n            \"linkedAlgoOrd\": {\n                \"algoId\": \"\"\n            },\n            \"ordId\": \"680800019749904384\",\n            \"ordType\": \"market\",\n            \"pnl\": \"0\",\n            \"posSide\": \"net\",\n            \"px\": \"\",\n            \"pxType\": \"\",\n            \"pxUsd\": \"\",\n            \"pxVol\": \"\",\n            \"quickMgnType\": \"\",\n            \"rebate\": \"0\",\n            \"rebateCcy\": \"USDT\",\n            \"reduceOnly\": \"false\",\n            \"side\": \"buy\",\n            \"slOrdPx\": \"\",\n            \"slTriggerPx\": \"\",\n            \"slTriggerPxType\": \"\",\n            \"source\": \"\",\n            \"state\": \"filled\",\n            \"stpId\": \"\",\n            \"stpMode\": \"\",\n            \"sz\": \"100\",\n            \"tag\": \"\",\n            \"tdMode\": \"cash\",\n            \"tgtCcy\": \"quote_ccy\",\n            \"tpOrdPx\": \"\",\n            \"tpTriggerPx\": \"\",\n            \"tpTriggerPxType\": \"\",\n            \"tradeId\": \"744876980\",\n            \"tradeQuoteCcy\": \"USDT\",\n            \"uTime\": \"1708587373362\"\n        }\n    ],\n    \"msg\": \"\"\n}",
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "accFillSz": "0.00192834",
+            "algoClOrdId": "",
+            "algoId": "",
+            "attachAlgoClOrdId": "",
+            "attachAlgoOrds": [],
+            "avgPx": "51858",
+            "cTime": "1708587373361",
+            "cancelSource": "",
+            "cancelSourceReason": "",
+            "category": "normal",
+            "ccy": "",
+            "clOrdId": "",
+            "fee": "-0.00000192834",
+            "feeCcy": "BTC",
+            "fillPx": "51858",
+            "fillSz": "0.00192834",
+            "fillTime": "1708587373361",
+            "instId": "BTC-USDT",
+            "instType": "SPOT",
+            "isTpLimit": "false",
+            "lever": "",
+            "linkedAlgoOrd": {
+              "algoId": ""
+            },
+            "ordId": "680800019749904384",
+            "ordType": "market",
+            "pnl": "0",
+            "posSide": "net",
+            "px": "",
+            "pxType": "",
+            "pxUsd": "",
+            "pxVol": "",
+            "quickMgnType": "",
+            "rebate": "0",
+            "rebateCcy": "USDT",
+            "reduceOnly": "false",
+            "side": "buy",
+            "slOrdPx": "",
+            "slTriggerPx": "",
+            "slTriggerPxType": "",
+            "source": "",
+            "state": "filled",
+            "stpId": "",
+            "stpMode": "",
+            "sz": "100",
+            "tag": "",
+            "tdMode": "cash",
+            "tgtCcy": "quote_ccy",
+            "tpOrdPx": "",
+            "tpTriggerPx": "",
+            "tpTriggerPxType": "",
+            "tradeId": "744876980",
+            "tradeQuoteCcy": "USDT",
+            "uTime": "1708587373362"
+          }
+        ],
+        "msg": ""
+      },
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:7567",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:7574",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "tgtCcy",
+          "type": "String",
+          "anchor": "R:7575",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ccy",
+          "type": "String",
+          "anchor": "R:7579",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordId",
+          "type": "String",
+          "anchor": "R:7581",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "clOrdId",
+          "type": "String",
+          "anchor": "R:7582",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "tag",
+          "type": "String",
+          "anchor": "R:7583",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "px",
+          "type": "String",
+          "anchor": "R:7584",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxUsd",
+          "type": "String",
+          "anchor": "R:7586",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxVol",
+          "type": "String",
+          "anchor": "R:7587",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxType",
+          "type": "String",
+          "anchor": "R:7588",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "sz",
+          "type": "String",
+          "anchor": "R:7592",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pnl",
+          "type": "String",
+          "anchor": "R:7593",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordType",
+          "type": "String",
+          "anchor": "R:7595",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "side",
+          "type": "String",
+          "anchor": "R:7607",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posSide",
+          "type": "String",
+          "anchor": "R:7608",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tdMode",
+          "type": "String",
+          "anchor": "R:7609",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "accFillSz",
+          "type": "String",
+          "anchor": "R:7610",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPx",
+          "type": "String",
+          "anchor": "R:7613",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeId",
+          "type": "String",
+          "anchor": "R:7614",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillSz",
+          "type": "String",
+          "anchor": "R:7615",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillTime",
+          "type": "String",
+          "anchor": "R:7618",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "avgPx",
+          "type": "String",
+          "anchor": "R:7619",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "state",
+          "type": "String",
+          "anchor": "R:7620",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "stpId",
+          "type": "String",
+          "anchor": "R:7627",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "stpMode",
+          "type": "String",
+          "anchor": "R:7629",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "lever",
+          "type": "String",
+          "anchor": "R:7630",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoClOrdId",
+          "type": "String",
+          "anchor": "R:7632",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpTriggerPx",
+          "type": "String",
+          "anchor": "R:7633",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpTriggerPxType",
+          "type": "String",
+          "anchor": "R:7634",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpOrdPx",
+          "type": "String",
+          "anchor": "R:7638",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slTriggerPx",
+          "type": "String",
+          "anchor": "R:7639",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slTriggerPxType",
+          "type": "String",
+          "anchor": "R:7640",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slOrdPx",
+          "type": "String",
+          "anchor": "R:7644",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds",
+          "type": "Array of objects",
+          "anchor": "R:7645",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].attachAlgoId",
+          "type": "String",
+          "anchor": "R:7646",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].attachAlgoClOrdId",
+          "type": "String",
+          "anchor": "R:7647",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpOrdKind",
+          "type": "String",
+          "anchor": "R:7650",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerPx",
+          "type": "String",
+          "anchor": "R:7653",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerRatio",
+          "type": "String",
+          "anchor": "R:7654",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerPxType",
+          "type": "String",
+          "anchor": "R:7656",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpOrdPx",
+          "type": "String",
+          "anchor": "R:7660",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerPx",
+          "type": "String",
+          "anchor": "R:7661",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerRatio",
+          "type": "String",
+          "anchor": "R:7662",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerPxType",
+          "type": "String",
+          "anchor": "R:7664",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slOrdPx",
+          "type": "String",
+          "anchor": "R:7668",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].sz",
+          "type": "String",
+          "anchor": "R:7669",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].amendPxOnTriggerType",
+          "type": "String",
+          "anchor": "R:7670",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].callbackRatio",
+          "type": "String",
+          "anchor": "R:7673",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].callbackSpread",
+          "type": "String",
+          "anchor": "R:7674",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].activePx",
+          "type": "String",
+          "anchor": "R:7675",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].failCode",
+          "type": "String",
+          "anchor": "R:7676",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].failReason",
+          "type": "String",
+          "anchor": "R:7678",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "linkedAlgoOrd",
+          "type": "Object",
+          "anchor": "R:7680",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "linkedAlgoOrd.algoId",
+          "type": "String",
+          "anchor": "R:7681",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "feeCcy",
+          "type": "String",
+          "anchor": "R:7682",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fee",
+          "type": "String",
+          "anchor": "R:7684",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "rebateCcy",
+          "type": "String",
+          "anchor": "R:7688",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "rebate",
+          "type": "String",
+          "anchor": "R:7690",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "source",
+          "type": "String",
+          "anchor": "R:7693",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "category",
+          "type": "String",
+          "anchor": "R:7700",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "reduceOnly",
+          "type": "String",
+          "anchor": "R:7709",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "isTpLimit",
+          "type": "String",
+          "anchor": "R:7710",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cancelSource",
+          "type": "String",
+          "anchor": "R:7711",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cancelSourceReason",
+          "type": "String",
+          "anchor": "R:7712",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "quickMgnType",
+          "type": "String",
+          "anchor": "R:7713",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "algoClOrdId",
+          "type": "String",
+          "anchor": "R:7715",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "algoId",
+          "type": "String",
+          "anchor": "R:7716",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "uTime",
+          "type": "String",
+          "anchor": "R:7717",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cTime",
+          "type": "String",
+          "anchor": "R:7718",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeQuoteCcy",
+          "type": "String",
+          "anchor": "R:7719",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "outcome",
+          "type": "String",
+          "anchor": "R:7720",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        }
+      ],
+      "syntheticExtension": {
+        "label": "documented-shape synthetic extension; NOT populated official attachment example",
+        "control": {
+          "code": "0",
+          "data": [
+            {
+              "accFillSz": "0.00192834",
+              "algoClOrdId": "",
+              "algoId": "",
+              "attachAlgoClOrdId": "",
+              "attachAlgoOrds": [
+                {
+                  "attachAlgoId": "documented",
+                  "attachAlgoClOrdId": "documented",
+                  "tpOrdKind": "documented",
+                  "tpTriggerPx": "0.05",
+                  "tpTriggerRatio": "0.05",
+                  "tpTriggerPxType": "documented",
+                  "tpOrdPx": "-1",
+                  "slTriggerPx": "0.05",
+                  "slTriggerRatio": "0.05",
+                  "slTriggerPxType": "documented",
+                  "slOrdPx": "-1",
+                  "sz": "0.05",
+                  "amendPxOnTriggerType": "documented",
+                  "callbackRatio": "0.05",
+                  "callbackSpread": "0.05",
+                  "activePx": "0.05",
+                  "failCode": "documented",
+                  "failReason": "PRIVATE_DISCARDED_SENTINEL"
+                }
+              ],
+              "avgPx": "51858",
+              "cTime": "1708587373361",
+              "cancelSource": "",
+              "cancelSourceReason": "",
+              "category": "normal",
+              "ccy": "",
+              "clOrdId": "DifferentClient",
+              "fee": "-0.00000192834",
+              "feeCcy": "BTC",
+              "fillPx": "51858",
+              "fillSz": "0.00192834",
+              "fillTime": "1708587373361",
+              "instId": "BTC-USDT",
+              "instType": "SPOT",
+              "isTpLimit": "false",
+              "lever": "",
+              "linkedAlgoOrd": {
+                "algoId": ""
+              },
+              "ordId": "680800019749904384",
+              "ordType": "market",
+              "pnl": "0",
+              "posSide": "net",
+              "px": "",
+              "pxType": "",
+              "pxUsd": "",
+              "pxVol": "",
+              "quickMgnType": "",
+              "rebate": "0",
+              "rebateCcy": "USDT",
+              "reduceOnly": "false",
+              "side": "buy",
+              "slOrdPx": "",
+              "slTriggerPx": "",
+              "slTriggerPxType": "",
+              "source": "",
+              "state": "filled",
+              "stpId": "",
+              "stpMode": "",
+              "sz": "100",
+              "tag": "",
+              "tdMode": "cash",
+              "tgtCcy": "quote_ccy",
+              "tpOrdPx": "",
+              "tpTriggerPx": "",
+              "tpTriggerPxType": "",
+              "tradeId": "744876980",
+              "tradeQuoteCcy": "EUR",
+              "uTime": "1708587373362",
+              "outcome": "yes"
+            }
+          ],
+          "msg": ""
+        }
+      }
+    },
+    "pending": {
+      "endpoint": "/api/v5/trade/orders-pending",
+      "kind": "order",
+      "requestAnchor": "R:7766-7796",
+      "requestTable": "#### Request Parameters  \n| Parameter  | Type  | Required  | Description  |  \n| --- | --- | --- | --- |  \n| instType  | String  | No  | Instrument type  \n`SPOT`  \n`MARGIN`  \n`SWAP`  \n`FUTURES`  \n`OPTION`  \n`EVENTS`  |  \n| instFamily  | String  | No  | Instrument family  \nApplicable to `FUTURES`/`SWAP`/`OPTION`  |  \n| instId  | String  | No  | Instrument ID, e.g. `BTC-USD-200927`  |  \n| ordType  | String  | No  | Order type   \n`market`: Market order   \n`limit`: Limit order   \n`post_only`: Post-only order   \n`fok`: Fill-or-kill order   \n`ioc`: Immediate-or-cancel order   \n`optimal_limit_ioc`: Market order with immediate-or-cancel order   \n`mmp`: Market Maker Protection (only applicable to Option in Portfolio Margin mode)  \n`mmp_and_post_only`: Market Maker Protection and Post-only order(only applicable to Option in Portfolio Margin mode)   \n`op_fok`: Simple options (fok)  \n`rpi`: Retail Price Improvement order  \n`elp`: Enhanced Liquidity Program order (Deprecated; use `rpi`. Accepted until October 31, 2026.)  |  \n| state  | String  | No  | State  \n`live`   \n`partially_filled`  |  \n| after  | String  | No  | Pagination of data to return records earlier than the requested `ordId`  |  \n| before  | String  | No  | Pagination of data to return records newer than the requested `ordId`  |  \n| limit  | String  | No  | Number of results per request. The maximum is `100`; The default is `100`  |  ",
+      "responseAnchor": "R:7871-8012",
+      "exampleAnchor": "R:7803-7864",
+      "originalExampleText": "{\n    \"code\": \"0\",\n    \"data\": [\n        {\n            \"accFillSz\": \"0\",\n            \"algoClOrdId\": \"\",\n            \"algoId\": \"\",\n            \"attachAlgoClOrdId\": \"\",\n            \"attachAlgoOrds\": [],\n            \"avgPx\": \"\",\n            \"cTime\": \"1724733617998\",\n            \"cancelSource\": \"\",\n            \"cancelSourceReason\": \"\",\n            \"category\": \"normal\",\n            \"ccy\": \"\",\n            \"clOrdId\": \"\",\n            \"fee\": \"0\",\n            \"feeCcy\": \"BTC\",\n            \"fillPx\": \"\",\n            \"fillSz\": \"0\",\n            \"fillTime\": \"\",\n            \"instId\": \"BTC-USDT\",\n            \"instType\": \"SPOT\",\n            \"isTpLimit\": \"false\",\n            \"lever\": \"\",\n            \"linkedAlgoOrd\": {\n                \"algoId\": \"\"\n            },\n            \"ordId\": \"1752588852617379840\",\n            \"ordType\": \"post_only\",\n            \"pnl\": \"0\",\n            \"posSide\": \"net\",\n            \"px\": \"13013.5\",\n            \"pxType\": \"\",\n            \"pxUsd\": \"\",\n            \"pxVol\": \"\",\n            \"quickMgnType\": \"\",\n            \"rebate\": \"0\",\n            \"rebateCcy\": \"USDT\",\n            \"reduceOnly\": \"false\",\n            \"side\": \"buy\",\n            \"slOrdPx\": \"\",\n            \"slTriggerPx\": \"\",\n            \"slTriggerPxType\": \"\",\n            \"source\": \"\",\n            \"state\": \"live\",\n            \"stpId\": \"\",\n            \"stpMode\": \"cancel_maker\",\n            \"sz\": \"0.001\",\n            \"tag\": \"\",\n            \"tdMode\": \"cash\",\n            \"tgtCcy\": \"\",\n            \"tpOrdPx\": \"\",\n            \"tpTriggerPx\": \"\",\n            \"tpTriggerPxType\": \"\",\n            \"tradeId\": \"\",\n            \"tradeQuoteCcy\": \"USDT\",\n            \"uTime\": \"1724733617998\"\n        }\n    ],\n    \"msg\": \"\"\n}",
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "accFillSz": "0",
+            "algoClOrdId": "",
+            "algoId": "",
+            "attachAlgoClOrdId": "",
+            "attachAlgoOrds": [],
+            "avgPx": "",
+            "cTime": "1724733617998",
+            "cancelSource": "",
+            "cancelSourceReason": "",
+            "category": "normal",
+            "ccy": "",
+            "clOrdId": "",
+            "fee": "0",
+            "feeCcy": "BTC",
+            "fillPx": "",
+            "fillSz": "0",
+            "fillTime": "",
+            "instId": "BTC-USDT",
+            "instType": "SPOT",
+            "isTpLimit": "false",
+            "lever": "",
+            "linkedAlgoOrd": {
+              "algoId": ""
+            },
+            "ordId": "1752588852617379840",
+            "ordType": "post_only",
+            "pnl": "0",
+            "posSide": "net",
+            "px": "13013.5",
+            "pxType": "",
+            "pxUsd": "",
+            "pxVol": "",
+            "quickMgnType": "",
+            "rebate": "0",
+            "rebateCcy": "USDT",
+            "reduceOnly": "false",
+            "side": "buy",
+            "slOrdPx": "",
+            "slTriggerPx": "",
+            "slTriggerPxType": "",
+            "source": "",
+            "state": "live",
+            "stpId": "",
+            "stpMode": "cancel_maker",
+            "sz": "0.001",
+            "tag": "",
+            "tdMode": "cash",
+            "tgtCcy": "",
+            "tpOrdPx": "",
+            "tpTriggerPx": "",
+            "tpTriggerPxType": "",
+            "tradeId": "",
+            "tradeQuoteCcy": "USDT",
+            "uTime": "1724733617998"
+          }
+        ],
+        "msg": ""
+      },
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:7871",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:7878",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "tgtCcy",
+          "type": "String",
+          "anchor": "R:7879",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ccy",
+          "type": "String",
+          "anchor": "R:7883",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordId",
+          "type": "String",
+          "anchor": "R:7885",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "clOrdId",
+          "type": "String",
+          "anchor": "R:7886",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "tag",
+          "type": "String",
+          "anchor": "R:7887",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "px",
+          "type": "String",
+          "anchor": "R:7888",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxUsd",
+          "type": "String",
+          "anchor": "R:7890",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxVol",
+          "type": "String",
+          "anchor": "R:7892",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxType",
+          "type": "String",
+          "anchor": "R:7894",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "sz",
+          "type": "String",
+          "anchor": "R:7898",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pnl",
+          "type": "String",
+          "anchor": "R:7899",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordType",
+          "type": "String",
+          "anchor": "R:7901",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "side",
+          "type": "String",
+          "anchor": "R:7913",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posSide",
+          "type": "String",
+          "anchor": "R:7914",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tdMode",
+          "type": "String",
+          "anchor": "R:7915",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "accFillSz",
+          "type": "String",
+          "anchor": "R:7916",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPx",
+          "type": "String",
+          "anchor": "R:7917",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeId",
+          "type": "String",
+          "anchor": "R:7918",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillSz",
+          "type": "String",
+          "anchor": "R:7919",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillTime",
+          "type": "String",
+          "anchor": "R:7920",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "avgPx",
+          "type": "String",
+          "anchor": "R:7921",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "state",
+          "type": "String",
+          "anchor": "R:7922",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "lever",
+          "type": "String",
+          "anchor": "R:7925",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoClOrdId",
+          "type": "String",
+          "anchor": "R:7927",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpTriggerPx",
+          "type": "String",
+          "anchor": "R:7928",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpTriggerPxType",
+          "type": "String",
+          "anchor": "R:7929",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpOrdPx",
+          "type": "String",
+          "anchor": "R:7933",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slTriggerPx",
+          "type": "String",
+          "anchor": "R:7934",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slTriggerPxType",
+          "type": "String",
+          "anchor": "R:7935",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slOrdPx",
+          "type": "String",
+          "anchor": "R:7939",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds",
+          "type": "Array of objects",
+          "anchor": "R:7940",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].attachAlgoId",
+          "type": "String",
+          "anchor": "R:7941",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].attachAlgoClOrdId",
+          "type": "String",
+          "anchor": "R:7942",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpOrdKind",
+          "type": "String",
+          "anchor": "R:7945",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerPx",
+          "type": "String",
+          "anchor": "R:7948",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerRatio",
+          "type": "String",
+          "anchor": "R:7949",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerPxType",
+          "type": "String",
+          "anchor": "R:7951",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpOrdPx",
+          "type": "String",
+          "anchor": "R:7955",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerPx",
+          "type": "String",
+          "anchor": "R:7956",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerRatio",
+          "type": "String",
+          "anchor": "R:7957",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerPxType",
+          "type": "String",
+          "anchor": "R:7959",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slOrdPx",
+          "type": "String",
+          "anchor": "R:7963",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].sz",
+          "type": "String",
+          "anchor": "R:7964",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].amendPxOnTriggerType",
+          "type": "String",
+          "anchor": "R:7965",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].callbackRatio",
+          "type": "String",
+          "anchor": "R:7968",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].callbackSpread",
+          "type": "String",
+          "anchor": "R:7969",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].activePx",
+          "type": "String",
+          "anchor": "R:7970",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].failCode",
+          "type": "String",
+          "anchor": "R:7971",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].failReason",
+          "type": "String",
+          "anchor": "R:7973",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "linkedAlgoOrd",
+          "type": "Object",
+          "anchor": "R:7975",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "linkedAlgoOrd.algoId",
+          "type": "String",
+          "anchor": "R:7976",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "stpId",
+          "type": "String",
+          "anchor": "R:7977",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "stpMode",
+          "type": "String",
+          "anchor": "R:7979",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "feeCcy",
+          "type": "String",
+          "anchor": "R:7980",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fee",
+          "type": "String",
+          "anchor": "R:7982",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "rebateCcy",
+          "type": "String",
+          "anchor": "R:7985",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "rebate",
+          "type": "String",
+          "anchor": "R:7987",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "source",
+          "type": "String",
+          "anchor": "R:7990",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "category",
+          "type": "String",
+          "anchor": "R:7996",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "reduceOnly",
+          "type": "String",
+          "anchor": "R:7998",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "quickMgnType",
+          "type": "String",
+          "anchor": "R:7999",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "algoClOrdId",
+          "type": "String",
+          "anchor": "R:8001",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "algoId",
+          "type": "String",
+          "anchor": "R:8002",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "isTpLimit",
+          "type": "String",
+          "anchor": "R:8003",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "uTime",
+          "type": "String",
+          "anchor": "R:8004",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cTime",
+          "type": "String",
+          "anchor": "R:8005",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cancelSource",
+          "type": "String",
+          "anchor": "R:8006",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cancelSourceReason",
+          "type": "String",
+          "anchor": "R:8007",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeQuoteCcy",
+          "type": "String",
+          "anchor": "R:8008",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "outcome",
+          "type": "String",
+          "anchor": "R:8009",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        }
+      ],
+      "syntheticExtension": {
+        "label": "documented-shape synthetic extension; NOT populated official attachment example",
+        "control": {
+          "code": "0",
+          "data": [
+            {
+              "accFillSz": "0",
+              "algoClOrdId": "",
+              "algoId": "",
+              "attachAlgoClOrdId": "",
+              "attachAlgoOrds": [
+                {
+                  "attachAlgoId": "documented",
+                  "attachAlgoClOrdId": "documented",
+                  "tpOrdKind": "documented",
+                  "tpTriggerPx": "0.05",
+                  "tpTriggerRatio": "0.05",
+                  "tpTriggerPxType": "documented",
+                  "tpOrdPx": "-1",
+                  "slTriggerPx": "0.05",
+                  "slTriggerRatio": "0.05",
+                  "slTriggerPxType": "documented",
+                  "slOrdPx": "-1",
+                  "sz": "0.05",
+                  "amendPxOnTriggerType": "documented",
+                  "callbackRatio": "0.05",
+                  "callbackSpread": "0.05",
+                  "activePx": "0.05",
+                  "failCode": "documented",
+                  "failReason": "PRIVATE_DISCARDED_SENTINEL"
+                }
+              ],
+              "avgPx": "",
+              "cTime": "1724733617998",
+              "cancelSource": "",
+              "cancelSourceReason": "",
+              "category": "normal",
+              "ccy": "",
+              "clOrdId": "DifferentClient",
+              "fee": "0",
+              "feeCcy": "BTC",
+              "fillPx": "",
+              "fillSz": "0",
+              "fillTime": "",
+              "instId": "BTC-USDT",
+              "instType": "SPOT",
+              "isTpLimit": "false",
+              "lever": "",
+              "linkedAlgoOrd": {
+                "algoId": ""
+              },
+              "ordId": "1752588852617379840",
+              "ordType": "post_only",
+              "pnl": "0",
+              "posSide": "net",
+              "px": "13013.5",
+              "pxType": "",
+              "pxUsd": "",
+              "pxVol": "",
+              "quickMgnType": "",
+              "rebate": "0",
+              "rebateCcy": "USDT",
+              "reduceOnly": "false",
+              "side": "buy",
+              "slOrdPx": "",
+              "slTriggerPx": "",
+              "slTriggerPxType": "",
+              "source": "",
+              "state": "live",
+              "stpId": "",
+              "stpMode": "cancel_maker",
+              "sz": "0.001",
+              "tag": "",
+              "tdMode": "cash",
+              "tgtCcy": "",
+              "tpOrdPx": "",
+              "tpTriggerPx": "",
+              "tpTriggerPxType": "",
+              "tradeId": "",
+              "tradeQuoteCcy": "EUR",
+              "uTime": "1724733617998",
+              "outcome": "yes"
+            }
+          ],
+          "msg": ""
+        }
+      }
+    },
+    "history": {
+      "endpoint": "/api/v5/trade/orders-history",
+      "kind": "order",
+      "requestAnchor": "R:8058-8098",
+      "requestTable": "#### Request Parameters  \n| Parameter  | Type  | Required  | Description  |  \n| --- | --- | --- | --- |  \n| instType  | String  | yes  | Instrument type  \n`SPOT`  \n`MARGIN`  \n`SWAP`  \n`FUTURES`  \n`OPTION`  \n`EVENTS`  |  \n| instFamily  | String  | No  | Instrument family  \nApplicable to `FUTURES`/`SWAP`/`OPTION`  |  \n| instId  | String  | No  | Instrument ID, e.g. `BTC-USDT`  |  \n| ordType  | String  | No  | Order type  \n`market`: market order   \n`limit`: limit order   \n`post_only`: Post-only order   \n`fok`: Fill-or-kill order   \n`ioc`: Immediate-or-cancel order   \n`optimal_limit_ioc`: Market order with immediate-or-cancel order  \n`mmp`: Market Maker Protection (only applicable to Option in Portfolio Margin mode)  \n`mmp_and_post_only`: Market Maker Protection and Post-only order(only applicable to Option in Portfolio Margin mode)   \n`op_fok`: Simple options (fok)   \n`rpi`: Retail Price Improvement order  \n`elp`: Enhanced Liquidity Program order (Deprecated; use `rpi`. Accepted until October 31, 2026.)  |  \n| state  | String  | No  | State  \n`canceled`  \n`filled`  \n`mmp_canceled`: Order canceled automatically due to Market Maker Protection  |  \n| category  | String  | No  | Category   \n`twap`   \n`adl`  \n`full_liquidation`  \n`partial_liquidation`   \n`delivery`   \n`ddh`: Delta dynamic hedge  |  \n| after  | String  | No  | Pagination of data to return records earlier than the requested `ordId`  |  \n| before  | String  | No  | Pagination of data to return records newer than the requested `ordId`  |  \n| begin  | String  | No  | Filter with a begin timestamp `cTime`. Unix timestamp format in milliseconds, e.g. 1597026383085  |  \n| end  | String  | No  | Filter with an end timestamp `cTime`. Unix timestamp format in milliseconds, e.g. 1597026383085  |  \n| limit  | String  | No  | Number of results per request. The maximum is `100`; The default is `100`  |  ",
+      "responseAnchor": "R:8173-8322",
+      "exampleAnchor": "R:8105-8166",
+      "originalExampleText": "{\n    \"code\": \"0\",\n    \"data\": [\n        {\n            \"accFillSz\": \"0.00192834\",\n            \"algoClOrdId\": \"\",\n            \"algoId\": \"\",\n            \"attachAlgoClOrdId\": \"\",\n            \"attachAlgoOrds\": [],\n            \"avgPx\": \"51858\",\n            \"cTime\": \"1708587373361\",\n            \"cancelSource\": \"\",\n            \"cancelSourceReason\": \"\",\n            \"category\": \"normal\",\n            \"ccy\": \"\",\n            \"clOrdId\": \"\",\n            \"fee\": \"-0.00000192834\",\n            \"feeCcy\": \"BTC\",\n            \"fillPx\": \"51858\",\n            \"fillSz\": \"0.00192834\",\n            \"fillTime\": \"1708587373361\",\n            \"instId\": \"BTC-USDT\",\n            \"instType\": \"SPOT\",\n            \"lever\": \"\",\n            \"linkedAlgoOrd\": {\n                \"algoId\": \"\"\n            },\n            \"ordId\": \"680800019749904384\",\n            \"ordType\": \"market\",\n            \"pnl\": \"0\",\n            \"posSide\": \"\",\n            \"px\": \"\",\n            \"pxType\": \"\",\n            \"pxUsd\": \"\",\n            \"pxVol\": \"\",\n            \"quickMgnType\": \"\",\n            \"rebate\": \"0\",\n            \"rebateCcy\": \"USDT\",\n            \"reduceOnly\": \"false\",\n            \"side\": \"buy\",\n            \"slOrdPx\": \"\",\n            \"slTriggerPx\": \"\",\n            \"slTriggerPxType\": \"\",\n            \"source\": \"\",\n            \"state\": \"filled\",\n            \"stpId\": \"\",\n            \"stpMode\": \"\",\n            \"sz\": \"100\",\n            \"tag\": \"\",\n            \"tdMode\": \"cash\",\n            \"tgtCcy\": \"quote_ccy\",\n            \"tpOrdPx\": \"\",\n            \"tpTriggerPx\": \"\",\n            \"tpTriggerPxType\": \"\",\n            \"tradeId\": \"744876980\",\n            \"tradeQuoteCcy\": \"USDT\",\n            \"uTime\": \"1708587373362\",\n            \"isTpLimit\": \"false\"\n        }\n    ],\n    \"msg\": \"\"\n}",
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "accFillSz": "0.00192834",
+            "algoClOrdId": "",
+            "algoId": "",
+            "attachAlgoClOrdId": "",
+            "attachAlgoOrds": [],
+            "avgPx": "51858",
+            "cTime": "1708587373361",
+            "cancelSource": "",
+            "cancelSourceReason": "",
+            "category": "normal",
+            "ccy": "",
+            "clOrdId": "",
+            "fee": "-0.00000192834",
+            "feeCcy": "BTC",
+            "fillPx": "51858",
+            "fillSz": "0.00192834",
+            "fillTime": "1708587373361",
+            "instId": "BTC-USDT",
+            "instType": "SPOT",
+            "lever": "",
+            "linkedAlgoOrd": {
+              "algoId": ""
+            },
+            "ordId": "680800019749904384",
+            "ordType": "market",
+            "pnl": "0",
+            "posSide": "",
+            "px": "",
+            "pxType": "",
+            "pxUsd": "",
+            "pxVol": "",
+            "quickMgnType": "",
+            "rebate": "0",
+            "rebateCcy": "USDT",
+            "reduceOnly": "false",
+            "side": "buy",
+            "slOrdPx": "",
+            "slTriggerPx": "",
+            "slTriggerPxType": "",
+            "source": "",
+            "state": "filled",
+            "stpId": "",
+            "stpMode": "",
+            "sz": "100",
+            "tag": "",
+            "tdMode": "cash",
+            "tgtCcy": "quote_ccy",
+            "tpOrdPx": "",
+            "tpTriggerPx": "",
+            "tpTriggerPxType": "",
+            "tradeId": "744876980",
+            "tradeQuoteCcy": "USDT",
+            "uTime": "1708587373362",
+            "isTpLimit": "false"
+          }
+        ],
+        "msg": ""
+      },
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:8173",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:8180",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "tgtCcy",
+          "type": "String",
+          "anchor": "R:8181",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ccy",
+          "type": "String",
+          "anchor": "R:8185",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordId",
+          "type": "String",
+          "anchor": "R:8187",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "clOrdId",
+          "type": "String",
+          "anchor": "R:8188",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "tag",
+          "type": "String",
+          "anchor": "R:8189",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "px",
+          "type": "String",
+          "anchor": "R:8190",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxUsd",
+          "type": "String",
+          "anchor": "R:8192",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxVol",
+          "type": "String",
+          "anchor": "R:8194",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxType",
+          "type": "String",
+          "anchor": "R:8196",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "sz",
+          "type": "String",
+          "anchor": "R:8200",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordType",
+          "type": "String",
+          "anchor": "R:8201",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "side",
+          "type": "String",
+          "anchor": "R:8213",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posSide",
+          "type": "String",
+          "anchor": "R:8214",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tdMode",
+          "type": "String",
+          "anchor": "R:8215",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "accFillSz",
+          "type": "String",
+          "anchor": "R:8216",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPx",
+          "type": "String",
+          "anchor": "R:8217",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeId",
+          "type": "String",
+          "anchor": "R:8218",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillSz",
+          "type": "String",
+          "anchor": "R:8219",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillTime",
+          "type": "String",
+          "anchor": "R:8220",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "avgPx",
+          "type": "String",
+          "anchor": "R:8221",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "state",
+          "type": "String",
+          "anchor": "R:8222",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "lever",
+          "type": "String",
+          "anchor": "R:8226",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoClOrdId",
+          "type": "String",
+          "anchor": "R:8228",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpTriggerPx",
+          "type": "String",
+          "anchor": "R:8229",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpTriggerPxType",
+          "type": "String",
+          "anchor": "R:8230",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpOrdPx",
+          "type": "String",
+          "anchor": "R:8234",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slTriggerPx",
+          "type": "String",
+          "anchor": "R:8235",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slTriggerPxType",
+          "type": "String",
+          "anchor": "R:8236",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slOrdPx",
+          "type": "String",
+          "anchor": "R:8240",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds",
+          "type": "Array of objects",
+          "anchor": "R:8241",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].attachAlgoId",
+          "type": "String",
+          "anchor": "R:8242",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].attachAlgoClOrdId",
+          "type": "String",
+          "anchor": "R:8243",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpOrdKind",
+          "type": "String",
+          "anchor": "R:8246",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerPx",
+          "type": "String",
+          "anchor": "R:8249",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerRatio",
+          "type": "String",
+          "anchor": "R:8250",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerPxType",
+          "type": "String",
+          "anchor": "R:8252",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpOrdPx",
+          "type": "String",
+          "anchor": "R:8256",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerPx",
+          "type": "String",
+          "anchor": "R:8257",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerRatio",
+          "type": "String",
+          "anchor": "R:8258",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerPxType",
+          "type": "String",
+          "anchor": "R:8260",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slOrdPx",
+          "type": "String",
+          "anchor": "R:8264",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].sz",
+          "type": "String",
+          "anchor": "R:8265",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].amendPxOnTriggerType",
+          "type": "String",
+          "anchor": "R:8266",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].callbackRatio",
+          "type": "String",
+          "anchor": "R:8269",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].callbackSpread",
+          "type": "String",
+          "anchor": "R:8270",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].activePx",
+          "type": "String",
+          "anchor": "R:8271",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].failCode",
+          "type": "String",
+          "anchor": "R:8272",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].failReason",
+          "type": "String",
+          "anchor": "R:8274",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "linkedAlgoOrd",
+          "type": "Object",
+          "anchor": "R:8276",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "linkedAlgoOrd.algoId",
+          "type": "String",
+          "anchor": "R:8277",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "stpId",
+          "type": "String",
+          "anchor": "R:8278",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "stpMode",
+          "type": "String",
+          "anchor": "R:8280",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "feeCcy",
+          "type": "String",
+          "anchor": "R:8281",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fee",
+          "type": "String",
+          "anchor": "R:8283",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "rebateCcy",
+          "type": "String",
+          "anchor": "R:8286",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "rebate",
+          "type": "String",
+          "anchor": "R:8288",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "source",
+          "type": "String",
+          "anchor": "R:8291",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pnl",
+          "type": "String",
+          "anchor": "R:8297",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "category",
+          "type": "String",
+          "anchor": "R:8299",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "reduceOnly",
+          "type": "String",
+          "anchor": "R:8308",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cancelSource",
+          "type": "String",
+          "anchor": "R:8309",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cancelSourceReason",
+          "type": "String",
+          "anchor": "R:8310",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "algoClOrdId",
+          "type": "String",
+          "anchor": "R:8311",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "algoId",
+          "type": "String",
+          "anchor": "R:8312",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "isTpLimit",
+          "type": "String",
+          "anchor": "R:8313",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "uTime",
+          "type": "String",
+          "anchor": "R:8314",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cTime",
+          "type": "String",
+          "anchor": "R:8315",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "quickMgnType",
+          "type": "String",
+          "anchor": "R:8316",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeQuoteCcy",
+          "type": "String",
+          "anchor": "R:8318",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "outcome",
+          "type": "String",
+          "anchor": "R:8319",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        }
+      ],
+      "syntheticExtension": {
+        "label": "documented-shape synthetic extension; NOT populated official attachment example",
+        "control": {
+          "code": "0",
+          "data": [
+            {
+              "accFillSz": "0.00192834",
+              "algoClOrdId": "",
+              "algoId": "",
+              "attachAlgoClOrdId": "",
+              "attachAlgoOrds": [
+                {
+                  "attachAlgoId": "documented",
+                  "attachAlgoClOrdId": "documented",
+                  "tpOrdKind": "documented",
+                  "tpTriggerPx": "0.05",
+                  "tpTriggerRatio": "0.05",
+                  "tpTriggerPxType": "documented",
+                  "tpOrdPx": "-1",
+                  "slTriggerPx": "0.05",
+                  "slTriggerRatio": "0.05",
+                  "slTriggerPxType": "documented",
+                  "slOrdPx": "-1",
+                  "sz": "0.05",
+                  "amendPxOnTriggerType": "documented",
+                  "callbackRatio": "0.05",
+                  "callbackSpread": "0.05",
+                  "activePx": "0.05",
+                  "failCode": "documented",
+                  "failReason": "PRIVATE_DISCARDED_SENTINEL"
+                }
+              ],
+              "avgPx": "51858",
+              "cTime": "1708587373361",
+              "cancelSource": "",
+              "cancelSourceReason": "",
+              "category": "normal",
+              "ccy": "",
+              "clOrdId": "DifferentClient",
+              "fee": "-0.00000192834",
+              "feeCcy": "BTC",
+              "fillPx": "51858",
+              "fillSz": "0.00192834",
+              "fillTime": "1708587373361",
+              "instId": "BTC-USDT",
+              "instType": "SPOT",
+              "lever": "",
+              "linkedAlgoOrd": {
+                "algoId": ""
+              },
+              "ordId": "680800019749904384",
+              "ordType": "market",
+              "pnl": "0",
+              "posSide": "",
+              "px": "",
+              "pxType": "",
+              "pxUsd": "",
+              "pxVol": "",
+              "quickMgnType": "",
+              "rebate": "0",
+              "rebateCcy": "USDT",
+              "reduceOnly": "false",
+              "side": "buy",
+              "slOrdPx": "",
+              "slTriggerPx": "",
+              "slTriggerPxType": "",
+              "source": "",
+              "state": "filled",
+              "stpId": "",
+              "stpMode": "",
+              "sz": "100",
+              "tag": "",
+              "tdMode": "cash",
+              "tgtCcy": "quote_ccy",
+              "tpOrdPx": "",
+              "tpTriggerPx": "",
+              "tpTriggerPxType": "",
+              "tradeId": "744876980",
+              "tradeQuoteCcy": "EUR",
+              "uTime": "1708587373362",
+              "isTpLimit": "false",
+              "outcome": "yes"
+            }
+          ],
+          "msg": ""
+        }
+      }
+    },
+    "historyArchive": {
+      "endpoint": "/api/v5/trade/orders-history-archive",
+      "kind": "order",
+      "requestAnchor": "R:8366-8406",
+      "requestTable": "#### Request Parameters  \n| Parameter  | Type  | Required  | Description  |  \n| --- | --- | --- | --- |  \n| instType  | String  | yes  | Instrument type  \n`SPOT`  \n`MARGIN`  \n`SWAP`  \n`FUTURES`  \n`OPTION`  \n`EVENTS`  |  \n| instFamily  | String  | No  | Instrument family  \nApplicable to `FUTURES`/`SWAP`/`OPTION`  |  \n| instId  | String  | No  | Instrument ID, e.g. `BTC-USD-200927`  |  \n| ordType  | String  | No  | Order type   \n`market`: Market order   \n`limit`: Limit order   \n`post_only`: Post-only order   \n`fok`: Fill-or-kill order   \n`ioc`: Immediate-or-cancel order   \n`optimal_limit_ioc`: Market order with immediate-or-cancel order  \n`mmp`: Market Maker Protection (only applicable to Option in Portfolio Margin mode)  \n`mmp_and_post_only`: Market Maker Protection and Post-only order(only applicable to Option in Portfolio Margin mode)   \n`op_fok`: Simple options (fok)   \n`rpi`: Retail Price Improvement order  \n`elp`: Enhanced Liquidity Program order (Deprecated; use `rpi`. Accepted until October 31, 2026.)  |  \n| state  | String  | No  | State  \n`canceled`   \n`filled`  \n`mmp_canceled`: Order canceled automatically due to Market Maker Protection  |  \n| category  | String  | No  | Category   \n`twap`   \n`adl`  \n`full_liquidation`  \n`partial_liquidation`  \n`delivery`   \n`ddh`: Delta dynamic hedge  |  \n| after  | String  | No  | Pagination of data to return records earlier than the requested `ordId`  |  \n| before  | String  | No  | Pagination of data to return records newer than the requested `ordId`  |  \n| begin  | String  | No  | Filter with a begin timestamp `cTime`. Unix timestamp format in milliseconds, e.g. 1597026383085  |  \n| end  | String  | No  | Filter with an end timestamp `cTime`. Unix timestamp format in milliseconds, e.g. 1597026383085  |  \n| limit  | String  | No  | Number of results per request. The maximum is `100`; The default is `100`  |  ",
+      "responseAnchor": "R:8481-8628",
+      "exampleAnchor": "R:8413-8474",
+      "originalExampleText": "{\n    \"code\": \"0\",\n    \"data\": [\n        {\n            \"accFillSz\": \"0.00192834\",\n            \"algoClOrdId\": \"\",\n            \"algoId\": \"\",\n            \"attachAlgoClOrdId\": \"\",\n            \"attachAlgoOrds\": [],\n            \"avgPx\": \"51858\",\n            \"cTime\": \"1708587373361\",\n            \"cancelSource\": \"\",\n            \"cancelSourceReason\": \"\",\n            \"category\": \"normal\",\n            \"ccy\": \"\",\n            \"clOrdId\": \"\",\n            \"fee\": \"-0.00000192834\",\n            \"feeCcy\": \"BTC\",\n            \"fillPx\": \"51858\",\n            \"fillSz\": \"0.00192834\",\n            \"fillTime\": \"1708587373361\",\n            \"instId\": \"BTC-USDT\",\n            \"instType\": \"SPOT\",\n            \"lever\": \"\",\n            \"ordId\": \"680800019749904384\",\n            \"ordType\": \"market\",\n            \"pnl\": \"0\",\n            \"posSide\": \"\",\n            \"px\": \"\",\n            \"pxType\": \"\",\n            \"pxUsd\": \"\",\n            \"pxVol\": \"\",\n            \"quickMgnType\": \"\",\n            \"rebate\": \"0\",\n            \"rebateCcy\": \"USDT\",\n            \"reduceOnly\": \"false\",\n            \"side\": \"buy\",\n            \"slOrdPx\": \"\",\n            \"slTriggerPx\": \"\",\n            \"slTriggerPxType\": \"\",\n            \"source\": \"\",\n            \"state\": \"filled\",\n            \"stpId\": \"\",\n            \"stpMode\": \"\",\n            \"sz\": \"100\",\n            \"tag\": \"\",\n            \"tdMode\": \"cash\",\n            \"tgtCcy\": \"quote_ccy\",\n            \"tpOrdPx\": \"\",\n            \"tpTriggerPx\": \"\",\n            \"tpTriggerPxType\": \"\",\n            \"tradeId\": \"744876980\",\n            \"tradeQuoteCcy\": \"USDT\",\n            \"uTime\": \"1708587373362\",\n            \"isTpLimit\": \"false\",\n            \"linkedAlgoOrd\": {\n                \"algoId\": \"\"\n            }\n        }\n    ],\n    \"msg\": \"\"\n}",
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "accFillSz": "0.00192834",
+            "algoClOrdId": "",
+            "algoId": "",
+            "attachAlgoClOrdId": "",
+            "attachAlgoOrds": [],
+            "avgPx": "51858",
+            "cTime": "1708587373361",
+            "cancelSource": "",
+            "cancelSourceReason": "",
+            "category": "normal",
+            "ccy": "",
+            "clOrdId": "",
+            "fee": "-0.00000192834",
+            "feeCcy": "BTC",
+            "fillPx": "51858",
+            "fillSz": "0.00192834",
+            "fillTime": "1708587373361",
+            "instId": "BTC-USDT",
+            "instType": "SPOT",
+            "lever": "",
+            "ordId": "680800019749904384",
+            "ordType": "market",
+            "pnl": "0",
+            "posSide": "",
+            "px": "",
+            "pxType": "",
+            "pxUsd": "",
+            "pxVol": "",
+            "quickMgnType": "",
+            "rebate": "0",
+            "rebateCcy": "USDT",
+            "reduceOnly": "false",
+            "side": "buy",
+            "slOrdPx": "",
+            "slTriggerPx": "",
+            "slTriggerPxType": "",
+            "source": "",
+            "state": "filled",
+            "stpId": "",
+            "stpMode": "",
+            "sz": "100",
+            "tag": "",
+            "tdMode": "cash",
+            "tgtCcy": "quote_ccy",
+            "tpOrdPx": "",
+            "tpTriggerPx": "",
+            "tpTriggerPxType": "",
+            "tradeId": "744876980",
+            "tradeQuoteCcy": "USDT",
+            "uTime": "1708587373362",
+            "isTpLimit": "false",
+            "linkedAlgoOrd": {
+              "algoId": ""
+            }
+          }
+        ],
+        "msg": ""
+      },
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:8481",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:8488",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "tgtCcy",
+          "type": "String",
+          "anchor": "R:8489",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ccy",
+          "type": "String",
+          "anchor": "R:8493",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordId",
+          "type": "String",
+          "anchor": "R:8495",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "clOrdId",
+          "type": "String",
+          "anchor": "R:8496",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "tag",
+          "type": "String",
+          "anchor": "R:8497",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "px",
+          "type": "String",
+          "anchor": "R:8498",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxUsd",
+          "type": "String",
+          "anchor": "R:8500",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxVol",
+          "type": "String",
+          "anchor": "R:8501",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pxType",
+          "type": "String",
+          "anchor": "R:8502",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "sz",
+          "type": "String",
+          "anchor": "R:8506",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordType",
+          "type": "String",
+          "anchor": "R:8507",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "side",
+          "type": "String",
+          "anchor": "R:8519",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posSide",
+          "type": "String",
+          "anchor": "R:8520",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tdMode",
+          "type": "String",
+          "anchor": "R:8521",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "accFillSz",
+          "type": "String",
+          "anchor": "R:8522",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPx",
+          "type": "String",
+          "anchor": "R:8523",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeId",
+          "type": "String",
+          "anchor": "R:8524",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillSz",
+          "type": "String",
+          "anchor": "R:8525",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillTime",
+          "type": "String",
+          "anchor": "R:8526",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "avgPx",
+          "type": "String",
+          "anchor": "R:8527",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "state",
+          "type": "String",
+          "anchor": "R:8528",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "lever",
+          "type": "String",
+          "anchor": "R:8532",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoClOrdId",
+          "type": "String",
+          "anchor": "R:8534",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpTriggerPx",
+          "type": "String",
+          "anchor": "R:8535",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpTriggerPxType",
+          "type": "String",
+          "anchor": "R:8536",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tpOrdPx",
+          "type": "String",
+          "anchor": "R:8540",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slTriggerPx",
+          "type": "String",
+          "anchor": "R:8541",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slTriggerPxType",
+          "type": "String",
+          "anchor": "R:8542",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "slOrdPx",
+          "type": "String",
+          "anchor": "R:8546",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds",
+          "type": "Array of objects",
+          "anchor": "R:8547",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].attachAlgoId",
+          "type": "String",
+          "anchor": "R:8548",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].attachAlgoClOrdId",
+          "type": "String",
+          "anchor": "R:8549",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpOrdKind",
+          "type": "String",
+          "anchor": "R:8552",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerPx",
+          "type": "String",
+          "anchor": "R:8555",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerRatio",
+          "type": "String",
+          "anchor": "R:8556",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpTriggerPxType",
+          "type": "String",
+          "anchor": "R:8558",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].tpOrdPx",
+          "type": "String",
+          "anchor": "R:8562",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerPx",
+          "type": "String",
+          "anchor": "R:8563",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerRatio",
+          "type": "String",
+          "anchor": "R:8564",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slTriggerPxType",
+          "type": "String",
+          "anchor": "R:8566",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].slOrdPx",
+          "type": "String",
+          "anchor": "R:8570",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].sz",
+          "type": "String",
+          "anchor": "R:8571",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].amendPxOnTriggerType",
+          "type": "String",
+          "anchor": "R:8572",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].callbackRatio",
+          "type": "String",
+          "anchor": "R:8575",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].callbackSpread",
+          "type": "String",
+          "anchor": "R:8576",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].activePx",
+          "type": "String",
+          "anchor": "R:8577",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].failCode",
+          "type": "String",
+          "anchor": "R:8578",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "attachAlgoOrds[].failReason",
+          "type": "String",
+          "anchor": "R:8580",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "linkedAlgoOrd",
+          "type": "Object",
+          "anchor": "R:8582",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "linkedAlgoOrd.algoId",
+          "type": "String",
+          "anchor": "R:8583",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "stpId",
+          "type": "String",
+          "anchor": "R:8584",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "stpMode",
+          "type": "String",
+          "anchor": "R:8586",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "feeCcy",
+          "type": "String",
+          "anchor": "R:8587",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fee",
+          "type": "String",
+          "anchor": "R:8589",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "rebateCcy",
+          "type": "String",
+          "anchor": "R:8592",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "rebate",
+          "type": "String",
+          "anchor": "R:8594",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "source",
+          "type": "String",
+          "anchor": "R:8597",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "pnl",
+          "type": "String",
+          "anchor": "R:8603",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "category",
+          "type": "String",
+          "anchor": "R:8605",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "reduceOnly",
+          "type": "String",
+          "anchor": "R:8614",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cancelSource",
+          "type": "String",
+          "anchor": "R:8615",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cancelSourceReason",
+          "type": "String",
+          "anchor": "R:8616",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "algoClOrdId",
+          "type": "String",
+          "anchor": "R:8617",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "algoId",
+          "type": "String",
+          "anchor": "R:8618",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "isTpLimit",
+          "type": "String",
+          "anchor": "R:8619",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "uTime",
+          "type": "String",
+          "anchor": "R:8620",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "cTime",
+          "type": "String",
+          "anchor": "R:8621",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "quickMgnType",
+          "type": "String",
+          "anchor": "R:8622",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeQuoteCcy",
+          "type": "String",
+          "anchor": "R:8624",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "outcome",
+          "type": "String",
+          "anchor": "R:8625",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        }
+      ],
+      "syntheticExtension": {
+        "label": "documented-shape synthetic extension; NOT populated official attachment example",
+        "control": {
+          "code": "0",
+          "data": [
+            {
+              "accFillSz": "0.00192834",
+              "algoClOrdId": "",
+              "algoId": "",
+              "attachAlgoClOrdId": "",
+              "attachAlgoOrds": [
+                {
+                  "attachAlgoId": "documented",
+                  "attachAlgoClOrdId": "documented",
+                  "tpOrdKind": "documented",
+                  "tpTriggerPx": "0.05",
+                  "tpTriggerRatio": "0.05",
+                  "tpTriggerPxType": "documented",
+                  "tpOrdPx": "-1",
+                  "slTriggerPx": "0.05",
+                  "slTriggerRatio": "0.05",
+                  "slTriggerPxType": "documented",
+                  "slOrdPx": "-1",
+                  "sz": "0.05",
+                  "amendPxOnTriggerType": "documented",
+                  "callbackRatio": "0.05",
+                  "callbackSpread": "0.05",
+                  "activePx": "0.05",
+                  "failCode": "documented",
+                  "failReason": "PRIVATE_DISCARDED_SENTINEL"
+                }
+              ],
+              "avgPx": "51858",
+              "cTime": "1708587373361",
+              "cancelSource": "",
+              "cancelSourceReason": "",
+              "category": "normal",
+              "ccy": "",
+              "clOrdId": "DifferentClient",
+              "fee": "-0.00000192834",
+              "feeCcy": "BTC",
+              "fillPx": "51858",
+              "fillSz": "0.00192834",
+              "fillTime": "1708587373361",
+              "instId": "BTC-USDT",
+              "instType": "SPOT",
+              "lever": "",
+              "ordId": "680800019749904384",
+              "ordType": "market",
+              "pnl": "0",
+              "posSide": "",
+              "px": "",
+              "pxType": "",
+              "pxUsd": "",
+              "pxVol": "",
+              "quickMgnType": "",
+              "rebate": "0",
+              "rebateCcy": "USDT",
+              "reduceOnly": "false",
+              "side": "buy",
+              "slOrdPx": "",
+              "slTriggerPx": "",
+              "slTriggerPxType": "",
+              "source": "",
+              "state": "filled",
+              "stpId": "",
+              "stpMode": "",
+              "sz": "100",
+              "tag": "",
+              "tdMode": "cash",
+              "tgtCcy": "quote_ccy",
+              "tpOrdPx": "",
+              "tpTriggerPx": "",
+              "tpTriggerPxType": "",
+              "tradeId": "744876980",
+              "tradeQuoteCcy": "EUR",
+              "uTime": "1708587373362",
+              "isTpLimit": "false",
+              "linkedAlgoOrd": {
+                "algoId": ""
+              },
+              "outcome": "yes"
+            }
+          ],
+          "msg": ""
+        }
+      }
+    },
+    "fills": {
+      "endpoint": "/api/v5/trade/fills",
+      "kind": "fill",
+      "requestAnchor": "R:8671-8744",
+      "requestTable": "#### Request Parameters  \n| Parameter  | Type  | Required  | Description  |  \n| --- | --- | --- | --- |  \n| instType  | String  | No  | Instrument type  \n`SPOT`  \n`MARGIN`  \n`SWAP`  \n`FUTURES`  \n`OPTION`  \n`EVENTS`  |  \n| instFamily  | String  | No  | Instrument family  \nApplicable to `FUTURES`/`SWAP`/`OPTION`  |  \n| instId  | String  | No  | Instrument ID, e.g. `BTC-USDT`  |  \n| ordId  | String  | No  | Order ID  |  \n| subType  | String  | No  | Transaction type   \n`1`: Buy  \n`2`: Sell  \n`3`: Open long  \n`4`: Open short  \n`5`: Close long  \n`6`: Close short   \n`100`: Partial liquidation close long  \n`101`: Partial liquidation close short  \n`102`: Partial liquidation buy  \n`103`: Partial liquidation sell  \n`104`: Liquidation long  \n`105`: Liquidation short  \n`106`: Liquidation buy   \n`107`: Liquidation sell   \n`110`: Liquidation transfer in  \n`111`: Liquidation transfer out   \n`118`: System token conversion transfer in  \n`119`: System token conversion transfer out  \n`112`: Delivery long  \n`113`: Delivery short   \n`125`: ADL close long  \n`126`: ADL close short  \n`127`: ADL buy  \n`128`: ADL sell   \n`212`: Auto borrow of quick margin  \n`213`: Auto repay of quick margin   \n`204`: block trade buy  \n`205`: block trade sell  \n`206`: block trade open long  \n`207`: block trade open short  \n`208`: block trade close long  \n`209`: block trade close short  \n`236`: Easy convert in  \n`237`: Easy convert out  \n`270`: Spread trading buy  \n`271`: Spread trading sell  \n`272`: Spread trading open long  \n`273`: Spread trading open short  \n`274`: Spread trading close long  \n`275`: Spread trading close short  \n`324`: Move position buy  \n`325`: Move position sell  \n`326`: Move position open long  \n`327`: Move position open short  \n`328`: Move position close long  \n`329`: Move position close short   \n`376`: Collateralized borrowing auto conversion buy  \n`377`: Collateralized borrowing auto conversion sell  \n`410`: Buy yes  \n`411`: Buy no  \n`412`: Sell yes  \n`413`: Sell no  \n`414`: Yes expiry  \n`415`: No expiry  |  \n| after  | String  | No  | Pagination of data to return records earlier than the requested `billId`  |  \n| before  | String  | No  | Pagination of data to return records newer than the requested `billId`  |  \n| begin  | String  | No  | Filter with a begin timestamp `ts`. Unix timestamp format in milliseconds, e.g. `1597026383085`  |  \n| end  | String  | No  | Filter with an end timestamp `ts`. Unix timestamp format in milliseconds, e.g. `1597026383085`  |  \n| limit  | String  | No  | Number of results per request. The maximum is `100`; The default is `100`  |  ",
+      "responseAnchor": "R:8791-8827",
+      "exampleAnchor": "R:8751-8784",
+      "originalExampleText": "{\n    \"code\": \"0\",\n    \"data\": [\n        {\n            \"side\": \"buy\",\n            \"fillSz\": \"0.00192834\",\n            \"fillPx\": \"51858\",\n            \"fillPxVol\": \"\",\n            \"fillFwdPx\": \"\",\n            \"fee\": \"-0.00000192834\",\n            \"fillPnl\": \"0\",\n            \"ordId\": \"680800019749904384\",\n            \"feeRate\": \"-0.001\",\n            \"instType\": \"SPOT\",\n            \"fillPxUsd\": \"\",\n            \"instId\": \"BTC-USDT\",\n            \"clOrdId\": \"\",\n            \"posSide\": \"net\",\n            \"billId\": \"680800019754098688\",\n            \"subType\": \"1\",\n            \"fillMarkVol\": \"\",\n            \"tag\": \"\",\n            \"fillTime\": \"1708587373361\",\n            \"execType\": \"T\",\n            \"fillIdxPx\": \"\",\n            \"tradeId\": \"744876980\",\n            \"fillMarkPx\": \"\",\n            \"feeCcy\": \"BTC\",\n            \"ts\": \"1708587373362\",\n            \"tradeQuoteCcy\": \"USDT\"\n        }\n    ],\n    \"msg\": \"\"\n}",
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "side": "buy",
+            "fillSz": "0.00192834",
+            "fillPx": "51858",
+            "fillPxVol": "",
+            "fillFwdPx": "",
+            "fee": "-0.00000192834",
+            "fillPnl": "0",
+            "ordId": "680800019749904384",
+            "feeRate": "-0.001",
+            "instType": "SPOT",
+            "fillPxUsd": "",
+            "instId": "BTC-USDT",
+            "clOrdId": "",
+            "posSide": "net",
+            "billId": "680800019754098688",
+            "subType": "1",
+            "fillMarkVol": "",
+            "tag": "",
+            "fillTime": "1708587373361",
+            "execType": "T",
+            "fillIdxPx": "",
+            "tradeId": "744876980",
+            "fillMarkPx": "",
+            "feeCcy": "BTC",
+            "ts": "1708587373362",
+            "tradeQuoteCcy": "USDT"
+          }
+        ],
+        "msg": ""
+      },
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:8791",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:8792",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "tradeId",
+          "type": "String",
+          "anchor": "R:8793",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "ordId",
+          "type": "String",
+          "anchor": "R:8794",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "clOrdId",
+          "type": "String",
+          "anchor": "R:8795",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "billId",
+          "type": "String",
+          "anchor": "R:8796",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "subType",
+          "type": "String",
+          "anchor": "R:8797",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tag",
+          "type": "String",
+          "anchor": "R:8798",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPx",
+          "type": "String",
+          "anchor": "R:8799",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillSz",
+          "type": "String",
+          "anchor": "R:8800",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillIdxPx",
+          "type": "String",
+          "anchor": "R:8801",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPnl",
+          "type": "String",
+          "anchor": "R:8803",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPxVol",
+          "type": "String",
+          "anchor": "R:8804",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPxUsd",
+          "type": "String",
+          "anchor": "R:8806",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillMarkVol",
+          "type": "String",
+          "anchor": "R:8808",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillFwdPx",
+          "type": "String",
+          "anchor": "R:8810",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillMarkPx",
+          "type": "String",
+          "anchor": "R:8812",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "side",
+          "type": "String",
+          "anchor": "R:8814",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posSide",
+          "type": "String",
+          "anchor": "R:8815",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "execType",
+          "type": "String",
+          "anchor": "R:8818",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "feeCcy",
+          "type": "String",
+          "anchor": "R:8822",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fee",
+          "type": "String",
+          "anchor": "R:8823",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ts",
+          "type": "String",
+          "anchor": "R:8824",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillTime",
+          "type": "String",
+          "anchor": "R:8825",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "feeRate",
+          "type": "String",
+          "anchor": "R:8826",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeQuoteCcy",
+          "type": "String",
+          "anchor": "R:8827",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        }
+      ],
+      "syntheticExtension": {
+        "label": "documented-shape synthetic extension; NOT populated official attachment example",
+        "control": {
+          "code": "0",
+          "data": [
+            {
+              "side": "buy",
+              "fillSz": "0.00192834",
+              "fillPx": "51858",
+              "fillPxVol": "",
+              "fillFwdPx": "",
+              "fee": "0.01",
+              "fillPnl": "0",
+              "ordId": "",
+              "feeRate": "-0.001",
+              "instType": "SPOT",
+              "fillPxUsd": "",
+              "instId": "BTC-USDT",
+              "clOrdId": "",
+              "posSide": "net",
+              "billId": "680800019754098688",
+              "subType": "1",
+              "fillMarkVol": "",
+              "tag": "",
+              "fillTime": "1708587373361",
+              "execType": "",
+              "fillIdxPx": "",
+              "tradeId": "-1",
+              "fillMarkPx": "",
+              "feeCcy": "OTHER",
+              "ts": "1708587373362",
+              "tradeQuoteCcy": "EUR"
+            }
+          ],
+          "msg": ""
+        }
+      }
+    },
+    "fillsArchive": {
+      "endpoint": "/api/v5/trade/fills-history",
+      "kind": "fill",
+      "requestAnchor": "R:8874-8947",
+      "requestTable": "#### Request Parameters  \n| Parameter  | Type  | Required  | Description  |  \n| --- | --- | --- | --- |  \n| instType  | String  | YES  | Instrument type  \n`SPOT`  \n`MARGIN`  \n`SWAP`  \n`FUTURES`  \n`OPTION`  \n`EVENTS`  |  \n| instFamily  | String  | No  | Instrument family  \nApplicable to `FUTURES`/`SWAP`/`OPTION`  |  \n| instId  | String  | No  | Instrument ID, e.g. `BTC-USDT`  |  \n| ordId  | String  | No  | Order ID  |  \n| subType  | String  | No  | Transaction type   \n`1`: Buy  \n`2`: Sell  \n`3`: Open long  \n`4`: Open short  \n`5`: Close long  \n`6`: Close short   \n`100`: Partial liquidation close long  \n`101`: Partial liquidation close short  \n`102`: Partial liquidation buy  \n`103`: Partial liquidation sell  \n`104`: Liquidation long  \n`105`: Liquidation short  \n`106`: Liquidation buy   \n`107`: Liquidation sell   \n`110`: Liquidation transfer in  \n`111`: Liquidation transfer out   \n`118`: System token conversion transfer in  \n`119`: System token conversion transfer out  \n`112`: Delivery long  \n`113`: Delivery short   \n`125`: ADL close long  \n`126`: ADL close short  \n`127`: ADL buy  \n`128`: ADL sell   \n`212`: Auto borrow of quick margin  \n`213`: Auto repay of quick margin   \n`204`: block trade buy  \n`205`: block trade sell  \n`206`: block trade open long  \n`207`: block trade open short  \n`208`: block trade close long  \n`209`: block trade close short  \n`236`: Easy convert in  \n`237`: Easy convert out  \n`270`: Spread trading buy  \n`271`: Spread trading sell  \n`272`: Spread trading open long  \n`273`: Spread trading open short  \n`274`: Spread trading close long  \n`275`: Spread trading close short  \n`324`: Move position buy  \n`325`: Move position sell  \n`326`: Move position open long  \n`327`: Move position open short  \n`328`: Move position close long  \n`329`: Move position close short   \n`376`: Collateralized borrowing auto conversion buy  \n`377`: Collateralized borrowing auto conversion sell  \n`410`: Buy yes  \n`411`: Buy no  \n`412`: Sell yes  \n`413`: Sell no  \n`414`: Yes expiry  \n`415`: No expiry  |  \n| after  | String  | No  | Pagination of data to return records earlier than the requested `billId`  |  \n| before  | String  | No  | Pagination of data to return records newer than the requested `billId`  |  \n| begin  | String  | No  | Filter with a begin timestamp `ts`. Unix timestamp format in milliseconds, e.g. `1597026383085`  |  \n| end  | String  | No  | Filter with an end timestamp `ts`. Unix timestamp format in milliseconds, e.g. `1597026383085`  |  \n| limit  | String  | No  | Number of results per request. The maximum is `100`; The default is `100`  |  ",
+      "responseAnchor": "R:8994-9033",
+      "exampleAnchor": "R:8954-8987",
+      "originalExampleText": "{\n    \"code\": \"0\",\n    \"data\": [\n        {\n            \"side\": \"buy\",\n            \"fillSz\": \"0.00192834\",\n            \"fillPx\": \"51858\",\n            \"fillPxVol\": \"\",\n            \"fillFwdPx\": \"\",\n            \"fee\": \"-0.00000192834\",\n            \"fillPnl\": \"0\",\n            \"ordId\": \"680800019749904384\",\n            \"feeRate\": \"-0.001\",\n            \"instType\": \"SPOT\",\n            \"fillPxUsd\": \"\",\n            \"instId\": \"BTC-USDT\",\n            \"clOrdId\": \"\",\n            \"posSide\": \"net\",\n            \"billId\": \"680800019754098688\",\n            \"subType\": \"1\",\n            \"fillMarkVol\": \"\",\n            \"tag\": \"\",\n            \"fillTime\": \"1708587373361\",\n            \"execType\": \"T\",\n            \"fillIdxPx\": \"\",\n            \"tradeId\": \"744876980\",\n            \"fillMarkPx\": \"\",\n            \"feeCcy\": \"BTC\",\n            \"ts\": \"1708587373362\",\n            \"tradeQuoteCcy\": \"USDT\"\n        }\n    ],\n    \"msg\": \"\"\n}",
+      "control": {
+        "code": "0",
+        "data": [
+          {
+            "side": "buy",
+            "fillSz": "0.00192834",
+            "fillPx": "51858",
+            "fillPxVol": "",
+            "fillFwdPx": "",
+            "fee": "-0.00000192834",
+            "fillPnl": "0",
+            "ordId": "680800019749904384",
+            "feeRate": "-0.001",
+            "instType": "SPOT",
+            "fillPxUsd": "",
+            "instId": "BTC-USDT",
+            "clOrdId": "",
+            "posSide": "net",
+            "billId": "680800019754098688",
+            "subType": "1",
+            "fillMarkVol": "",
+            "tag": "",
+            "fillTime": "1708587373361",
+            "execType": "T",
+            "fillIdxPx": "",
+            "tradeId": "744876980",
+            "fillMarkPx": "",
+            "feeCcy": "BTC",
+            "ts": "1708587373362",
+            "tradeQuoteCcy": "USDT"
+          }
+        ],
+        "msg": ""
+      },
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:8994",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:8995",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "tradeId",
+          "type": "String",
+          "anchor": "R:8996",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "ordId",
+          "type": "String",
+          "anchor": "R:8997",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "clOrdId",
+          "type": "String",
+          "anchor": "R:8998",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "billId",
+          "type": "String",
+          "anchor": "R:8999",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "subType",
+          "type": "String",
+          "anchor": "R:9000",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tag",
+          "type": "String",
+          "anchor": "R:9001",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPx",
+          "type": "String",
+          "anchor": "R:9002",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillSz",
+          "type": "String",
+          "anchor": "R:9003",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillIdxPx",
+          "type": "String",
+          "anchor": "R:9004",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPnl",
+          "type": "String",
+          "anchor": "R:9006",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPxVol",
+          "type": "String",
+          "anchor": "R:9007",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPxUsd",
+          "type": "String",
+          "anchor": "R:9009",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillMarkVol",
+          "type": "String",
+          "anchor": "R:9011",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillFwdPx",
+          "type": "String",
+          "anchor": "R:9013",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillMarkPx",
+          "type": "String",
+          "anchor": "R:9015",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "side",
+          "type": "String",
+          "anchor": "R:9017",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posSide",
+          "type": "String",
+          "anchor": "R:9020",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "execType",
+          "type": "String",
+          "anchor": "R:9024",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "feeCcy",
+          "type": "String",
+          "anchor": "R:9028",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fee",
+          "type": "String",
+          "anchor": "R:9029",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ts",
+          "type": "String",
+          "anchor": "R:9030",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillTime",
+          "type": "String",
+          "anchor": "R:9031",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "feeRate",
+          "type": "String",
+          "anchor": "R:9032",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeQuoteCcy",
+          "type": "String",
+          "anchor": "R:9033",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        }
+      ],
+      "syntheticExtension": {
+        "label": "documented-shape synthetic extension; NOT populated official attachment example",
+        "control": {
+          "code": "0",
+          "data": [
+            {
+              "side": "buy",
+              "fillSz": "0.00192834",
+              "fillPx": "51858",
+              "fillPxVol": "",
+              "fillFwdPx": "",
+              "fee": "0.01",
+              "fillPnl": "0",
+              "ordId": "",
+              "feeRate": "-0.001",
+              "instType": "SPOT",
+              "fillPxUsd": "",
+              "instId": "BTC-USDT",
+              "clOrdId": "",
+              "posSide": "net",
+              "billId": "680800019754098688",
+              "subType": "1",
+              "fillMarkVol": "",
+              "tag": "",
+              "fillTime": "1708587373361",
+              "execType": "",
+              "fillIdxPx": "",
+              "tradeId": "-1",
+              "fillMarkPx": "",
+              "feeCcy": "OTHER",
+              "ts": "1708587373362",
+              "tradeQuoteCcy": "EUR"
+            }
+          ],
+          "msg": ""
+        }
+      }
+    },
+    "bills": {
+      "endpoint": "/api/v5/account/bills",
+      "kind": "bill",
+      "requestAnchor": "R:2175-2202",
+      "requestTable": "#### Request Parameters  \n| Parameter  | Type  | Required  | Description  |  \n| --- | --- | --- | --- |  \n| instType  | String  | No  | Instrument type  \n`SPOT`  \n`MARGIN`  \n`SWAP`  \n`FUTURES`  \n`OPTION`  \n`EVENTS`  |  \n| instId  | String  | No  | Instrument ID, e.g. `BTC-USDT`  |  \n| ccy  | String  | No  | Bill currency  |  \n| mgnMode  | String  | No  | Margin mode  \n`isolated`  \n`cross`  |  \n| ctType  | String  | No  | Contract type  \n`linear`  \n`inverse`  \nOnly applicable to `FUTURES`/`SWAP`  |  \n| type  | String  | No  | Bill type  \nPlease refer to [Get bill types](https://my.okx.com/docs-v5/en/#trading-account-rest-api-get-bill-types) for the list of available types.  |  \n| subType  | String  | No  | Bill subtype  \nPlease refer to [Get bill types](https://my.okx.com/docs-v5/en/#trading-account-rest-api-get-bill-types) for the list of available types.  |  \n| after  | String  | No  | Pagination of data to return records earlier than the requested bill ID.  |  \n| before  | String  | No  | Pagination of data to return records newer than the requested bill ID.  |  \n| begin  | String  | No  | Filter with a begin timestamp `ts`. Unix timestamp format in milliseconds, e.g. `1597026383085`  |  \n| end  | String  | No  | Filter with an end timestamp `ts`. Unix timestamp format in milliseconds, e.g. `1597026383085`  |  \n| limit  | String  | No  | Number of results per request. The maximum is `100`. The default is `100`.  |  ",
+      "responseAnchor": "R:2255-2329",
+      "exampleAnchor": "R:2209-2248",
+      "originalExampleText": "{\n    \"code\": \"0\",\n    \"msg\": \"\",\n    \"data\": [{\n        \"bal\": \"8694.2179403378290202\",\n        \"balChg\": \"0.0219338232210000\",\n        \"billId\": \"623950854533513219\",\n        \"ccy\": \"USDT\",\n        \"clOrdId\": \"\",\n        \"earnAmt\": \"\",\n        \"earnApr\": \"\",\n        \"execType\": \"T\",\n        \"fee\": \"-0.000021955779\",\n        \"fillFwdPx\": \"\",\n        \"fillIdxPx\": \"27104.1\",\n        \"fillMarkPx\": \"\",\n        \"fillMarkVol\": \"\",\n        \"fillPxUsd\": \"\",\n        \"fillPxVol\": \"\",\n        \"fillTime\": \"1695033476166\",\n        \"from\": \"\",\n        \"instId\": \"BTC-USDT\",\n        \"instType\": \"SPOT\",\n        \"interest\": \"0\",\n        \"mgnMode\": \"isolated\",\n        \"notes\": \"\",\n        \"ordId\": \"623950854525124608\",\n        \"pnl\": \"0\",\n        \"posBal\": \"0\",\n        \"posBalChg\": \"0\",\n        \"px\": \"27105.9\",\n        \"subType\": \"1\",\n        \"sz\": \"0.021955779\",\n        \"tag\": \"\",\n        \"to\": \"\",\n        \"tradeId\": \"586760148\",\n        \"ts\": \"1695033476167\",\n        \"type\": \"2\"\n    }]\n} ",
+      "control": {
+        "code": "0",
+        "msg": "",
+        "data": [
+          {
+            "bal": "8694.2179403378290202",
+            "balChg": "0.0219338232210000",
+            "billId": "623950854533513219",
+            "ccy": "USDT",
+            "clOrdId": "",
+            "earnAmt": "",
+            "earnApr": "",
+            "execType": "T",
+            "fee": "-0.000021955779",
+            "fillFwdPx": "",
+            "fillIdxPx": "27104.1",
+            "fillMarkPx": "",
+            "fillMarkVol": "",
+            "fillPxUsd": "",
+            "fillPxVol": "",
+            "fillTime": "1695033476166",
+            "from": "",
+            "instId": "BTC-USDT",
+            "instType": "SPOT",
+            "interest": "0",
+            "mgnMode": "isolated",
+            "notes": "",
+            "ordId": "623950854525124608",
+            "pnl": "0",
+            "posBal": "0",
+            "posBalChg": "0",
+            "px": "27105.9",
+            "subType": "1",
+            "sz": "0.021955779",
+            "tag": "",
+            "to": "",
+            "tradeId": "586760148",
+            "ts": "1695033476167",
+            "type": "2"
+          }
+        ]
+      },
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:2255",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "billId",
+          "type": "String",
+          "anchor": "R:2256",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "type",
+          "type": "String",
+          "anchor": "R:2257",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "subType",
+          "type": "String",
+          "anchor": "R:2258",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "ts",
+          "type": "String",
+          "anchor": "R:2259",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "balChg",
+          "type": "String",
+          "anchor": "R:2260",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posBalChg",
+          "type": "String",
+          "anchor": "R:2261",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "bal",
+          "type": "String",
+          "anchor": "R:2262",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posBal",
+          "type": "String",
+          "anchor": "R:2263",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "sz",
+          "type": "String",
+          "anchor": "R:2264",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "px",
+          "type": "String",
+          "anchor": "R:2267",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ccy",
+          "type": "String",
+          "anchor": "R:2283",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "pnl",
+          "type": "String",
+          "anchor": "R:2284",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fee",
+          "type": "String",
+          "anchor": "R:2285",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "earnAmt",
+          "type": "String",
+          "anchor": "R:2289",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "earnApr",
+          "type": "String",
+          "anchor": "R:2291",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "mgnMode",
+          "type": "String",
+          "anchor": "R:2293",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:2296",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordId",
+          "type": "String",
+          "anchor": "R:2297",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "execType",
+          "type": "String",
+          "anchor": "R:2300",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "from",
+          "type": "String",
+          "anchor": "R:2303",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "to",
+          "type": "String",
+          "anchor": "R:2307",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "notes",
+          "type": "String",
+          "anchor": "R:2311",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "interest",
+          "type": "String",
+          "anchor": "R:2312",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tag",
+          "type": "String",
+          "anchor": "R:2313",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillTime",
+          "type": "String",
+          "anchor": "R:2314",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeId",
+          "type": "String",
+          "anchor": "R:2315",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "clOrdId",
+          "type": "String",
+          "anchor": "R:2316",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillIdxPx",
+          "type": "String",
+          "anchor": "R:2318",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillMarkPx",
+          "type": "String",
+          "anchor": "R:2320",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPxVol",
+          "type": "String",
+          "anchor": "R:2322",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPxUsd",
+          "type": "String",
+          "anchor": "R:2324",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillMarkVol",
+          "type": "String",
+          "anchor": "R:2326",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillFwdPx",
+          "type": "String",
+          "anchor": "R:2328",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        }
+      ],
+      "syntheticExtension": {
+        "label": "documented-shape synthetic extension; NOT populated official attachment example",
+        "control": {
+          "code": "0",
+          "msg": "",
+          "data": [
+            {
+              "bal": "8694.2179403378290202",
+              "balChg": "0.0219338232210000",
+              "billId": "623950854533513219",
+              "ccy": "EUR",
+              "earnAmt": "",
+              "earnApr": "",
+              "execType": "T",
+              "fee": "-0.000021955779",
+              "fillFwdPx": "",
+              "fillIdxPx": "27104.1",
+              "fillMarkPx": "",
+              "fillMarkVol": "",
+              "fillPxUsd": "",
+              "fillPxVol": "",
+              "from": "",
+              "instType": "SPOT",
+              "interest": "0",
+              "mgnMode": "isolated",
+              "notes": "PRIVATE_DISCARDED_SENTINEL",
+              "pnl": "0",
+              "posBal": "0",
+              "posBalChg": "0",
+              "px": "27105.9",
+              "subType": "outside",
+              "sz": "0.021955779",
+              "tag": "",
+              "to": "",
+              "tradeId": "586760148",
+              "ts": "1695033476167",
+              "type": "unknown"
+            }
+          ]
+        }
+      }
+    },
+    "billsArchive": {
+      "endpoint": "/api/v5/account/bills-archive",
+      "kind": "bill",
+      "requestAnchor": "R:2373-2400",
+      "requestTable": "#### Request Parameters  \n| Parameter  | Type  | Required  | Description  |  \n| --- | --- | --- | --- |  \n| instType  | String  | No  | Instrument type  \n`SPOT`  \n`MARGIN`  \n`SWAP`  \n`FUTURES`  \n`OPTION`  \n`EVENTS`  |  \n| instId  | String  | No  | Instrument ID, e.g. `BTC-USDT`  |  \n| ccy  | String  | No  | Bill currency  |  \n| mgnMode  | String  | No  | Margin mode  \n`isolated`  \n`cross`  |  \n| ctType  | String  | No  | Contract type  \n`linear`  \n`inverse`  \nOnly applicable to `FUTURES`/`SWAP`  |  \n| type  | String  | No  | Bill type  \nPlease refer to [Get bill types](https://my.okx.com/docs-v5/en/#trading-account-rest-api-get-bill-types) for the list of available types.  |  \n| subType  | String  | No  | Bill subtype  \nPlease refer to [Get bill types](https://my.okx.com/docs-v5/en/#trading-account-rest-api-get-bill-types) for the list of available types.  |  \n| after  | String  | No  | Pagination of data to return records earlier than the requested bill ID.  |  \n| before  | String  | No  | Pagination of data to return records newer than the requested bill ID.  |  \n| begin  | String  | No  | Filter with a begin timestamp `ts`. Unix timestamp format in milliseconds, e.g. `1597026383085`  |  \n| end  | String  | No  | Filter with an end timestamp `ts`. Unix timestamp format in milliseconds, e.g. `1597026383085`  |  \n| limit  | String  | No  | Number of results per request. The maximum is `100`. The default is `100`.  |  ",
+      "responseAnchor": "R:2453-2526",
+      "exampleAnchor": "R:2407-2446",
+      "originalExampleText": "{\n    \"code\": \"0\",\n    \"msg\": \"\",\n    \"data\": [{\n        \"bal\": \"8694.2179403378290202\",\n        \"balChg\": \"0.0219338232210000\",\n        \"billId\": \"623950854533513219\",\n        \"ccy\": \"USDT\",\n        \"clOrdId\": \"\",\n        \"earnAmt\": \"\",\n        \"earnApr\": \"\",\n        \"execType\": \"T\",\n        \"fee\": \"-0.000021955779\",\n        \"fillFwdPx\": \"\",\n        \"fillIdxPx\": \"27104.1\",\n        \"fillMarkPx\": \"\",\n        \"fillMarkVol\": \"\",\n        \"fillPxUsd\": \"\",\n        \"fillPxVol\": \"\",\n        \"fillTime\": \"1695033476166\",\n        \"from\": \"\",\n        \"instId\": \"BTC-USDT\",\n        \"instType\": \"SPOT\",\n        \"interest\": \"0\",\n        \"mgnMode\": \"isolated\",\n        \"notes\": \"\",\n        \"ordId\": \"623950854525124608\",\n        \"pnl\": \"0\",\n        \"posBal\": \"0\",\n        \"posBalChg\": \"0\",\n        \"px\": \"27105.9\",\n        \"subType\": \"1\",\n        \"sz\": \"0.021955779\",\n        \"tag\": \"\",\n        \"to\": \"\",\n        \"tradeId\": \"586760148\",\n        \"ts\": \"1695033476167\",\n        \"type\": \"2\"\n    }]\n} ",
+      "control": {
+        "code": "0",
+        "msg": "",
+        "data": [
+          {
+            "bal": "8694.2179403378290202",
+            "balChg": "0.0219338232210000",
+            "billId": "623950854533513219",
+            "ccy": "USDT",
+            "clOrdId": "",
+            "earnAmt": "",
+            "earnApr": "",
+            "execType": "T",
+            "fee": "-0.000021955779",
+            "fillFwdPx": "",
+            "fillIdxPx": "27104.1",
+            "fillMarkPx": "",
+            "fillMarkVol": "",
+            "fillPxUsd": "",
+            "fillPxVol": "",
+            "fillTime": "1695033476166",
+            "from": "",
+            "instId": "BTC-USDT",
+            "instType": "SPOT",
+            "interest": "0",
+            "mgnMode": "isolated",
+            "notes": "",
+            "ordId": "623950854525124608",
+            "pnl": "0",
+            "posBal": "0",
+            "posBalChg": "0",
+            "px": "27105.9",
+            "subType": "1",
+            "sz": "0.021955779",
+            "tag": "",
+            "to": "",
+            "tradeId": "586760148",
+            "ts": "1695033476167",
+            "type": "2"
+          }
+        ]
+      },
+      "fields": [
+        {
+          "field": "instType",
+          "type": "String",
+          "anchor": "R:2453",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "billId",
+          "type": "String",
+          "anchor": "R:2454",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "type",
+          "type": "String",
+          "anchor": "R:2455",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "subType",
+          "type": "String",
+          "anchor": "R:2456",
+          "policy": "selected",
+          "presence": "required String; empty permitted"
+        },
+        {
+          "field": "ts",
+          "type": "String",
+          "anchor": "R:2457",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "balChg",
+          "type": "String",
+          "anchor": "R:2458",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posBalChg",
+          "type": "String",
+          "anchor": "R:2459",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "bal",
+          "type": "String",
+          "anchor": "R:2460",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "posBal",
+          "type": "String",
+          "anchor": "R:2461",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "sz",
+          "type": "String",
+          "anchor": "R:2462",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "px",
+          "type": "String",
+          "anchor": "R:2465",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ccy",
+          "type": "String",
+          "anchor": "R:2481",
+          "policy": "selected",
+          "presence": "required nonempty String"
+        },
+        {
+          "field": "pnl",
+          "type": "String",
+          "anchor": "R:2482",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fee",
+          "type": "String",
+          "anchor": "R:2483",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "earnAmt",
+          "type": "String",
+          "anchor": "R:2487",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "earnApr",
+          "type": "String",
+          "anchor": "R:2489",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "mgnMode",
+          "type": "String",
+          "anchor": "R:2491",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "instId",
+          "type": "String",
+          "anchor": "R:2494",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "ordId",
+          "type": "String",
+          "anchor": "R:2495",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "execType",
+          "type": "String",
+          "anchor": "R:2498",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "from",
+          "type": "String",
+          "anchor": "R:2500",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "to",
+          "type": "String",
+          "anchor": "R:2504",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "notes",
+          "type": "String",
+          "anchor": "R:2508",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "interest",
+          "type": "String",
+          "anchor": "R:2509",
+          "policy": "selected decimal",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tag",
+          "type": "String",
+          "anchor": "R:2510",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillTime",
+          "type": "String",
+          "anchor": "R:2511",
+          "policy": "selected timestamp",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "tradeId",
+          "type": "String",
+          "anchor": "R:2512",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "clOrdId",
+          "type": "String",
+          "anchor": "R:2513",
+          "policy": "selected",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillIdxPx",
+          "type": "String",
+          "anchor": "R:2515",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillMarkPx",
+          "type": "String",
+          "anchor": "R:2517",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPxVol",
+          "type": "String",
+          "anchor": "R:2519",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillPxUsd",
+          "type": "String",
+          "anchor": "R:2521",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillMarkVol",
+          "type": "String",
+          "anchor": "R:2523",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        },
+        {
+          "field": "fillFwdPx",
+          "type": "String",
+          "anchor": "R:2525",
+          "policy": "validate/discard",
+          "presence": "optional; absent null, explicit empty preserved; explicit null refuses"
+        }
+      ],
+      "syntheticExtension": {
+        "label": "documented-shape synthetic extension; NOT populated official attachment example",
+        "control": {
+          "code": "0",
+          "msg": "",
+          "data": [
+            {
+              "bal": "8694.2179403378290202",
+              "balChg": "0.0219338232210000",
+              "billId": "623950854533513219",
+              "ccy": "EUR",
+              "earnAmt": "",
+              "earnApr": "",
+              "execType": "T",
+              "fee": "-0.000021955779",
+              "fillFwdPx": "",
+              "fillIdxPx": "27104.1",
+              "fillMarkPx": "",
+              "fillMarkVol": "",
+              "fillPxUsd": "",
+              "fillPxVol": "",
+              "from": "",
+              "instType": "SPOT",
+              "interest": "0",
+              "mgnMode": "isolated",
+              "notes": "PRIVATE_DISCARDED_SENTINEL",
+              "pnl": "0",
+              "posBal": "0",
+              "posBalChg": "0",
+              "px": "27105.9",
+              "subType": "outside",
+              "sz": "0.021955779",
+              "tag": "",
+              "to": "",
+              "tradeId": "586760148",
+              "ts": "1695033476167",
+              "type": "unknown"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
