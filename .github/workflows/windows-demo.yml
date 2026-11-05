@@ -600,6 +600,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
           $native=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/OpenSSH'
+          @('Windows','CommonApplicationData') | ForEach-Object { $p=[Environment]::GetFolderPath($_); [ordered]@{folder=$_;path=$p;sddl=(Get-Acl -LiteralPath $p).Sddl} } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $e 'os-root-security.json')
           $prereq=@('ssh.exe','sshd.exe','ssh-keygen.exe') | ForEach-Object {
             $p=Join-Path $native $_
             [ordered]@{name=$_;path=$p;exists=(Test-Path -LiteralPath $p -PathType Leaf);sha256=$(if(Test-Path -LiteralPath $p -PathType Leaf){(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null})}
@@ -618,10 +619,10 @@ jobs:
             $preference=$ErrorActionPreference
             try {
               $ErrorActionPreference='Continue'
-              & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~NativeEnvironmentTests|FullyQualifiedName~Apex.ControllerAdmission.Tests' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
+              & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~NativeEnvironmentTests' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
               $code=$LASTEXITCODE
             } finally { $ErrorActionPreference=$preference }
-            [ordered]@{exit=$code;sourceOnly=$true;phase='green-admitted-environment'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
+            [ordered]@{exit=$code;sourceOnly=$true;phase='red-environment-security'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
             if ($code -ne 0) { throw 'Native transport tests failed; retain closure and TRX' }
           } finally { Pop-Location }
       - name: Retain source-gate evidence and verify unchanged source

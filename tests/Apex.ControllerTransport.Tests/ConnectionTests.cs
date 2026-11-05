@@ -41,6 +41,28 @@ public sealed class ConnectionTests
             "host"=>Json(f.Config with{Host="other.example"}),"pin"=>Json(f.Config with{HostKey=new string('A',68)}),_=>new string('x',4097)};
         Put(f.Root,bad);Assert.ThrowsAny<Exception>(()=>Call("Load",f.Root));Assert.Equal(bad,File.ReadAllText(Path.Combine(f.Root,"controller-connection.json")));
     }
+    [Theory][InlineData("file-acl")][InlineData("root-acl")][InlineData("hardlink")][InlineData("reparse")][InlineData("owner")]
+    public void Metadata_native_security_refuses_without_repair_after_positive_load(string kind)
+    {
+        using var f=new NativeAdmissionTests.Profile();Put(f.Root,Json(f.Config));Assert.Equal(f.Config,Call("Load",f.Root));
+        string file=Path.Combine(f.Root,"controller-connection.json");
+        if(kind=="hardlink")Assert.True(CreateHardLinkW(file+".link",file,IntPtr.Zero));
+        else if(kind=="reparse"){File.Move(file,file+".target");File.CreateSymbolicLink(file,file+".target");}
+        else if(kind=="root-acl")
+        {
+            var acl=new DirectoryInfo(f.Root).GetAccessControl();acl.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid,null),FileSystemRights.Read,AccessControlType.Allow));new DirectoryInfo(f.Root).SetAccessControl(acl);
+        }
+        else
+        {
+            var acl=new FileInfo(file).GetAccessControl();
+            if(kind=="owner")acl.SetOwner(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid,null));
+            else acl.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid,null),FileSystemRights.Read,AccessControlType.Allow));
+            new FileInfo(file).SetAccessControl(acl);
+        }
+        var before=File.ReadAllBytes(file);var security=new FileInfo(file).GetAccessControl().GetSecurityDescriptorBinaryForm();
+        Assert.ThrowsAny<Exception>(()=>Call("Load",f.Root));Assert.Equal(before,File.ReadAllBytes(file));Assert.Equal(security,new FileInfo(file).GetAccessControl().GetSecurityDescriptorBinaryForm());
+    }
+    [System.Runtime.InteropServices.DllImport("kernel32.dll",CharSet=System.Runtime.InteropServices.CharSet.Unicode,SetLastError=true)]private static extern bool CreateHardLinkW(string link,string file,IntPtr attributes);
     [Fact] public async Task Missing_profile_cancelled_factory_and_wrong_platform_do_not_provision()
     {
         using var f=new NativeAdmissionTests.Profile();var factory=Factory(f.Root);
