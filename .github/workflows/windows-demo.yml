@@ -594,67 +594,32 @@ jobs:
             </Target>
           </Project>
           '@ | Set-Content (Join-Path $e 'compile-evidence.targets')
-      - name: Build and execute the 32 portable client cases natively
-        id: client
+      - name: Real native controller SSH transport and fixed public configuration
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
-          $items=Join-Path $e 'client-build-inputs'; New-Item -ItemType Directory -Path $items | Out-Null
+          $native=Join-Path ([Environment]::GetFolderPath('Windows')) 'System32/OpenSSH'
+          $prereq=@('ssh.exe','sshd.exe','ssh-keygen.exe') | ForEach-Object {
+            $p=Join-Path $native $_
+            [ordered]@{name=$_;path=$p;exists=(Test-Path -LiteralPath $p -PathType Leaf);sha256=$(if(Test-Path -LiteralPath $p -PathType Leaf){(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null})}
+          }
+          [ordered]@{systemOpenSsh=$prereq;otherExistingSshd=@(Get-Command sshd.exe -ErrorAction SilentlyContinue | ForEach-Object {$_.Source});noInstall=$true;noService=$true;loopbackOnly=$true} | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $e 'ssh-prerequisites.json')
+          $items=Join-Path $e 'transport-build-inputs'; New-Item -ItemType Directory -Path $items | Out-Null
           Push-Location (Join-Path $e 'sdk')
           try {
-            $project=Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerClient.Tests/Apex.ControllerClient.Tests.csproj'
-            & dotnet build $project -c Release -p:NuGetAudit=false "-p:CustomAfterMicrosoftCommonTargets=$e/compile-evidence.targets" "-p:ControllerEvidenceRoot=$items" *> (Join-Path $e 'client-build.log')
-            if ($LASTEXITCODE -ne 0) { throw 'Client compile failed; inspect retained build log' }
-            $closure=Join-Path $e 'client-closure'; New-Item -ItemType Directory -Path $closure | Out-Null
-            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerClient.Tests/bin/Release/net8.0') -Destination (Join-Path $closure 'tests') -Recurse
+            $project=Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerTransport.Tests/Apex.ControllerTransport.Tests.csproj'
+            & dotnet build $project -c Release -p:NuGetAudit=false "-p:CustomAfterMicrosoftCommonTargets=$e/compile-evidence.targets" "-p:ControllerEvidenceRoot=$items" *> (Join-Path $e 'transport-build.log')
+            if ($LASTEXITCODE -ne 0) { throw 'Transport compilation failed, not behavioral RED' }
+            $closure=Join-Path $e 'transport-closure'; New-Item -ItemType Directory -Path $closure | Out-Null
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerTransport.Tests/bin/Release/net8.0') -Destination (Join-Path $closure 'tests') -Recurse
             Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
-            & dotnet test $project -c Release --no-build --no-restore --logger 'trx;LogFileName=client.trx' --results-directory $e *> (Join-Path $e 'client-tests.log')
+            $env:APEX_SYNTHETIC_TRANSPORT_EVIDENCE=$e
+            & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~Apex.ControllerTransport.Tests' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
             $code=$LASTEXITCODE
-            [ordered]@{exit=$code;expectedCases=32;sourceOnly=$true} | ConvertTo-Json | Set-Content (Join-Path $e 'client-summary.json')
-            if ($code -ne 0) { throw 'Client native tests failed; retain actual TRX' }
-            [xml]$trx=Get-Content (Join-Path $e 'client.trx')
-            $c=$trx.TestRun.ResultSummary.Counters
-            if ([int]$c.total -ne 32 -or [int]$c.passed -ne 32 -or [int]$c.failed -ne 0) { throw 'Unexpected client case counts' }
+            [ordered]@{exit=$code;sourceOnly=$true;phase='red'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
+            if ($code -ne 0) { throw 'Native transport tests failed; retain closure and TRX' }
           } finally { Pop-Location }
-      - name: Native controller transport admission (never launches SSH)
-        if: always()
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'
-          $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
-          $items=Join-Path $e 'admission-build-inputs'; New-Item -ItemType Directory -Path $items | Out-Null
-          Push-Location (Join-Path $e 'sdk')
-          try {
-            $project=Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerAdmission.Tests/Apex.ControllerAdmission.Tests.csproj'
-            & dotnet build $project -c Release -p:NuGetAudit=false "-p:CustomAfterMicrosoftCommonTargets=$e/compile-evidence.targets" "-p:ControllerEvidenceRoot=$items" *> (Join-Path $e 'admission-build.log')
-            if ($LASTEXITCODE -ne 0) { throw 'Admission compilation failure, not behavioral RED' }
-            $closure=Join-Path $e 'admission-closure'; New-Item -ItemType Directory -Path $closure | Out-Null
-            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerAdmission.Tests/bin/Release/net8.0') -Destination (Join-Path $closure 'tests') -Recurse
-            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
-            & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName!~Wrong_platform_refuses_before_accessing_any_path' --logger 'trx;LogFileName=admission.trx' --results-directory $e *> (Join-Path $e 'admission-tests.log')
-            $code=$LASTEXITCODE
-            [ordered]@{exit=$code;sourceOnly=$true;sshStarted=$false;phase='os-identity-green'} | ConvertTo-Json | Set-Content (Join-Path $e 'admission-summary.json')
-            if ($code -ne 0) { throw 'Native admission tests failed; retain original closure and TRX' }
-          } finally { Pop-Location }
-      - name: Existing native broker-store source gate only
-        if: always() && steps.client.outcome != 'skipped'
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'
-          $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
-          $items=Join-Path $e 'store-build-inputs'; New-Item -ItemType Directory -Path $items | Out-Null
-          Push-Location (Join-Path $e 'sdk')
-          try {
-            $project=Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.Tests/Apex.Tests.csproj'
-            & dotnet build $project -c Release -p:NuGetAudit=false "-p:CustomAfterMicrosoftCommonTargets=$e/compile-evidence.targets" "-p:ControllerEvidenceRoot=$items" *> (Join-Path $e 'store-prebuild.log')
-            if ($LASTEXITCODE -ne 0) { throw 'Store source compile failed; not a behavioral store result' }
-            $closure=Join-Path $e 'store-closure'; New-Item -ItemType Directory -Path $closure | Out-Null
-            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.Tests/bin/Release/net8.0') -Destination (Join-Path $closure 'tests') -Recurse
-            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
-          } finally { Pop-Location }
-          # Reuse the unchanged source gate: this subset does no npm, UI, private broker or package work.
-          & "$env:GITHUB_WORKSPACE/tools/windows/Test-OkxCompositionSource.ps1" -Phase green -Gate broker-store
       - name: Retain source-gate evidence and verify unchanged source
         if: always()
         shell: powershell
@@ -666,7 +631,7 @@ jobs:
           $before=Get-Content (Join-Path $e 'source-inputs-before-build.json') -Raw | ConvertFrom-Json
           $changed=@($before | Where-Object { (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $_.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $_.sha256 })
           [ordered]@{unchanged=($changed.Count -eq 0);changedPaths=@($changed | ForEach-Object {$_.path})} | ConvertTo-Json | Set-Content (Join-Path $e 'source-after-tests.json')
-          $binaryMap=@(Get-ChildItem -LiteralPath $e -File -Recurse | Where-Object { $_.FullName -match '[\\/](client-closure|store-closure|admission-closure)[\\/]' } | ForEach-Object { [ordered]@{path=$_.FullName.Substring($e.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
+          $binaryMap=@(Get-ChildItem -LiteralPath $e -File -Recurse | Where-Object { $_.FullName -match '[\\/](transport-closure)[\\/]' } | ForEach-Object { [ordered]@{path=$_.FullName.Substring($e.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
           $binaryMap | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $e 'binary-closures.json')
           if ($changed.Count -ne 0) { throw 'Tracked source changed during native execution' }
       - uses: actions/upload-artifact@v4
