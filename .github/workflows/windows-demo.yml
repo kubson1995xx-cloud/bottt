@@ -541,3 +541,117 @@ jobs:
             ${{ runner.temp }}/apex-task3-source-${{ github.run_id }}-${{ github.run_attempt }}/sdk-selection/global.json
           if-no-files-found: error
           retention-days: 30
+  controllerWindowsSource:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-native-20261105' && inputs.mode == 'okx-task1-source'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.427'
+      - name: Retain actual OS, SDK and source before any build
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
+          New-Item -ItemType Directory -Path $e | Out-Null
+          $sdk=Join-Path $e 'sdk'; New-Item -ItemType Directory -Path $sdk | Out-Null
+          [IO.File]::WriteAllText((Join-Path $sdk 'global.json'),'{"sdk":{"version":"8.0.427","rollForward":"disable"}}')
+          Push-Location $sdk
+          try {
+            $version=(& dotnet --version)
+            if ($version -cne '8.0.427') { throw 'Exact SDK selection failed' }
+            & dotnet --info | Set-Content (Join-Path $e 'dotnet-info.txt')
+          } finally { Pop-Location }
+          $os=Get-CimInstance Win32_OperatingSystem
+          [ordered]@{sourceCommit=(& git rev-parse HEAD);ref=$env:GITHUB_REF;osCaption=$os.Caption;osVersion=$os.Version;osBuild=$os.BuildNumber;architecture=$os.OSArchitecture;sdk=$version;powershell=$PSVersionTable.PSVersion.ToString();sourceOnly=$true;packageTested=$false;secureUiTested=$false;brokerTested=$false} | ConvertTo-Json | Set-Content (Join-Path $e 'environment.json')
+          $source=Join-Path $e 'source'; New-Item -ItemType Directory -Path $source | Out-Null
+          $map=@(& git ls-files | ForEach-Object {
+            $rel=$_; $p=Join-Path $env:GITHUB_WORKSPACE $rel
+            $out=Join-Path $source $rel
+            New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
+            Copy-Item -LiteralPath $p -Destination $out
+            [ordered]@{path=$rel;bytes=(Get-Item -LiteralPath $p).Length;sha256=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}
+          })
+          $map | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $e 'source-inputs-before-build.json')
+          # Build item identities are emitted before each real CoreCompile, for every project.
+          @'
+          <Project>
+            <Target Name="RetainControllerCompileInputs" BeforeTargets="CoreCompile">
+              <ItemGroup>
+                <ControllerEvidenceInput Include="@(Compile);@(EmbeddedResource);@(Content);@(AdditionalFiles);@(Analyzer);@(ReferencePath);$(MSBuildProjectFullPath);$(ProjectAssetsFile);$(MSBuildAllProjects)" />
+              </ItemGroup>
+              <WriteLinesToFile File="$(ControllerEvidenceRoot)/$(MSBuildProjectName)-compile-input-paths.txt" Lines="@(ControllerEvidenceInput->'%(FullPath)')" Overwrite="true" />
+              <GetFileHash Files="@(ControllerEvidenceInput)" Algorithm="SHA256">
+                <Output TaskParameter="Items" ItemName="ControllerEvidenceHashed" />
+              </GetFileHash>
+              <WriteLinesToFile File="$(ControllerEvidenceRoot)/$(MSBuildProjectName)-compile-input-hashes.txt" Lines="@(ControllerEvidenceHashed->'%(FileHash) %(FullPath)')" Overwrite="true" />
+            </Target>
+          </Project>
+          '@ | Set-Content (Join-Path $e 'compile-evidence.targets')
+      - name: Build and execute the 32 portable client cases natively
+        id: client
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
+          $items=Join-Path $e 'client-build-inputs'; New-Item -ItemType Directory -Path $items | Out-Null
+          Push-Location (Join-Path $e 'sdk')
+          try {
+            $project=Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerClient.Tests/Apex.ControllerClient.Tests.csproj'
+            & dotnet build $project -c Release -p:NuGetAudit=false "-p:CustomAfterMicrosoftCommonTargets=$e/compile-evidence.targets" "-p:ControllerEvidenceRoot=$items" *> (Join-Path $e 'client-build.log')
+            if ($LASTEXITCODE -ne 0) { throw 'Client compile failed; inspect retained build log' }
+            $closure=Join-Path $e 'client-closure'; New-Item -ItemType Directory -Path $closure | Out-Null
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerClient.Tests/bin/Release/net8.0') -Destination (Join-Path $closure 'tests') -Recurse
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
+            & dotnet test $project -c Release --no-build --no-restore --logger 'trx;LogFileName=client.trx' --results-directory $e *> (Join-Path $e 'client-tests.log')
+            $code=$LASTEXITCODE
+            [ordered]@{exit=$code;expectedCases=32;sourceOnly=$true} | ConvertTo-Json | Set-Content (Join-Path $e 'client-summary.json')
+            if ($code -ne 0) { throw 'Client native tests failed; retain actual TRX' }
+            [xml]$trx=Get-Content (Join-Path $e 'client.trx')
+            $c=$trx.TestRun.ResultSummary.Counters
+            if ([int]$c.total -ne 32 -or [int]$c.passed -ne 32 -or [int]$c.failed -ne 0) { throw 'Unexpected client case counts' }
+          } finally { Pop-Location }
+      - name: Existing native broker-store source gate only
+        if: always() && steps.client.outcome != 'skipped'
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
+          $items=Join-Path $e 'store-build-inputs'; New-Item -ItemType Directory -Path $items | Out-Null
+          Push-Location (Join-Path $e 'sdk')
+          try {
+            $project=Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.Tests/Apex.Tests.csproj'
+            & dotnet build $project -c Release -p:NuGetAudit=false "-p:CustomAfterMicrosoftCommonTargets=$e/compile-evidence.targets" "-p:ControllerEvidenceRoot=$items" *> (Join-Path $e 'store-prebuild.log')
+            if ($LASTEXITCODE -ne 0) { throw 'Store source compile failed; not a behavioral store result' }
+            $closure=Join-Path $e 'store-closure'; New-Item -ItemType Directory -Path $closure | Out-Null
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.Tests/bin/Release/net8.0') -Destination (Join-Path $closure 'tests') -Recurse
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
+          } finally { Pop-Location }
+          # Reuse the unchanged source gate: this subset does no npm, UI, private broker or package work.
+          & "$env:GITHUB_WORKSPACE/tools/windows/Test-OkxCompositionSource.ps1" -Phase green -Gate broker-store
+      - name: Retain source-gate evidence and verify unchanged source
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $e=Join-Path $env:RUNNER_TEMP 'controller-windows-source'
+          $gate=Join-Path $env:RUNNER_TEMP ('apex-okx-task1-source-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT)
+          if (Test-Path -LiteralPath $gate) { Copy-Item -LiteralPath $gate -Destination (Join-Path $e 'existing-store-gate') -Recurse }
+          $before=Get-Content (Join-Path $e 'source-inputs-before-build.json') -Raw | ConvertFrom-Json
+          $changed=@($before | Where-Object { (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $_.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $_.sha256 })
+          [ordered]@{unchanged=($changed.Count -eq 0);changedPaths=@($changed | ForEach-Object {$_.path})} | ConvertTo-Json | Set-Content (Join-Path $e 'source-after-tests.json')
+          $binaryMap=@(Get-ChildItem -LiteralPath $e -File -Recurse | Where-Object { $_.FullName -match '[\\/](client-closure|store-closure)[\\/]' } | ForEach-Object { [ordered]@{path=$_.FullName.Substring($e.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
+          $binaryMap | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $e 'binary-closures.json')
+          if ($changed.Count -ne 0) { throw 'Tracked source changed during native execution' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Controller-Windows-Source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/controller-windows-source/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
