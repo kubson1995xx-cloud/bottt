@@ -134,6 +134,24 @@ public sealed class NativeAdmissionTests
         try{Environment.SetEnvironmentVariable("WINDIR",f.Root);using var lease=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);Assert.DoesNotContain(f.Root,lease.Spec.Executable);Assert.EndsWith(@"\System32\OpenSSH\ssh.exe",lease.Spec.Executable,StringComparison.OrdinalIgnoreCase);}
         finally{Environment.SetEnvironmentVariable("WINDIR",previous);}
     }
+    [Fact] public void Executable_directory_policy_refuses_untrusted_companion_file_creation()
+    {
+        using var f=new Profile();Control(f);
+        var method=typeof(WindowsOkxControllerTransportAdmission).GetMethod("ValidateSystemSecurity",BindingFlags.Static|BindingFlags.NonPublic)!;
+        using var opened=WindowsPathSecurity.Open(f.DirectoryPath);
+        method.Invoke(null,new object[]{opened.Handle,true,true});
+        var acl=new DirectoryInfo(f.DirectoryPath).GetAccessControl();
+        acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.WorldSid,null),FileSystemRights.CreateFiles,AccessControlType.Allow));new DirectoryInfo(f.DirectoryPath).SetAccessControl(acl);
+        var ex=Assert.Throws<TargetInvocationException>(()=>method.Invoke(null,new object[]{opened.Handle,true,true}));
+        Assert.IsType<InvalidOperationException>(ex.InnerException);Assert.Equal(WindowsOkxControllerTransportAdmission.Refused,ex.InnerException.Message);
+    }
+    [Theory][InlineData("identity")][InlineData("known_hosts")]
+    public void Native_key_and_pin_owner_must_be_current_sid(string leaf)
+    {
+        using var f=new Profile();Control(f);string p=leaf=="identity"?f.Identity:f.KnownHosts;
+        var acl=new FileInfo(p).GetAccessControl();acl.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null));new FileInfo(p).SetAccessControl(acl);
+        Refuses(f.Root,f.Config);
+    }
     [Fact] public void Wrong_platform_refuses_before_accessing_any_path()
     {
         if(OperatingSystem.IsWindows())return; // Executed separately on actual Linux; not native positive evidence.

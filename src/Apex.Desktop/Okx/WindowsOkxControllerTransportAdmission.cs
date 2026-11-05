@@ -26,6 +26,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
     private readonly List<WindowsPathSecurity.NativeObject> directories=new();
     private readonly HashSet<string> privateDirectories=new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> systemDirectories=new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> strictSystemDirectories=new(StringComparer.OrdinalIgnoreCase);
     private readonly List<OpenedFile> files=new();
     private readonly string sid;
     private readonly long issued=Stopwatch.GetTimestamp();
@@ -98,9 +99,10 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             {
                 if(!opened.IsDirectory||!opened.Path.Equals(path,StringComparison.OrdinalIgnoreCase))throw Denied();
                 if(checkLocation)WindowsPathSecurity.Validate(opened,privateTarget);
-                else ValidateSystemSecurity(opened.Handle,true);
+                else ValidateSystemSecurity(opened.Handle,true,path.Equals(target,StringComparison.OrdinalIgnoreCase));
                 if(privateTarget)privateDirectories.Add(opened.Path);
                 if(!checkLocation)systemDirectories.Add(opened.Path);
+                if(!checkLocation&&path.Equals(target,StringComparison.OrdinalIgnoreCase))strictSystemDirectories.Add(opened.Path);
                 directories.Add(opened);opened=null!;
             }
             finally{opened?.Dispose();}
@@ -123,7 +125,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
                 foreach(var d in directories)
                 {
                     if(privateDirectories.Contains(d.Path))WindowsPathSecurity.Validate(d,true);
-                    else if(systemDirectories.Contains(d.Path))ValidateSystemSecurity(d.Handle,true);
+                    else if(systemDirectories.Contains(d.Path))ValidateSystemSecurity(d.Handle,true,strictSystemDirectories.Contains(d.Path));
                     else WindowsPathSecurity.Validate(d,false);
                     WindowsPrivateData.CheckMarkers(d.Path);
                     using var current=WindowsPathSecurity.Open(d.Path);
@@ -188,7 +190,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
     }
     // OS servicing owns Windows/System32 through TrustedInstaller. The private-data ancestor
     // policy intentionally does not allow that SID to write a private profile; do not widen it.
-    private static void ValidateSystemSecurity(SafeFileHandle handle,bool directory)
+    private static void ValidateSystemSecurity(SafeFileHandle handle,bool directory,bool closedDirectory=false)
     {
         if(GetSecurityInfo(handle,1,5,out _,out _,out _,out _,out var sd)!=0||sd==IntPtr.Zero)throw Denied("SYSTEM_SECURITY");
         try
@@ -202,7 +204,9 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             {
                 if(entry is not CommonAce ace||ace.IsCallback||ace.AceType is not(AceType.AccessAllowed or AceType.AccessDenied))throw Denied("SYSTEM_SECURITY");
                 if(ace.AceType==AceType.AccessDenied||Trusted(ace.SecurityIdentifier)||(ace.AceFlags&AceFlags.InheritOnly)!=0)continue;
-                int unsafeRights=directory?unchecked((int)0x500D0150):unchecked((int)0x500D0116);
+                // Ancestors may permit harmless new siblings; the executable's own directory
+                // must also deny untrusted file creation (including potential DLL companions).
+                int unsafeRights=directory?(closedDirectory?unchecked((int)0x500D0156):unchecked((int)0x500D0150)):unchecked((int)0x500D0116);
                 if((ace.AccessMask&unsafeRights)!=0)throw Denied("SYSTEM_SECURITY");
             }
         }
