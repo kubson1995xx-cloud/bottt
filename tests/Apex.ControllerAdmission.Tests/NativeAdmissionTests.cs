@@ -29,7 +29,7 @@ public sealed class NativeAdmissionTests
         var capability=(OkxControllerSshLaunchSpec.AdmittedTransportCapability)type.GetProperty("Capability",BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(lease)!;
         var info=spec.CreateStartInfo(capability);
         Assert.EndsWith(@"\System32\OpenSSH\ssh.exe",info.FileName,StringComparison.OrdinalIgnoreCase);
-        Assert.False(info.UseShellExecute);Assert.Empty(info.Environment);Assert.Contains("StrictHostKeyChecking=yes",info.ArgumentList);
+        Assert.False(info.UseShellExecute);Assert.Equal(new[]{"PROGRAMDATA","SystemRoot"},info.Environment.Keys.OrderBy(x=>x,StringComparer.Ordinal));Assert.Contains("StrictHostKeyChecking=yes",info.ArgumentList);
         Assert.DoesNotContain(Profile.FakeIdentity,info.ArgumentList);Assert.Equal(OkxControllerSshLaunchSpec.Relay,info.ArgumentList.Last());
     }
     [Fact] public void Foreign_identical_spec_other_lease_null_and_disposal_cannot_authorize_start_info()

@@ -64,12 +64,25 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             // GetSystemWindowsDirectoryW is OS authority; WINDIR/PATH/SSH environment is never read.
             stage="SYSTEM_SSH";var windows=new StringBuilder(32768);uint n=GetSystemWindowsDirectoryW(windows,(uint)windows.Capacity);
             if(n==0||n>=windows.Capacity||!Environment.Is64BitProcess)throw Denied();
-            string exe=Path.Combine(ExactSyntax(windows.ToString()),"System32","OpenSSH","ssh.exe");
+            string systemRoot=ExactSyntax(windows.ToString());
+            string exe=Path.Combine(systemRoot,"System32","OpenSSH","ssh.exe");
             lease.HoldDirectoryChain(Path.GetDirectoryName(exe)!,null,false);
             // Only this OS-composed protected executable may have servicing hard links.
             // Private keys/pins never enter this role; its observed link count is pinned, not ignored.
             lease.HoldFile(exe,FileRole.SystemSsh,64*1024*1024);
-            lease.Spec=OkxControllerSshLaunchSpec.Build(new(config.Host,config.Port,config.User,identity,knownHosts),exe,"NUL");
+            stage="OS_ENVIRONMENT";
+            var folder=new Guid("62AB5D82-FDC1-4DC3-A9DD-070D1D495D97");
+            IntPtr common=IntPtr.Zero;string commonAppData;
+            try
+            {
+                if(SHGetKnownFolderPath(ref folder,0,IntPtr.Zero,out common)!=0||common==IntPtr.Zero)throw Denied();
+                commonAppData=ExactSyntax(Marshal.PtrToStringUni(common)!);
+            }
+            finally{if(common!=IntPtr.Zero)Marshal.FreeCoTaskMem(common);}
+            // CommonAppData may allow new unrelated siblings. Pin its canonical root and
+            // protected ancestry, not a new closed-directory policy or inherited value.
+            lease.HoldDirectoryChain(commonAppData,null,false,false);
+            lease.Spec=OkxControllerSshLaunchSpec.BuildWindows(new(config.Host,config.Port,config.User,identity,knownHosts),exe,systemRoot,commonAppData);
             stage="CAPABILITY";lease.Capability=OkxControllerSshLaunchSpec.AdmittedTransportCapability.Issue(lease);
             return lease;
         }
@@ -88,7 +101,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
         if(path==null||path.Any(c=>c is '$' or '"' or '`'))throw Denied();
         return WindowsPrivateData.ValidateSyntax(path);
     }
-    private void HoldDirectoryChain(string target,string? privateRoot,bool checkLocation)
+    private void HoldDirectoryChain(string target,string? privateRoot,bool checkLocation,bool closedTarget=true)
     {
         target=ExactSyntax(target);WindowsPathSecurity.ValidateVolume(Path.GetPathRoot(target)!);
         foreach(string path in WindowsPrivateData.Components(target))
@@ -101,10 +114,10 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             {
                 if(!opened.IsDirectory||!opened.Path.Equals(path,StringComparison.OrdinalIgnoreCase))throw Denied();
                 if(checkLocation)WindowsPathSecurity.Validate(opened,privateTarget);
-                else ValidateSystemSecurity(opened.Handle,true,path.Equals(target,StringComparison.OrdinalIgnoreCase));
+                else ValidateSystemSecurity(opened.Handle,true,closedTarget&&path.Equals(target,StringComparison.OrdinalIgnoreCase));
                 if(privateTarget)privateDirectories.Add(opened.Path);
                 if(!checkLocation)systemDirectories.Add(opened.Path);
-                if(!checkLocation&&path.Equals(target,StringComparison.OrdinalIgnoreCase))strictSystemDirectories.Add(opened.Path);
+                if(!checkLocation&&closedTarget&&path.Equals(target,StringComparison.OrdinalIgnoreCase))strictSystemDirectories.Add(opened.Path);
                 directories.Add(opened);opened=null!;
             }
             finally{opened?.Dispose();}
@@ -223,6 +236,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
         finally{LocalFree(sd);}
     }
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern uint GetSystemWindowsDirectoryW(StringBuilder buffer,uint size);
+    [DllImport("shell32.dll")]private static extern int SHGetKnownFolderPath(ref Guid folder,uint flags,IntPtr token,out IntPtr path);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr attributes,uint creation,uint flags,IntPtr template);
     [DllImport("kernel32.dll",SetLastError=true)]private static extern bool GetFileInformationByHandle(SafeFileHandle file,out WindowsPathSecurity.FileInformation info);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern uint GetFinalPathNameByHandleW(SafeFileHandle file,StringBuilder path,uint size,uint flags);

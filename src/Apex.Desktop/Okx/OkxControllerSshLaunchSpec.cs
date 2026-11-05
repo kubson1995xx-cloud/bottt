@@ -13,8 +13,15 @@ internal sealed class OkxControllerSshLaunchSpec
     internal const string Relay="/home/ubuntu/.local/bin/apex-okx-demo-controller-relay";
     internal string Executable {get;}
     internal IReadOnlyList<string> Arguments {get;}
-    internal IReadOnlyDictionary<string,string> Environment {get;}=new ReadOnlyDictionary<string,string>(new Dictionary<string,string>());
-    private OkxControllerSshLaunchSpec(string exe,List<string> args){Executable=exe;Arguments=args.AsReadOnly();}
+    internal IReadOnlyDictionary<string,string> Environment {get;}
+    private OkxControllerSshLaunchSpec(string exe,List<string> args,IReadOnlyDictionary<string,string>? environment=null){Executable=exe;Arguments=args.AsReadOnly();Environment=environment??new ReadOnlyDictionary<string,string>(new Dictionary<string,string>());}
+    // Only native admission calls this, after holding and validating both OS-selected roots.
+    // These immutable values are part of the exact capability-bound spec, not caller inheritance.
+    internal static OkxControllerSshLaunchSpec BuildWindows(OkxControllerSshEndpoint endpoint,string systemSsh,string systemRoot,string commonAppData)
+    {
+        var spec=Build(endpoint,systemSsh,"NUL");
+        return new(spec.Executable,spec.Arguments.ToList(),new ReadOnlyDictionary<string,string>(new Dictionary<string,string>{{"SystemRoot",systemRoot},{"PROGRAMDATA",commonAppData}}));
+    }
     internal static OkxControllerSshLaunchSpec Build(OkxControllerSshEndpoint endpoint,string systemSsh,string nullFile)
     {
         static bool Token(string s)=>!string.IsNullOrEmpty(s)&&s.Length<=253&&s[0]!='-'&&s.All(c=>char.IsAsciiLetterOrDigit(c)||c is '.' or '_' or '-');
