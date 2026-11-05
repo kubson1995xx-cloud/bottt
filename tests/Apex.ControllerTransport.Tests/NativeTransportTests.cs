@@ -8,7 +8,11 @@ public sealed class NativeTransportTests
     private static async Task<string> VersionProbe(Apex.Desktop.Okx.WindowsOkxControllerTransportAdmission lease,params string[] variables)
     {
         var info=lease.Spec.CreateStartInfo(lease.Capability);info.ArgumentList.Clear();info.ArgumentList.Add("-V");
-        foreach(string name in variables)if(Environment.GetEnvironmentVariable(name) is string value)info.Environment.Add(name,value);
+        foreach(string name in variables)
+        {
+            if(name=="@CommonApplicationData")info.Environment.Add("PROGRAMDATA",Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+            else if(Environment.GetEnvironmentVariable(name) is string value)info.Environment.Add(name,value);
+        }
         using var p=Process.Start(info)!;var error=p.StandardError.ReadToEndAsync();var output=p.StandardOutput.ReadToEndAsync();
         await p.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));string e=await error;await output;
         return p.ExitCode+":"+e.Contains("OpenSSH",StringComparison.Ordinal);
@@ -16,6 +20,29 @@ public sealed class NativeTransportTests
     private static T Property<T>(object t,string name)=>(T)t.GetType().GetProperty(name,BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(t)!;
     private static async Task Reaped(IOkxControllerFrameTransport t)
     {await t.DisposeAsync();await t.DisposeAsync();Assert.True(Property<bool>(t,"ChildReaped"));}
+    [Fact] public async Task Os_programdata_version_control_proves_exact_empty_environment_startup_blocker()
+    {
+        using var f=new Apex.ControllerAdmission.Tests.NativeAdmissionTests.Profile();
+        using var lease=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
+        Assert.Equal("255:False",await VersionProbe(lease));
+        Assert.Equal("0:True",await VersionProbe(lease,"@CommonApplicationData"));
+        Assert.Empty(lease.Spec.Environment);Assert.Empty(lease.Spec.CreateStartInfo(lease.Capability).Environment);
+    }
+    [Fact] public async Task Os_programdata_only_control_authenticates_fixed_relay_without_changing_product()
+    {
+        await using var f=await NativeSshFixture.Open();using var admission=WindowsOkxControllerTransportAdmission.Open(f.Root,f.Config);
+        var info=admission.Spec.CreateStartInfo(admission.Capability);
+        // Explicit TEST-ONLY calibration. This mutable StartInfo is NOT an accepted native spec.
+        info.Environment.Add("PROGRAMDATA",Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+        using var child=Process.Start(info)!;var err=child.StandardError.ReadToEndAsync();
+        try
+        {
+            string? hello=await child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            if(hello==null){await child.WaitForExitAsync();string diagnostic=await err;throw new Xunit.Sdk.XunitException("PROGRAMDATA_CONTROL_EOF exit="+child.ExitCode+" client="+NativeSshFixture.Classify(diagnostic)+" syntheticDiagnostic="+NativeSshFixture.SyntheticError(diagnostic,f.Root)+" server="+f.ServerCodes+" peer="+f.Events.Length);}
+            Assert.Equal(OkxControllerProtocol.Version,OkxControllerProtocol.DecodeHello(hello).Schema);Assert.Contains("AUTHENTICATED_FIXED_RELAY",f.Events);
+        }
+        finally{child.StandardInput.Close();if(!child.HasExited)child.Kill(true);await child.WaitForExitAsync();await err;}
+    }
     [Fact] public async Task Existing_native_sshd_accepts_disposable_key_and_exact_fixed_relay_before_transport_assertions()
     {
         await using var f=await NativeSshFixture.Open();

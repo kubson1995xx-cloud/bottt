@@ -615,9 +615,13 @@ jobs:
             Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'tests/Apex.ControllerTransport.Tests/bin/Release/net8.0') -Destination (Join-Path $closure 'tests') -Recurse
             Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'src/Apex.Desktop/bin/Release/net8.0') -Destination (Join-Path $closure 'host') -Recurse
             $env:APEX_SYNTHETIC_TRANSPORT_EVIDENCE=$e
-            & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~Existing_native_sshd_accepts' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
-            $code=$LASTEXITCODE
-            [ordered]@{exit=$code;sourceOnly=$true;phase='red-diagnostic-osvars'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
+            $preference=$ErrorActionPreference
+            try {
+              $ErrorActionPreference='Continue'
+              & dotnet test $project -c Release --no-build --no-restore --filter 'FullyQualifiedName~Existing_native_sshd_accepts|FullyQualifiedName~Os_programdata' --logger 'trx;LogFileName=transport.trx' --results-directory $e *> (Join-Path $e 'transport-tests.log')
+              $code=$LASTEXITCODE
+            } finally { $ErrorActionPreference=$preference }
+            [ordered]@{exit=$code;sourceOnly=$true;phase='red-blocker-controls'} | ConvertTo-Json | Set-Content (Join-Path $e 'transport-summary.json')
             if ($code -ne 0) { throw 'Native transport tests failed; retain closure and TRX' }
           } finally { Pop-Location }
       - name: Retain source-gate evidence and verify unchanged source
