@@ -25,6 +25,7 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
     private readonly object gate=new();
     private readonly List<WindowsPathSecurity.NativeObject> directories=new();
     private readonly HashSet<string> privateDirectories=new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> systemDirectories=new(StringComparer.OrdinalIgnoreCase);
     private readonly List<OpenedFile> files=new();
     private readonly string sid;
     private readonly long issued=Stopwatch.GetTimestamp();
@@ -96,8 +97,10 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             try
             {
                 if(!opened.IsDirectory||!opened.Path.Equals(path,StringComparison.OrdinalIgnoreCase))throw Denied();
-                WindowsPathSecurity.Validate(opened,privateTarget);
+                if(checkLocation)WindowsPathSecurity.Validate(opened,privateTarget);
+                else ValidateSystemSecurity(opened.Handle,true);
                 if(privateTarget)privateDirectories.Add(opened.Path);
+                if(!checkLocation)systemDirectories.Add(opened.Path);
                 directories.Add(opened);opened=null!;
             }
             finally{opened?.Dispose();}
@@ -119,7 +122,9 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             {
                 foreach(var d in directories)
                 {
-                    WindowsPathSecurity.Validate(d,privateDirectories.Contains(d.Path));
+                    if(privateDirectories.Contains(d.Path))WindowsPathSecurity.Validate(d,true);
+                    else if(systemDirectories.Contains(d.Path))ValidateSystemSecurity(d.Handle,true);
+                    else WindowsPathSecurity.Validate(d,false);
                     WindowsPrivateData.CheckMarkers(d.Path);
                     using var current=WindowsPathSecurity.Open(d.Path);
                     if(!current.SameIdentity(d)||!current.Path.Equals(d.Path,StringComparison.OrdinalIgnoreCase))throw Denied();
@@ -166,7 +171,8 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             if(!GetFileInformationByHandle(handle,out var info)||info.Links!=1||(info.Attributes&(uint)(FileAttributes.Directory|FileAttributes.ReparsePoint))!=0||info.VolumeSerial!=original.VolumeSerial||info.IndexHigh!=original.IndexHigh||info.IndexLow!=original.IndexLow||Stream.Length is <=0||Stream.Length>maximum)throw Denied("FILE_IDENTITY");
             var name=new StringBuilder(32768);uint n=GetFinalPathNameByHandleW(handle,name,(uint)name.Capacity,0);
             if(n==0||n>=name.Capacity||!name.ToString().Equals("\\\\?\\"+Path,StringComparison.OrdinalIgnoreCase))throw Denied();
-            using(var view=new WindowsPathSecurity.NativeObject(new SafeFileHandle(handle.DangerousGetHandle(),false),Path,info))WindowsPathSecurity.Validate(view,Private);
+            using(var view=new WindowsPathSecurity.NativeObject(new SafeFileHandle(handle.DangerousGetHandle(),false),Path,info))
+            {if(Private)WindowsPathSecurity.Validate(view,true);else ValidateSystemSecurity(handle,false);}
             if(GetSecurityInfo(handle,1,5,out _,out _,out _,out _,out var sd)!=0||sd==IntPtr.Zero)throw Denied();
             try
             {
@@ -179,6 +185,28 @@ internal sealed class WindowsOkxControllerTransportAdmission : IDisposable
             finally{LocalFree(sd);}
         }
         public void Dispose()=>Stream.Dispose();
+    }
+    // OS servicing owns Windows/System32 through TrustedInstaller. The private-data ancestor
+    // policy intentionally does not allow that SID to write a private profile; do not widen it.
+    private static void ValidateSystemSecurity(SafeFileHandle handle,bool directory)
+    {
+        if(GetSecurityInfo(handle,1,5,out _,out _,out _,out _,out var sd)!=0||sd==IntPtr.Zero)throw Denied("SYSTEM_SECURITY");
+        try
+        {
+            uint size=GetSecurityDescriptorLength(sd);if(size is 0 or >65536)throw Denied("SYSTEM_SECURITY");
+            byte[] bytes=new byte[size];Marshal.Copy(sd,bytes,0,bytes.Length);var descriptor=new RawSecurityDescriptor(bytes,0);
+            var me=WindowsIdentity.GetCurrent().User;
+            bool Trusted(SecurityIdentifier? s)=>s!=null&&(s==me||s.IsWellKnown(WellKnownSidType.LocalSystemSid)||s.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)||s.Value=="S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
+            if(!Trusted(descriptor.Owner)||(descriptor.ControlFlags&ControlFlags.DiscretionaryAclPresent)==0||descriptor.DiscretionaryAcl==null)throw Denied("SYSTEM_SECURITY");
+            foreach(GenericAce entry in descriptor.DiscretionaryAcl)
+            {
+                if(entry is not CommonAce ace||ace.IsCallback||ace.AceType is not(AceType.AccessAllowed or AceType.AccessDenied))throw Denied("SYSTEM_SECURITY");
+                if(ace.AceType==AceType.AccessDenied||Trusted(ace.SecurityIdentifier)||(ace.AceFlags&AceFlags.InheritOnly)!=0)continue;
+                int unsafeRights=directory?unchecked((int)0x500D0150):unchecked((int)0x500D0116);
+                if((ace.AccessMask&unsafeRights)!=0)throw Denied("SYSTEM_SECURITY");
+            }
+        }
+        finally{LocalFree(sd);}
     }
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern uint GetSystemWindowsDirectoryW(StringBuilder buffer,uint size);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]private static extern SafeFileHandle CreateFileW(string path,uint access,uint share,IntPtr attributes,uint creation,uint flags,IntPtr template);
