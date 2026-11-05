@@ -26,6 +26,22 @@ public sealed class PackagedTests
         await b.CommandAsync("Input.dispatchMouseEvent",new{type="mouseReleased",x,y,button="left",clickCount=1},sid);
         await b.Wait(sid,"document.querySelector('#remote-result')?.textContent.includes('Potwierdzono odpowiedź serwera: "+action+" /')===true","No confirmed pointer command: "+action);
     }
+    [Fact] public async Task Extracted_EXE_first_start_and_restart_are_local_no_login_and_not_configured()
+    {
+        Assert.NotNull(Environment.GetEnvironmentVariable("APEX_COMPOSITION_PACKAGE_EXE"));
+        string root=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ApexControllerFirstStart-"+Guid.NewGuid().ToString("N"));
+        try
+        {
+            for(int attempt=0;attempt<2;attempt++)
+            {
+                await using var host=new CompositionTests.Host(root);var state=await host.Status();Assert.Equal("NOT_CONFIGURED",state.GetProperty("availability").GetString());
+                using var response=await host.Http.GetAsync("/");Assert.Equal(System.Net.HttpStatusCode.OK,response.StatusCode);Assert.False(response.Headers.Contains("WWW-Authenticate"));
+                Assert.False(Directory.Exists(Path.Combine(root,"controller-ssh")));Assert.False(File.Exists(Path.Combine(root,"controller-connection.json")));
+            }
+            WindowsTestHost.Evidence("extracted-first-start-restart",new{actualExtractedExe=true,firstStart=true,restart=true,noManualLogin=true,noAutomaticSsh=true,notConfigured=true,defaultAssociationTested=false});
+        }
+        finally{if(Directory.Exists(root))Directory.Delete(root,true);}
+    }
     [Fact] public async Task Extracted_EXE_native_SSH_pointer_lifecycle_five_views_and_close_after_START()
     {
         string exe=Environment.GetEnvironmentVariable("APEX_COMPOSITION_PACKAGE_EXE")??throw new Exception("EXTRACTED_EXE_REQUIRED");Assert.True(File.Exists(exe));
