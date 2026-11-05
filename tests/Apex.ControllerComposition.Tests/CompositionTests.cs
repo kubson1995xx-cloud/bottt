@@ -42,12 +42,23 @@ public sealed class CompositionTests
         internal readonly CancellationTokenSource Stop=new(TimeSpan.FromSeconds(60));
         internal readonly HttpClient Http;
         private readonly Task<int> running;
+        private readonly Process? child;
         internal Host(string root)
         {
             using var l=new TcpListener(IPAddress.Loopback,0);l.Start();int port=((IPEndPoint)l.LocalEndpoint).Port;l.Stop();
             Http=new(){BaseAddress=new Uri($"http://127.0.0.1:{port}"),Timeout=TimeSpan.FromSeconds(20)};Http.DefaultRequestHeaders.Add("X-Apex-Local","1");
-            running=Task.Run(()=>Program.Run(new[]{"--data",root,"--port",port.ToString(),"--no-browser"},false,null,null,Stop.Token,null));
+            var args=new[]{"--data",root,"--port",port.ToString(),"--no-browser"};
+            string? exe=Environment.GetEnvironmentVariable("APEX_COMPOSITION_PACKAGE_EXE");
+            if(exe!=null)
+            {
+                Assert.True(Path.IsPathFullyQualified(exe)&&File.Exists(exe),"EXPLICIT_PACKAGE_EXE_REQUIRED_NO_FALLBACK");
+                var start=new ProcessStartInfo(exe){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};foreach(var arg in args)start.ArgumentList.Add(arg);
+                child=Process.Start(start)!;_=child.StandardOutput.BaseStream.CopyToAsync(Stream.Null);_=child.StandardError.BaseStream.CopyToAsync(Stream.Null);
+                running=Observe(child);
+            }
+            else running=Task.Run(()=>Program.Run(args,false,null,null,Stop.Token,null));
         }
+        private static async Task<int> Observe(Process p){await p.WaitForExitAsync();return p.ExitCode;}
         internal async Task<JsonElement> Status()
         {
             var until=Stopwatch.StartNew();
@@ -61,7 +72,13 @@ public sealed class CompositionTests
         }
         internal async Task<JsonElement> Command(string action)
         {using var r=await Http.PostAsJsonAsync("/api/naval/controller/"+action,new{commandId="cmd-"+Guid.NewGuid().ToString("N")});r.EnsureSuccessStatusCode();return await r.Content.ReadFromJsonAsync<JsonElement>();}
-        public async ValueTask DisposeAsync(){Stop.Cancel();Assert.Equal(0,await running.WaitAsync(TimeSpan.FromSeconds(20)));Http.Dispose();Stop.Dispose();}
+        public async ValueTask DisposeAsync()
+        {
+            Stop.Cancel();
+            if(child!=null){if(!child.HasExited)child.Kill(true);await running.WaitAsync(TimeSpan.FromSeconds(20));child.Dispose();}
+            else Assert.Equal(0,await running.WaitAsync(TimeSpan.FromSeconds(20)));
+            Http.Dispose();Stop.Dispose();
+        }
     }
     [Fact] public async Task Production_boot_is_passive_then_panel_connect_uses_pinned_native_factory()
     {

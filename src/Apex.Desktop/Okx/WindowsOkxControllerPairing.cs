@@ -67,22 +67,23 @@ internal static class WindowsOkxControllerPairing
         // Reject invalid/unconfirmed input before writes. Main holds apex.lock; direct
         // native callers also serialize provisioning with a CREATE_NEW pending marker.
         if(!OperatingSystem.IsWindows()||!trusted||ct.IsCancellationRequested||!Valid(host,port,user,key))return false;
+        string stage="ROOT";
         try
         {
             using var lease=WindowsPrivateData.Open(root,AppContext.BaseDirectory);
             root=lease.Path;
             // Refuse unexplained startup state; never normalize/reset a partial profile.
-            _=WindowsLocalSetup.Ensure(root,Path.Combine(AppContext.BaseDirectory,"presentation"));
+            stage="PRESENTATION";_=WindowsLocalSetup.Ensure(root,Path.Combine(AppContext.BaseDirectory,"presentation"));
             string profile=Path.Combine(root,"controller-ssh"),metadata=Path.Combine(root,"controller-connection.json"),export=Path.Combine(root,"controller-public-key.txt"),pending=Path.Combine(root,"controller-pairing.pending");
             if(new[]{profile,metadata,export,pending}.Any(p=>File.Exists(p)||Directory.Exists(p)))return false;
             // OS-selected, protected native key generator; never PATH/WINDIR input.
             var windows=new StringBuilder(32768);uint n=GetSystemWindowsDirectoryW(windows,(uint)windows.Capacity);
             if(n==0||n>=windows.Capacity||!Environment.Is64BitProcess)return false;
             string exe=Path.Combine(windows.ToString(),"System32","OpenSSH","ssh-keygen.exe");
-            using var executable=WindowsPathSecurity.Open(exe);
+            stage="KEYGEN_ADMISSION";using var executable=WindowsPathSecurity.Open(exe);
             if(executable.IsDirectory||!executable.Path.Equals(exe,StringComparison.OrdinalIgnoreCase))return false;
             WindowsPathSecurity.Validate(executable,false);
-            using var marker=PrivateFile(pending);marker.WriteByte(1);marker.Flush(true);
+            stage="PENDING";using var marker=PrivateFile(pending);marker.WriteByte(1);marker.Flush(true);
             // A crash/failure deliberately leaves pending/partial state for explicit
             // investigation, never silent reenrollment or key replacement on restart.
             WindowsPathSecurity.CreatePrivateDirectory(profile);
@@ -91,36 +92,36 @@ internal static class WindowsOkxControllerPairing
             var start=new ProcessStartInfo(exe){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
             start.Environment.Clear();start.Environment["SystemRoot"]=windows.ToString();start.Environment["PROGRAMDATA"]=Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
             foreach(string arg in new[]{"-q","-t","ed25519","-N","","-C","apex-controller","-f",identity})start.ArgumentList.Add(arg);
-            using var child=Process.Start(start)??throw new IOException();
+            stage="KEYGEN";using var child=Process.Start(start)??throw new IOException();
             var output=Drain(child.StandardOutput.BaseStream);var error=Drain(child.StandardError.BaseStream);
             using var budget=CancellationTokenSource.CreateLinkedTokenSource(ct);budget.CancelAfter(TimeSpan.FromSeconds(15));
-            try{await child.WaitForExitAsync(budget.Token);await Task.WhenAll(output,error).WaitAsync(budget.Token);if(child.ExitCode!=0)return false;}
+            try{await child.WaitForExitAsync(budget.Token);await Task.WhenAll(output,error).WaitAsync(budget.Token);if(child.ExitCode!=0){Console.Error.WriteLine("CONTROLLER_PAIRING_KEYGEN_EXIT_"+child.ExitCode.ToString(CultureInfo.InvariantCulture));return false;}}
             finally{if(!child.HasExited)child.Kill(true);await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));}
             ct.ThrowIfCancellationRequested();
             // Only files created by this invocation receive their explicit current SID
             // owner. Existing files/roots are never repaired.
-            foreach(string p in new[]{identity,identity+".pub"})
+            stage="GENERATED_FILES";foreach(string p in new[]{identity,identity+".pub"})
             {
                 var file=new FileInfo(p);var acl=file.GetAccessControl();acl.SetOwner(WindowsIdentity.GetCurrent().User!);file.SetAccessControl(acl);
                 using var opened=WindowsPathSecurity.Open(p);WindowsPathSecurity.Validate(opened,true);
             }
             string publicKey=File.ReadAllText(identity+".pub");
             if(!publicKey.StartsWith("ssh-ed25519 ",StringComparison.Ordinal)||publicKey.Length>256)return false;
-            using(var file=PrivateFile(export)){file.Write(Encoding.ASCII.GetBytes(publicKey));file.Flush(true);}
+            stage="PUBLIC_EXPORT";using(var file=PrivateFile(export)){file.Write(Encoding.ASCII.GetBytes(publicKey));file.Flush(true);}
             File.Delete(identity+".pub");
             string hosts=(port==22?host:"["+host+"]:"+port.ToString(CultureInfo.InvariantCulture))+" ssh-ed25519 "+key+"\n";
             using(var file=PrivateFile(Path.Combine(profile,"known_hosts"))){file.Write(Encoding.ASCII.GetBytes(hosts));file.Flush(true);}
             string digest;using(var file=File.OpenRead(identity))digest=Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();
             var config=new WindowsOkxControllerTransportConfig(host,port,user,digest,key);
-            using(var admission=WindowsOkxControllerTransportAdmission.Open(root,config)){}
+            stage="PROFILE_ADMISSION";using(var admission=WindowsOkxControllerTransportAdmission.Open(root,config)){}
             ct.ThrowIfCancellationRequested();lease.ValidateDirectories();
-            using(var file=PrivateFile(metadata)){file.Write(JsonSerializer.SerializeToUtf8Bytes(new{Schema="apex-controller-connection-v1",Host=host,Port=port,User=user,IdentitySha256=digest,HostKey=key}));file.Flush(true);}
+            stage="METADATA";using(var file=PrivateFile(metadata)){file.Write(JsonSerializer.SerializeToUtf8Bytes(new{Schema="apex-controller-connection-v1",Host=host,Port=port,User=user,IdentitySha256=digest,HostKey=key}));file.Flush(true);}
             // Actual strict native readback; this never starts SSH or touches a broker.
-            if(WindowsOkxControllerConnectionStore.Load(root)!=config)return false;
+            stage="READBACK";if(WindowsOkxControllerConnectionStore.Load(root)!=config)return false;
             marker.Dispose();File.Delete(pending);
             return true;
         }
-        catch(Exception e) when(e is not OutOfMemoryException){return false;}
+        catch(Exception e) when(e is not OutOfMemoryException){Console.Error.WriteLine("CONTROLLER_PAIRING_REFUSED:"+stage+":"+(e is WindowsDataException w?w.Code:e.GetType().Name));return false;}
     }
     private static FileStream PrivateFile(string path)
     {
