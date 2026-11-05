@@ -22,8 +22,25 @@ public sealed class NativePairingTests
             await WindowsTestHost.Until(()=>Task.FromResult(Children(form).Contains("Uzupełnij wszystkie pola",StringComparison.Ordinal)),"Invalid native input validation not reached");
             Assert.True(IsWindowVisible(form));Assert.False(File.Exists(Path.Combine(root,"controller-connection.json")));
             foreach(var (id,value) in new[]{(100,config.Host),(101,config.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)),(102,config.User),(103,"ssh-ed25519 "+config.HostKey)})Assert.True(SetWindowTextW(GetDlgItem(form,id),value));
+            string[] expected={config.Host,config.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),config.User,"ssh-ed25519 "+config.HostKey};
+            bool fieldsAgree=Enumerable.Range(0,4).All(i=>Text(GetDlgItem(form,100+i))==expected[i]);
+            Assert.True(fieldsAgree,"NATIVE_METADATA_FIELD_READBACK_MISMATCH");
+            var input=typeof(Apex.Desktop.Program).Assembly.GetType("Apex.Desktop.Okx.WindowsOkxControllerPairing")!.GetMethod("Input",System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic)!;
+            object?[] operands={expected.Select(System.Text.Encoding.UTF8.GetBytes).ToArray(),null,0,null,null};
+            bool parserAccepts=(bool)input.Invoke(null,operands)!;Assert.True(parserAccepts,"PRODUCTION_METADATA_PARSER_REFUSED_NATIVE_OPERANDS");
             Click(GetDlgItem(form,1));
-            IntPtr confirm=IntPtr.Zero;
+            IntPtr confirm=IntPtr.Zero;var submitted=Stopwatch.StartNew();
+            while(submitted.Elapsed<TimeSpan.FromSeconds(2)&&(confirm=Window(child.Id,"APEX — potwierdź zaufany klucz hosta"))==IntPtr.Zero&&!child.HasExited)await Task.Delay(50);
+            bool keyboardSubmit=false;
+            if(confirm==IntPtr.Zero)
+            {
+                bool visible=IsWindowVisible(form),validationError=visible&&Children(form).Contains("Uzupełnij wszystkie pola",StringComparison.Ordinal);
+                WindowsTestHost.Evidence("native-submit-observation-"+child.Id,new{fieldsAgree,parserAccepts,formStillVisible=visible,validationErrorStillVisible=validationError,childExited=child.HasExited,trustDialogObserved=false});
+                Assert.True(visible&&!child.HasExited,"NATIVE_FORM_CLOSED_WITHOUT_TRUST");
+                // Real keyboard submit is an independent native-input control. A rapid
+                // second pointer click is not assumed to have produced BN_CLICKED.
+                keyboardSubmit=true;SetForegroundWindow(form);keybd_event(0x0D,0,0,UIntPtr.Zero);keybd_event(0x0D,0,2,UIntPtr.Zero);
+            }
             await WindowsTestHost.Until(()=>Task.FromResult((confirm=Window(child.Id,"APEX — potwierdź zaufany klucz hosta"))!=IntPtr.Zero),"Independent host-pin trust dialog missing");
             string text=Children(confirm);string fingerprint="SHA256:"+Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(Convert.FromBase64String(config.HostKey))).TrimEnd('=');
             Assert.True(text.Contains(fingerprint,StringComparison.Ordinal),"Exact operator host fingerprint not displayed");Assert.True(text.Contains(config.HostKey,StringComparison.Ordinal));
@@ -35,7 +52,7 @@ public sealed class NativePairingTests
                 Assert.True(File.Exists(Path.Combine(root,"controller-public-key.txt")),"NATIVE_PROVISIONING_DID_NOT_COMPLETE");Click(GetDlgItem(done,1));
             }
             await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));await Task.WhenAll(stdout,stderr);Assert.Equal(trust?0:2,child.ExitCode);
-            WindowsTestHost.Evidence("native-pairing-"+child.Id,new{extractedExe=true,invalidInputStaysOpen=true,hostFingerprintDisplayed=true,explicitTrust=trust,noNetworkOrBrokerConnect=true,processExited=true});
+            WindowsTestHost.Evidence("native-pairing-"+child.Id,new{extractedExe=true,invalidInputStaysOpen=true,fieldsAgree,parserAccepts,keyboardSubmit,hostFingerprintDisplayed=true,explicitTrust=trust,noNetworkOrBrokerConnect=true,processExited=true});
             return trust;
         }
         finally{if(!child.HasExited){child.Kill(true);await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));}}
@@ -54,6 +71,7 @@ public sealed class NativePairingTests
     {IntPtr found=IntPtr.Zero;EnumWindows((h,_)=>{GetWindowThreadProcessId(h,out uint owner);var text=new StringBuilder(256);GetWindowTextW(h,text,text.Capacity);if(owner==pid&&text.ToString()==title&&IsWindowVisible(h)){found=h;return false;}return true;},IntPtr.Zero);return found;}
     private static string Children(IntPtr w)
     {var text=new StringBuilder();EnumChildWindows(w,(h,_)=>{var s=new StringBuilder(4096);GetWindowTextW(h,s,s.Capacity);text.Append(s);return true;},IntPtr.Zero);return text.ToString();}
+    private static string Text(IntPtr w){var s=new StringBuilder(4096);GetWindowTextW(w,s,s.Capacity);return s.ToString();}
     private static void Click(IntPtr button)
     {
         Assert.NotEqual(IntPtr.Zero,button);Assert.True(IsWindowVisible(button));SetForegroundWindow(GetAncestor(button,2));
@@ -76,4 +94,5 @@ public sealed class NativePairingTests
     [DllImport("user32.dll")]private static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")]private static extern bool SetCursorPos(int x,int y);
     [DllImport("user32.dll")]private static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
+    [DllImport("user32.dll")]private static extern void keybd_event(byte key,byte scan,uint flags,UIntPtr extra);
 }

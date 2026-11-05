@@ -602,7 +602,9 @@ jobs:
           node-version: '26'
       - name: Native composition and pairing gate
         shell: powershell
-        run: ./tools/windows/Test-ControllerComposition.ps1 -Phase candidate-exe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/windows/Test-ControllerCompositionReplay.ps1 -Phase acceptance-native-submit
       - name: Retain source-gate evidence and verify unchanged source
         if: always()
         shell: powershell
@@ -613,19 +615,11 @@ jobs:
           if (Test-Path -LiteralPath $gate) { Copy-Item -LiteralPath $gate -Destination (Join-Path $e 'existing-store-gate') -Recurse }
           $before=Get-Content (Join-Path $e 'source-inputs-before-build.json') -Raw | ConvertFrom-Json
           $changed=@($before | Where-Object { (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $_.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $_.sha256 })
-          $generatedPath=Join-Path $e 'generated-assets-before-compile.json'
-          $generated=@();if(Test-Path $generatedPath){$generated=@(Get-Content $generatedPath -Raw|ConvertFrom-Json)}
-          $unexpected=@($changed | Where-Object {
-            $row=$_;$match=@($generated|Where-Object{$_.path -ceq $row.path})
-            if($match.Count -ne 1 -or -not $row.path.StartsWith('src/Apex.Desktop/wwwroot/naval/')){return $true}
-            $current=Join-Path $env:GITHUB_WORKSPACE $row.path
-            if((Get-FileHash $current -Algorithm SHA256).Hash.ToLowerInvariant() -cne $match[0].sha256){return $true}
-            return [IO.File]::ReadAllText((Join-Path (Join-Path $e 'source') $row.path)).Replace("`r`n","`n") -cne [IO.File]::ReadAllText($current).Replace("`r`n","`n")
-          })
-          [ordered]@{unchanged=($changed.Count -eq 0);changedPaths=@($changed|ForEach-Object{$_.path});onlyValidatedGeneratedEolChanges=($changed.Count -gt 0 -and $unexpected.Count -eq 0);unexpectedChanges=@($unexpected|ForEach-Object{$_.path})} | ConvertTo-Json | Set-Content (Join-Path $e 'source-after-tests.json')
+          & python (Join-Path $env:GITHUB_WORKSPACE 'tools/windows/verify_controller_composition_source.py') $e $env:GITHUB_WORKSPACE
+          $sourceCode=$LASTEXITCODE
           $binaryMap=@(Get-ChildItem -LiteralPath $e -File -Recurse | Where-Object { $_.FullName -match '[\\/](composition-closure)[\\/]' } | ForEach-Object { [ordered]@{path=$_.FullName.Substring($e.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
           $binaryMap | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $e 'binary-closures.json')
-          if ($unexpected.Count -ne 0) { throw 'Unadmitted source changed during native execution' }
+          if ($sourceCode -ne 0) { throw 'Unadmitted source changed during native execution' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
