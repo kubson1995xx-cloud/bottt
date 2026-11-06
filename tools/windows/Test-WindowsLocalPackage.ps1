@@ -18,6 +18,16 @@ try {
  Push-Location $repo
  $old=$ErrorActionPreference
  try{$ErrorActionPreference='Continue';& npm.cmd ci --ignore-scripts --no-audit --no-fund *> (Join-Path $e 'panel-install.log');if($LASTEXITCODE -ne 0){throw 'Panel install failed'};& npm.cmd test *> (Join-Path $e 'panel-tests.log');if($LASTEXITCODE -ne 0){throw 'Polish panel tests failed'}}finally{$ErrorActionPreference=$old;Pop-Location}
+ # Same typed frontend build/staging as the existing candidate job; committed assets are not trusted as current.
+ Push-Location (Join-Path $repo 'frontend/naval')
+ $old=$ErrorActionPreference
+ try{
+  $ErrorActionPreference='Continue'
+  & npm.cmd ci --ignore-scripts --no-audit --no-fund *> (Join-Path $e 'frontend-install.log');if($LASTEXITCODE -ne 0){throw 'Pinned frontend install failed'}
+  & npm.cmd test *> (Join-Path $e 'frontend-tests.log');if($LASTEXITCODE -ne 0){throw 'Frontend tests failed'}
+  & npm.cmd run build *> (Join-Path $e 'frontend-build.log');if($LASTEXITCODE -ne 0){throw 'Typed frontend build/staging failed'}
+  & npm.cmd run test:build *> (Join-Path $e 'frontend-build-tests.log');if($LASTEXITCODE -ne 0){throw 'Staged frontend tests failed'}
+ }finally{$ErrorActionPreference=$old;Pop-Location}
  Test-ApexNavalAssets (Join-Path $repo 'src/Apex.Desktop/wwwroot/naval')|ConvertTo-Json|Set-Content (Join-Path $e 'naval-assets.json')
  & dotnet build (Join-Path $repo 'tools/Apex.Backtester/Apex.Backtester.csproj') -c Release -p:NuGetAudit=false *> (Join-Path $e 'presentation-build.log');if($LASTEXITCODE -ne 0){throw 'Presentation producer build failed'}
  $presentation=Join-Path $env:RUNNER_TEMP ('local-presentation-'+$env:GITHUB_RUN_ID)
