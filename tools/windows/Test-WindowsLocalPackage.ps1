@@ -50,7 +50,7 @@ try {
  # Windows Terminal is the default console; falls back to a direct start if conhost is absent.
  [IO.File]::WriteAllText((Join-Path $package 'Uruchom-APEX.cmd'),"@echo off`r`nif exist `"%SystemRoot%\System32\conhost.exe`" (start `"`" `"%SystemRoot%\System32\conhost.exe`" `"%~dp0APEX-Desktop\ApexDesktop.exe`" %*) else (start `"`" `"%~dp0APEX-Desktop\ApexDesktop.exe`" %*)`r`n",[Text.Encoding]::ASCII)
  [ordered]@{schema='apex-windows-local-v1';sourceCommit=(& git -C $repo rev-parse HEAD);target='win-x64';sdk='8.0.427';selfContained=$true;edition='local-okx-demo';syntheticAcceptanceOnly=$true;brokerTested=$false;windows11Tested=$false;secureDesktopStartTestedOnExe=$false}|ConvertTo-Json|Set-Content (Join-Path $package 'apex-build.json') -Encoding UTF8
- $inventory=@(Get-ChildItem $package -File -Recurse|Sort-Object FullName|ForEach-Object{[ordered]@{path=$_.FullName.Substring($package.Length+1).Replace('\','/');sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$_.Length}})
+ $inventory=@(Get-ChildItem $package -File -Recurse|Sort-Object FullName|ForEach-Object{[ordered]@{path=$_.FullName.Substring($package.Length+1).Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$_.Length}})
  # AI contains genuine pinned upstream AUTH IMPLEMENTATION source (not auth state). Its
  # complete accepted source/wheel/base maps were verified by build_bundle before inventory.
  if(@($inventory|Where-Object{!$_.path.StartsWith('AI/') -and $_.path -match 'controller-ssh|controller-connection|authorized_keys|\.pub$|\.dpapi$|apex\.config|accounts/|credentials|\.pfx$'}).Count -ne 0){throw 'Private file in package layout'}
@@ -65,7 +65,7 @@ try {
  & python (Join-Path $repo 'tests/package/safe_extract.py') $zip $extractRoot (Join-Path $e 'extraction.json') $zipHash @extractFlags
  if($LASTEXITCODE -ne 0){throw 'ZIP CRC/inventory/safe extraction failed'}
  $extracted=$extractRoot
- foreach($row in $inventory){if((Get-FileHash (Join-Path $extracted $row.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $row.sha256){throw 'Extracted file differs from package inventory'}}
+ foreach($row in $inventory){if((Get-FileHash -LiteralPath (Join-Path $extracted $row.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $row.sha256){throw 'Extracted file differs from package inventory'}}
  $exe=Join-Path $extracted 'APEX-Desktop/ApexDesktop.exe'
  if($env:APEX_ADVISORY_PRIOR){
   $env:APEX_ADVISORY_TEST_BUNDLE=Join-Path $extracted 'AI'
@@ -91,7 +91,7 @@ try {
  $env:APEX_COMPOSITION_PACKAGE_EXE=$exe;$env:APEX_COMPOSITION_EVIDENCE=$e
  $old=$ErrorActionPreference
  try{$ErrorActionPreference='Continue';& dotnet test $project -c Release --no-build --filter 'FullyQualifiedName~Apex.ControllerComposition.Tests.LocalPackagedTests' --logger 'trx;LogFileName=extracted-local.trx' --results-directory $e -- xUnit.ParallelizeTestCollections=false *> (Join-Path $e 'extracted-local-tests.log');$code=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
- foreach($row in $inventory){if((Get-FileHash (Join-Path $extracted $row.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $row.sha256){throw 'Extracted package changed during native execution'}}
+ foreach($row in $inventory){if((Get-FileHash -LiteralPath (Join-Path $extracted $row.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $row.sha256){throw 'Extracted package changed during native execution'}}
  if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $zipHash){throw 'ZIP changed during native execution'}
  [ordered]@{zipSha256=$zipHash;exeSha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant();zipBytes=(Get-Item $zip).Length;extractedTestsExit=$code;extractedTests=(Read-ApexTestCounts (Join-Path $e 'extracted-local.trx'));actualExtractedExe=$true;syntheticOkxLoopback=$true;secureDesktopStartTestedOnExe=$false;brokerTested=$false;windows11Tested=$false}|ConvertTo-Json -Depth 4|Set-Content (Join-Path $e 'package-summary.json')
  if($code -ne 0){throw 'Extracted-EXE tests failed; ZIP and TRX retained'}
