@@ -5,7 +5,7 @@ on:
       mode:
         description: 'full-delivery packages; task1-source/task2-source/task3-source/task4-source validate only the named source prerequisite'
         type: choice
-        options: [windows-local-package, okx-simple-connect-commit-red, okx-simple-connect-commit-green, okx-simple-connect-commit-delivery, okx-simple-connect-wait, okx-simple-connect-red, okx-simple-connect-green, okx-simple-connect-delivery, okx-enrollment-remaining, okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
+        options: [windows-advisory-prerequisite, windows-local-package, okx-simple-connect-commit-red, okx-simple-connect-commit-green, okx-simple-connect-commit-delivery, okx-simple-connect-wait, okx-simple-connect-red, okx-simple-connect-green, okx-simple-connect-delivery, okx-enrollment-remaining, okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
         default: full-delivery
       ui_run_id:
         description: 'Immutable UI candidate artifact run for test-only acceptance'
@@ -652,6 +652,32 @@ jobs:
         with:
           name: Windows-Local-Package-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/windows-local-package/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
+  windowsAdvisoryPrerequisite:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-admission-20261105' && inputs.mode == 'windows-advisory-prerequisite'
+    runs-on: windows-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.0'
+          architecture: x64
+      - name: Native prerequisite only (no APEX build, broker, auth tokens or UI)
+        shell: pwsh
+        run: ./tools/windows/Test-WindowsAdvisoryPrerequisite.ps1 -Phase '${{ inputs.phase }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-Advisory-Prerequisite-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-advisory-prerequisite/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
