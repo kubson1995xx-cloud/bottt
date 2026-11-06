@@ -78,6 +78,15 @@ public sealed class LocalPackagedTests
         using var r=await host.Http.PostAsJsonAsync(path,new{commandId=Guid.NewGuid().ToString("N")});r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString()!;
     }
+    private static async Task Pointer(WindowsCdpBrowser browser,string sid,string selector)
+    {
+        string target=JsonSerializer.Serialize(selector);
+        var point=await browser.Evaluate(sid,"(()=>{const e=document.querySelector("+target+");if(!e)return null;e.scrollIntoView({block:'center',behavior:'instant'});const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,hit:e.contains(document.elementFromPoint(x,y)),disabled:!!e.disabled}})()");
+        Assert.True(point.ValueKind==JsonValueKind.Object&&point.GetProperty("hit").GetBoolean()&&!point.GetProperty("disabled").GetBoolean(),"Pointer target unavailable: "+selector);
+        double x=point.GetProperty("x").GetDouble(),y=point.GetProperty("y").GetDouble();
+        await browser.CommandAsync("Input.dispatchMouseEvent",new{type="mousePressed",x,y,button="left",clickCount=1},sid);
+        await browser.CommandAsync("Input.dispatchMouseEvent",new{type="mouseReleased",x,y,button="left",clickCount=1},sid);
+    }
     // Real Edge on the EXTRACTED EXE's /local/ panel: mode pill, honest disconnected "—" state, every
     // requested view, and the collapsed "Wersja VPS" section still mounting the VPS controller.
     private static async Task<string> Label(string baseUri,string root,string evidence,string expected,params string[] views)
@@ -94,15 +103,23 @@ public sealed class LocalPackagedTests
         string? dir=Environment.GetEnvironmentVariable("APEX_COMPOSITION_EVIDENCE");
         foreach(string view in views.Length==0?new[]{"dashboard"}:views)
         {
-            await browser.Evaluate(sid,"location.hash="+JsonSerializer.Serialize("#"+view));
+            await Pointer(browser,sid,"#desktop-nav [data-page='"+view+"']");
             await browser.Wait(sid,"document.getElementById("+JsonSerializer.Serialize(view)+").classList.contains('active')","View not shown: "+view);
             if(view=="settings")
             {
-                await browser.Evaluate(sid,"document.getElementById('vps-details').open=true");
+                Assert.False((await browser.Evaluate(sid,"document.getElementById('vps-details').open")).GetBoolean());
+                await Pointer(browser,sid,"#vps-details summary");
                 await browser.Wait(sid,"document.querySelector('#vps-details #remote-controller')!==null&&(document.querySelector('#remote-state')?.textContent||'').length>0","VPS controller did not mount under Ustawienia");
                 Assert.True((await browser.Evaluate(sid,"document.getElementById('remote-controller').compareDocumentPosition(document.getElementById('control-card'))&Node.DOCUMENT_POSITION_PRECEDING")).GetInt32()!=0,"VPS section must not sit above the local controls");
             }
             if(dir!=null){var image=await browser.CommandAsync("Page.captureScreenshot",new{format="png"},sid);File.WriteAllBytes(Path.Combine(dir,evidence+"-"+view+".png"),Convert.FromBase64String(image.GetProperty("data").GetString()!));}
+        }
+        if(views.Length>1)
+        {
+            await browser.CommandAsync("Emulation.setDeviceMetricsOverride",new{width=390,height=844,deviceScaleFactor=1,mobile=true},sid);
+            await Pointer(browser,sid,"#mobile-nav [data-page='dashboard']");
+            await browser.Wait(sid,"document.getElementById('dashboard').classList.contains('active')","Mobile navigation did not select Pulpit");
+            if(dir!=null){var image=await browser.CommandAsync("Page.captureScreenshot",new{format="png"},sid);File.WriteAllBytes(Path.Combine(dir,evidence+"-mobile.png"),Convert.FromBase64String(image.GetProperty("data").GetString()!));}
         }
         return text;
     }
