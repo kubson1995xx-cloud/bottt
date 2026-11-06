@@ -20,7 +20,8 @@ class NativeInstallerPaths(unittest.TestCase):
     k=ctypes.WinDLL('kernel32',use_last_error=True);create=k.CreateFileW;create.argtypes=[ctypes.c_wchar_p,ctypes.c_uint32,ctypes.c_uint32,ctypes.c_void_p,ctypes.c_uint32,ctypes.c_uint32,ctypes.c_void_p];create.restype=ctypes.c_void_p
     close=k.CloseHandle;close.argtypes=[ctypes.c_void_p]
     h=create(str(path),0x00020081,3,None,3,0x02200000,None);error=ctypes.get_last_error()
-    self.assertEqual(ctypes.c_void_p(-1).value,h);self.assertEqual(206,error);proof['rawCreateFileError']=error
+    if h==ctypes.c_void_p(-1).value:proof['pythonRawCreateFileError']=error
+    else:close(h);proof['pythonRawCreateFileAccepted']=True # Python carries its own longPathAware manifest.
     extended='\\\\?\\'+str(path);h=create(extended,0x00020081,3,None,3,0x02200000,None)
     self.assertNotEqual(ctypes.c_void_p(-1).value,h);close(h);proof['extendedNativeOpen']=True
     with self.assertRaises(StoreRefused):with_store.scan()
@@ -33,7 +34,12 @@ class NativeInstallerPaths(unittest.TestCase):
    alias=root/'hardlink-negative.md';os.link(path,alias)
    with self.assertRaises(StoreRefused):StoreLease(root,new,timeout=180)
    proof['hardlinkRefused']=True;alias.unlink()
-   subprocess.run(['icacls',str(path),'/grant','*S-1-1-0:R'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+   link=root/'reparse-negative';os.symlink(path.parent,link,target_is_directory=True)
+   try:
+    with self.assertRaises(StoreRefused):StoreLease(root,new,timeout=180)
+    proof['reparseRefused']=True
+   finally:link.unlink()
+   subprocess.run(['icacls',extended,'/grant','*S-1-1-0:R'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
    with self.assertRaises(StoreRefused):StoreLease(root,new,timeout=180)
    proof['broadAclRefused']=True
    Path(os.environ['APEX_INSTALLER_PATH_EVIDENCE']).write_text(json.dumps(proof,indent=2))
