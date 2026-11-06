@@ -128,6 +128,7 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
             }
             var request=new NavalEvaluationRequest(fleet,series,btc,cutoff,hasLong);var decision=new NavalD1Evaluator().Evaluate(request);
             Evaluated(decision.Action);evaluated=true;
+            if(decision.Action!=NavalAction.EntrySignal)advisoryEntryCode=decision.Action==NavalAction.ExitSignal?"OWNED_EXIT_ADVISORY_BYPASS":"STRATEGY_WAIT_NO_NEW_ENTRY";
             if(decision.Action==NavalAction.ExitSignal)
             {
                 var registered=account.RegisterConfirmedSignal(request);if(registered.Status is not (NavalMutationStatus.Applied or NavalMutationStatus.Duplicate))return registered;

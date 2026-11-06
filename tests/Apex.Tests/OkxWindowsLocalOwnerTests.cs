@@ -303,6 +303,7 @@ public sealed partial class OkxConditionalTradingTests
             Assert.Equal("EXECUTE_ARMED_START_SEPARATE_CONDITIONAL_RISK",await Command("arm"));
             await PanelScreens(control,"armed","ARMED","dashboard");
             fixture.Market.Wait=false;
+            foreach(string pair in new[]{"BTC-EUR","ETH-EUR","SOL-EUR"})await SeedSyntheticAdvice(fixture,pair);
             await Command("start");Assert.Equal("RUNNING",fixture.Loop.ReadStatus().Mode);
             Assert.True(control.KeepAwakeActive);Assert.Equal(WindowsLocalRunGuard.EsContinuous|WindowsLocalRunGuard.EsSystemRequired,control.KeepAwakeFlags);
             Assert.True(Status(control).GetProperty("keepAwake").GetBoolean());

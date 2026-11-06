@@ -92,7 +92,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
             atrDays=bravo.ResearchAtrDays,stopAtr=bravo.ResearchStopAtr,takeProfitR=bravo.ResearchTakeProfitR,instruments=Apex.Core.Naval.NavalOrdinaryDemoPolicy.FreshLocalInstruments};
         var trade=trading?.ReadStatus();
         return new{schema="apex-local-dashboard-v1",generatedUtc=DateTimeOffset.UtcNow,scopeId=binding?.ScopeId,connected,localOrdinary=binding!=null&&runtime.IsWindowsOrdinary(binding),
-            snapshotState,snapshot,equity,limits,marks,strategy,evaluation=trade?.Evaluation,obligations=trade?.Obligations,instruments=trade?.Instruments,lastResult=last};
+            snapshotState,snapshot,equity,limits,marks,strategy,evaluation=trade?.Evaluation,advisory=runtime.Advisory?.ReadStatus(),advisoryEntryCode=trading?.AdvisoryEntryCode,obligations=trade?.Obligations,instruments=trade?.Instruments,lastResult=last};
     }
     private bool Register(string scope,string id)
     {
@@ -103,7 +103,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
         // STOP/revocation is never queued behind a native dialog, connection or scheduler.
         if(action is "stop" or "emergency" or "disconnect" or "cancel")
         {
-            lock(sync){generation++;pending?.Cancel();runtime.Activation.Revoke();}
+            lock(sync){generation++;pending?.Cancel();runtime.Activation.Revoke();runtime.Advisory?.CancelAnalyses();}
             readObservations.TryRemove(scope,out _);
             bool ownerOpen=entries.TryGetValue(scope,out var existing)&&existing.Account.BrokerSession!=null;
             if(existing!=null)
@@ -127,6 +127,13 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
         {
             using var linked=CancellationTokenSource.CreateLinkedTokenSource(ct,lifetime.Token);
             long epoch;lock(sync){pending=linked;epoch=generation;}
+            if(action=="setup-ai")
+            {
+                if(entries.Values.Any(e=>e.Trading?.ReadStatus().Mode=="RUNNING"))return last="AI_SETUP_STOP_FIRST";
+                last="AI_LOCAL_SETUP_RUNNING";
+                string result=await WindowsOkxAdvisorySetup.ShowAsync(runtime.AdvisoryRoot,linked.Token).ConfigureAwait(false);
+                runtime.Advisory?.SetupChanged();return last=result;
+            }
             if(action=="create-local")
             {
                 if(entries.Values.Any(e=>e.Account.IsConnected))return last="DISCONNECT_BEFORE_CONFIGURATION";

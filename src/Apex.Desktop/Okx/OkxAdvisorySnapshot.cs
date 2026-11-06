@@ -57,7 +57,8 @@ internal sealed record OkxAdvisorySnapshot(string Instrument,string DatasetSha25
             if(state=="completed")
             {
                 Require(n.GetProperty("error").ValueKind==JsonValueKind.Null&&original!=null);
-                var native=n.GetProperty("native");Require(Text(native,"native_rating")==original&&Text(native,"recommendation")==mapped&&Text(native,"DatasetSha256")==digest&&Text(native,"summary").Length>0&&native.GetProperty("tool_calls").GetInt32()>=2);
+                var native=n.GetProperty("native");Fields(native,"native_rating recommendation summary module orchestration_module tool_calls DatasetSha256");
+                Require(Text(native,"module").Length is >0 and <=24000&&Text(native,"orchestration_module").Length is >0 and <=24000&&Text(native,"native_rating")==original&&Text(native,"recommendation")==mapped&&Text(native,"DatasetSha256")==digest&&Text(native,"summary").Length is >0 and <=16000&&native.GetProperty("tool_calls").GetInt32()>=2);
                 Require(Text(r,"Status")== (inference=="genuine"?"ok":"unavailable")&&Text(r,"Recommendation")== (inference=="genuine"?mapped:"WAIT"));
             }
             else Require(n.GetProperty("native").ValueKind==JsonValueKind.Null&&n.GetProperty("error").ValueKind==JsonValueKind.String&&original==null&&mapped==null&&Text(r,"Status")=="unavailable"&&Text(r,"Recommendation")=="WAIT");

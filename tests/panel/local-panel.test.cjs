@@ -123,3 +123,10 @@ test('no Pause, manual close, strategy switch or editable risk controls exist',a
  assert.ok(!html.includes('<script>')&&!/ style="/.test(html),'CSP: no inline script/style');
  assert.ok(!/https?:\/\//.test(html+fs.readFileSync(path.join(dir,'local-panel.css'),'utf8').replace(/http:\/\/www\.w3\.org\/2000\/svg/g,'')),'no external network resources');
 });
+test('AI uses real per-tool ratings and a closed local setup action without token inputs',async()=>{
+ const advisory={pairs:[{instrument:'BTC-EUR',state:'ENTRY_VETO',reason:'DUAL_BUY_REQUIRED',cutoff:now,expiresUtc:new Date(Date.now()+3600000).toISOString(),tools:[{tool:'vibe-trading',original:'WAIT',mapped:'WAIT',state:'completed'},{tool:'tradingagents',original:'Overweight',mapped:'BUY',state:'completed'}]}]};
+ const p=setup(serve(status({accounts:[]}),dashboard({advisory,advisoryEntryCode:'AI_ENTRY_VETO_DUAL_BUY_REQUIRED'})));await tick();
+ assert.match(p.text('ai-tools'),/Overweight.*BUY/);assert.match(p.text('ai-tools'),/vibe-trading.*WAIT/);assert.match(p.text('ai-entry'),/AI_ENTRY_VETO/);
+ p.click('#setup-ai');await tick();const call=p.calls.find(c=>c.options?.method==='POST');assert.equal(call.url,'/api/naval/okx/setup-ai');assert.deepEqual(JSON.parse(call.options.body),{commandId:'test-command'});
+ assert.deepEqual([...p.document.querySelectorAll('input,select,textarea')].map(i=>i.id),['notify-toggle']);
+});

@@ -46,6 +46,7 @@
    <button class="btn btn-danger full" id="stop-button" type="button">■ Zatrzymaj awaryjnie (STOP)</button>
    <div class="divider"></div>
    <div class="label-row"><span>Aktywna strategia</span><strong id="strategy-name">—</strong></div>
+   <div class="label-row"><span>AI — nowe kupno</span><strong id="ai-dashboard">—</strong></div>
    <div class="label-row"><span>Rynek</span><strong>OKX DEMO · cash SPOT · EUR</strong></div>
    <div class="label-row"><span>Tryb</span><span class="badge alt" id="mode-badge">—</span></div>
    <div class="label-row"><span>Uśpienie komputera</span><strong id="keepawake">—</strong></div>
@@ -62,7 +63,7 @@
 
 <section id="positions" class="view"><div class="card"><div class="card-pad"><h2 class="panel-title">Pozycje</h2><p class="panel-desc">Wyłącznie własne pozycje bota. Tylko odczyt — wyjścia wykonuje strategia (SL/TP lub sygnał wyjścia). Waluty wykluczone nie są pozycjami bota.</p></div><div class="table-overflow"><table class="data-table"><thead><tr><th>Para</th><th>Ilość</th><th>W toku</th><th>Koszt (z opłatą)</th><th>Koszt śr.</th><th>Aktualna cena</th><th>Niezreal. P&amp;L</th><th>Ochrona SL/TP</th></tr></thead><tbody id="positions-full"></tbody></table></div></div></section>
 
-<section id="strategies" class="view"><div class="strategies"><div class="card strategy" id="strategy-card"><div class="label-row"><strong id="strategy-title">—</strong><span class="pill green">AKTYWNA · STAŁA</span></div><p id="strategy-desc">—</p><div class="kv" id="strategy-params"></div><div><span class="tag">WYBÓR STRATEGII JEST STAŁY — TYLKO ODCZYT</span></div></div></div></section>
+<section id="strategies" class="view"><div class="strategies"><div class="card strategy" id="strategy-card"><div class="label-row"><strong id="strategy-title">—</strong><span class="pill green">AKTYWNA · STAŁA</span></div><p id="strategy-desc">—</p><div class="kv" id="strategy-params"></div><div><span class="tag">WYBÓR STRATEGII JEST STAŁY — TYLKO ODCZYT</span></div></div><div class="card strategy"><div class="label-row"><strong>Potwierdzenie AI — nowe zakupy</strong><button id="setup-ai" type="button" class="btn">Skonfiguruj AI lokalnie</button></div><p>Istniejący sygnał strategii + bieżące BUY od obu narzędzi. Wyjścia, ochrona i STOP nie zależą od AI.</p><div id="ai-tools" class="kv">Brak bieżących analiz.</div><p id="ai-entry">—</p></div></div></section>
 
 <section id="history" class="view"><div class="card"><div class="card-pad"><h2 class="panel-title">Historia transakcji</h2><p class="panel-desc" id="history-desc">Własne transakcje bota (fills) z opłatami. Tylko odczyt.</p></div><div class="table-overflow"><table class="data-table"><thead><tr><th>Data</th><th>Para</th><th>Operacja</th><th>Ilość</th><th>Cena</th><th>Brutto (EUR)</th><th>Opłata</th><th>Netto</th></tr></thead><tbody id="history-rows"></tbody></table></div></div></section>
 

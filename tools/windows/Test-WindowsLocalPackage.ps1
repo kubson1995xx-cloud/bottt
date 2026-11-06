@@ -39,13 +39,21 @@ try {
  & dotnet publish (Join-Path $repo 'src/Apex.Desktop/Apex.Desktop.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:NuGetAudit=false -o $publish *> (Join-Path $e 'publish.log')
  if($LASTEXITCODE -ne 0){throw 'Self-contained EXE publish failed'}
  Copy-Item $presentationDir (Join-Path $publish 'presentation') -Recurse
+ if($env:APEX_ADVISORY_PRIOR){
+  $helper=Join-Path $e 'advisory-store-helper'
+  & dotnet publish (Join-Path $repo 'tools/advisory/StrategyExport/StrategyExport.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:NuGetAudit=false -o $helper *> (Join-Path $e 'advisory-helper-publish.log');if($LASTEXITCODE -ne 0){throw 'Native self-contained store helper failed'}
+  & python (Join-Path $repo 'tools/advisory/build_bundle.py') --prior $env:APEX_ADVISORY_PRIOR --out (Join-Path $package 'AI') --guard (Join-Path $helper 'StrategyExport.exe') *> (Join-Path $e 'advisory-bundle.log');if($LASTEXITCODE -ne 0){throw 'Accepted native resource integrity failed'}
+  Copy-Item (Join-Path $repo 'tools/windows/AI-START.pl.md') (Join-Path $package 'AI-START.pl.md')
+ }
  Copy-Item (Join-Path $repo 'tools/windows/INSTRUKCJA-LOKALNIE.pl.md') (Join-Path $package 'INSTRUKCJA-LOKALNIE.pl.md')
  # Classic console host (conhost) so the greyed close button and Polish title work even where
  # Windows Terminal is the default console; falls back to a direct start if conhost is absent.
  [IO.File]::WriteAllText((Join-Path $package 'Uruchom-APEX.cmd'),"@echo off`r`nif exist `"%SystemRoot%\System32\conhost.exe`" (start `"`" `"%SystemRoot%\System32\conhost.exe`" `"%~dp0APEX-Desktop\ApexDesktop.exe`" %*) else (start `"`" `"%~dp0APEX-Desktop\ApexDesktop.exe`" %*)`r`n",[Text.Encoding]::ASCII)
  [ordered]@{schema='apex-windows-local-v1';sourceCommit=(& git -C $repo rev-parse HEAD);target='win-x64';sdk='8.0.427';selfContained=$true;edition='local-okx-demo';syntheticAcceptanceOnly=$true;brokerTested=$false;windows11Tested=$false;secureDesktopStartTestedOnExe=$false}|ConvertTo-Json|Set-Content (Join-Path $package 'apex-build.json') -Encoding UTF8
  $inventory=@(Get-ChildItem $package -File -Recurse|Sort-Object FullName|ForEach-Object{[ordered]@{path=$_.FullName.Substring($package.Length+1).Replace('\','/');sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$_.Length}})
- if(@($inventory|Where-Object{$_.path -match 'controller-ssh|controller-connection|authorized_keys|\.pub$|\.dpapi$|apex\.config|accounts/|credentials|\.pfx$'}).Count -ne 0){throw 'Private file in package layout'}
+ # AI contains genuine pinned upstream AUTH IMPLEMENTATION source (not auth state). Its
+ # complete accepted source/wheel/base maps were verified by build_bundle before inventory.
+ if(@($inventory|Where-Object{!$_.path.StartsWith('AI/') -and $_.path -match 'controller-ssh|controller-connection|authorized_keys|\.pub$|\.dpapi$|apex\.config|accounts/|credentials|\.pfx$'}).Count -ne 0){throw 'Private file in package layout'}
  [IO.File]::WriteAllLines((Join-Path $package 'manifest.sha256'),@($inventory|ForEach-Object{$_.sha256+'  '+$_.path}),[Text.UTF8Encoding]::new($false))
  $candidate=Join-Path $e 'candidate';New-Item -ItemType Directory -Path $candidate|Out-Null
  $zip=Join-Path $candidate 'APEX-Windows-Local-x64.zip'
@@ -53,11 +61,21 @@ try {
  [IO.Compression.ZipFile]::CreateFromDirectory($package,$zip,[IO.Compression.CompressionLevel]::Optimal,$false)
  $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
  $extractRoot=Join-Path $env:RUNNER_TEMP 'APEX-Windows-Local-extracted'
- & python (Join-Path $repo 'tests/package/safe_extract.py') $zip $extractRoot (Join-Path $e 'extraction.json') $zipHash
+ $extractFlags=@();if($env:APEX_ADVISORY_PRIOR){$extractFlags=@('--advisory-resources')}
+ & python (Join-Path $repo 'tests/package/safe_extract.py') $zip $extractRoot (Join-Path $e 'extraction.json') $zipHash @extractFlags
  if($LASTEXITCODE -ne 0){throw 'ZIP CRC/inventory/safe extraction failed'}
  $extracted=$extractRoot
  foreach($row in $inventory){if((Get-FileHash (Join-Path $extracted $row.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $row.sha256){throw 'Extracted file differs from package inventory'}}
  $exe=Join-Path $extracted 'APEX-Desktop/ApexDesktop.exe'
+ if($env:APEX_ADVISORY_PRIOR){
+  $env:APEX_ADVISORY_TEST_BUNDLE=Join-Path $extracted 'AI'
+  $advisoryProject=Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj'
+  & dotnet build $advisoryProject -c Release -p:NuGetAudit=false *> (Join-Path $e 'advisory-tests-build.log');if($LASTEXITCODE -ne 0){throw 'Native advisory consumers failed to compile'}
+  Copy-Item (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') (Join-Path $e 'advisory-tested-closure') -Recurse
+  $old=$ErrorActionPreference
+  try{$ErrorActionPreference='Continue';& dotnet test $advisoryProject -c Release --no-build --filter 'Gate=WindowsAdvisoryInstaller|Gate=WindowsAdvisoryIntegration|Gate=WindowsLocalExecution|FullyQualifiedName~OkxWindowsAdvisoryConsumerTests' --logger 'trx;LogFileName=advisory-native.trx' --results-directory $e -- xUnit.ParallelizeTestCollections=false *> (Join-Path $e 'advisory-native-tests.log');$advisoryCode=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
+  if($advisoryCode -ne 0){throw 'Native extracted-resource installer/admission/lifecycle failed'}
+ }
  # Runner-only synthetic OKX DEMO endpoint (never shipped): trusted test root + hosts redirect.
  Copy-Item $hosts $hostsBackup
  $cert=New-SelfSignedCertificate -DnsName 'eea.okx.com','wseeapap.okx.com' -CertStoreLocation 'Cert:\LocalMachine\My' -NotAfter (Get-Date).AddDays(1) -KeyExportPolicy Exportable

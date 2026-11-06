@@ -2,13 +2,15 @@
 import hashlib, json, pathlib, re, stat, sys, zipfile
 archive, destination, evidence = map(pathlib.Path, sys.argv[1:4])
 expected = sys.argv[4]
+advisory = len(sys.argv)==6 and sys.argv[5]=='--advisory-resources'
+assert len(sys.argv)==5 or advisory
 assert re.fullmatch('[0-9a-f]{64}', expected)
 sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
 assert sha(archive) == expected
 assert not destination.exists()
 files, seen, total = {}, set(), 0
 with zipfile.ZipFile(archive) as z:
-    assert 0 < len(z.infolist()) <= 10000
+    assert 0 < len(z.infolist()) <= (50000 if advisory else 10000)
     for entry in z.infolist():
         name = entry.filename.replace('\\', '/')
         parts = name.rstrip('/').split('/')
@@ -22,7 +24,7 @@ with zipfile.ZipFile(archive) as z:
         assert not entry.flag_bits & 1
         assert entry.file_size <= 256*1024*1024 and entry.file_size <= max(1024*1024, entry.compress_size*500)
         total += entry.file_size
-        assert total <= 512*1024*1024
+        assert total <= (1536 if advisory else 512)*1024*1024
         assert (destination/name).resolve().is_relative_to(destination.resolve())
         if not entry.is_dir(): files[name] = entry
     keys = {f.casefold() for f in files}
@@ -30,6 +32,9 @@ with zipfile.ZipFile(archive) as z:
         parts = name.split('/')
         assert all('/'.join(parts[:i]).casefold() not in keys for i in range(1, len(parts)))
     assert z.testzip() is None
+    if advisory:
+        bundle=json.loads(z.read('AI/bundle.json'))
+        assert bundle['Schema']=='apex-advisory-bundle-v1' and isinstance(bundle['Files'],list)
     destination.mkdir()
     for name, entry in files.items():
         target = destination/name

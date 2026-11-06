@@ -4,7 +4,7 @@ from pathlib import Path
 REPO=Path(__file__).resolve().parents[2];BRANCH='apex-demo/controller-windows-admission-20261105'
 def run(*args,**kw):return subprocess.check_output(args,cwd=REPO,**kw).decode().strip()
 def main():
- p=argparse.ArgumentParser();p.add_argument('lane');p.add_argument('--base',required=True);p.add_argument('--phase',choices=['red','green'],required=True);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('lane');p.add_argument('--base',required=True);p.add_argument('--phase',choices=['red','green'],required=True);p.add_argument('--delivery',action='store_true');a=p.parse_args()
  assert a.lane.startswith('integration-') and a.lane.replace('-','').isalnum()
  root=REPO/'artifacts/operational-windows-advisory'/a.lane;root.mkdir(parents=True,exist_ok=False)
  head=run('git','rev-parse','HEAD');idx=REPO/'.git/index';ih=hashlib.sha256(idx.read_bytes()).hexdigest()
@@ -17,9 +17,15 @@ def main():
  files=['src/Apex.Desktop/Okx/OkxAdvisorySnapshot.cs','tests/Apex.Tests/OkxWindowsAdvisoryConsumerTests.cs','tests/Apex.Tests/OkxWindowsAdvisoryStoreTests.cs','tools/windows/Test-WindowsAdvisoryIntegration.ps1','tools/windows/publish_windows_advisory_integration.py']
  for rel in ['src/Apex.Desktop/Okx/OkxAccountConnectionService.cs','src/Apex.Desktop/Okx/OkxOperationalTradingService.cs','src/Apex.Desktop/Okx/WindowsOkxAdvisoryStore.cs','src/Apex.Desktop/Okx/OkxAdvisoryCoordinator.cs','src/Apex.Desktop/Okx/OkxAdvisoryAdmission.cs','tests/Apex.Tests/OkxWindowsAdvisoryEntryTests.cs']:
   if (REPO/rel).exists():files.append(rel)
+ if a.delivery:
+  files += ['src/Apex.Desktop/Okx/'+r for r in ['OkxNavalRuntime.cs','OkxOperatorControl.cs','OkxControlEndpoints.cs','WindowsOkxAdvisorySetup.cs','local-panel.html','local-panel.js']]
+  files += ['tools/advisory/'+r for r in ['local_install.py','local_companion.py','build_bundle.py','store.py','tests/test_local_install.py']]
+  files += ['tools/windows/'+r for r in ['Test-WindowsLocalPackage.ps1','Test-WindowsAdvisoryDelivery.ps1','advisory-delivery-job.yml','AI-START.pl.md']]
+  files += ['tests/'+r for r in ['Apex.Tests/OkxWindowsAdvisorySetupTests.cs','Apex.Tests/OkxWindowsLocalLifecycleTests.cs','Apex.Tests/OkxWindowsLocalOwnerTests.cs','Apex.ControllerComposition.Tests/LocalPackagedTests.cs','panel/local-panel.test.cjs','package/safe_extract.py']]
  for rel in files:add(rel,(REPO/rel).read_bytes())
  workflow=run('git','show',a.base+':.github/workflows/windows-demo.yml')+'\n';marker='\n  windowsAdvisoryRefresh:\n';assert workflow.count(marker)==1
  job=(REPO/'tools/windows/advisory-store-job.yml').read_text().replace('I1 native storage RED or full advisory GREEN, no upstream reinstall','Consolidated advisory native production boundary').replace('Test-WindowsAdvisoryStore.ps1','Test-WindowsAdvisoryIntegration.ps1').replace('Windows-Advisory-Store-','Windows-Advisory-Integration-').replace('windows-advisory-store/','windows-advisory-integration/')
+ if a.delivery:job=(REPO/'tools/windows/advisory-delivery-job.yml').read_text()
  add('.github/workflows/windows-demo.yml',(workflow.split(marker)[0]+'\n'+job).encode())
  tree=run('git','write-tree',env=env);commit=run('git','commit-tree',tree,'-p',a.base,input=('feat: Windows advisory integration '+a.phase+'\n').encode())
  record={'base':a.base,'commit':commit,'tree':tree,'inputs':rows,'mainHead':head,'mainIndex':ih,'phase':a.phase}

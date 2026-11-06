@@ -17,9 +17,14 @@ class StoreLease:
         # Do not resolve symlinks before native admission.
         if os.name=='nt':
             guard=Path(guard) if guard else Path(__file__).parent/'StrategyExport/bin/Debug/net8.0/StrategyExport.dll'
-            host=shutil.which('dotnet')
-            if not host or not guard.is_file():raise StoreRefused('native advisory store admission helper required')
-            process=subprocess.Popen([host,str(guard),'--guard',str(root)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+            if guard.suffix.lower()=='.exe':
+                if not guard.is_file():raise StoreRefused('native advisory store admission helper required')
+                command=[str(guard),'--guard',str(root)]
+            else:
+                host=shutil.which('dotnet')
+                if not host or not guard.is_file():raise StoreRefused('native advisory store admission helper required')
+                command=[host,str(guard),'--guard',str(root)]
+            process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
             self.process=process
             line=self._line()
             if line.strip()!=b'ADVISORY_STORE_ADMITTED':

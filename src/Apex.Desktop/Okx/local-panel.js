@@ -213,7 +213,20 @@
     else if (!snap) { text = dash?.snapshotState === 'CHANGED_RETRY' ? 'Stan bota zmienia się — odczyt zostanie ponowiony.' : 'Bot nie jest połączony z OKX (Observe) — saldo, pozycje i historia niedostępne („—”). Wykonaj kroki w „Sterowanie botem”.'; klass += ' warn'; }
     n.className = klass; n.textContent = text; hide(n, !text);
   }
-  function render() { collectEvents(); renderNotice(); renderCards(); drawChart(); positionRows(false); positionRows(true); historyRows(); renderMarkets(); renderStrategy(); renderSettings(); renderControls(); renderFeed(); }
+  function renderAI() {
+    const box=$('ai-tools');box.replaceChildren();const pairs=healthy?dash?.advisory?.pairs||[]:[];
+    if(!pairs.length)box.append(el('p',null,'Brak bieżących analiz — wymagane lokalne AI i logowanie OpenAI.'));
+    for(const pair of pairs){
+      const stale=pair.expiresUtc&&Date.parse(pair.expiresUtc)<=Date.now();
+      box.append(el('b',null,pair.instrument+' · '+(stale?'STALE':pair.state)+' · '+pair.reason));
+      for(const tool of pair.tools||[])box.append(el('p',null,tool.tool+' · '+(tool.original||'—')+' → '+(tool.mapped||'—')+' · '+tool.state));
+      if(pair.cutoff)box.append(el('small',null,'Cutoff '+time(pair.cutoff)+' · ważne do '+time(pair.expiresUtc)));
+    }
+    $('ai-entry').textContent=healthy?(dash?.advisoryEntryCode||'Strategia nie zgłosiła nowego kandydata. AI nie tworzy sygnałów.'):'—';
+    $('ai-dashboard').textContent=healthy?(dash?.advisoryEntryCode||'Sprawdź Strategie / AI'):'—';
+    $('setup-ai').disabled=!healthy||status?.executionMode==='VPS'||account()?.mode==='RUNNING'||pending.has('setup-ai');
+  }
+  function render() { collectEvents(); renderNotice(); renderCards(); drawChart(); positionRows(false); positionRows(true); historyRows(); renderMarkets(); renderStrategy(); renderSettings(); renderControls(); renderFeed(); renderAI(); }
 
   async function getJson(url) { const abort = new AbortController(), t = setTimeout(() => abort.abort(), 5000); try { const r = await fetch(url, {cache: 'no-store', signal: abort.signal}); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); } finally { clearTimeout(t); } }
   async function refresh() {
@@ -225,10 +238,10 @@
   async function command(action) {
     const acct = account();
     if (action === 'stop' && !confirm(STOP_CONFIRM)) return;
-    const url = action === 'create-local' ? '/api/naval/okx/create-local' : action === 'stop' && !acct ? '/api/naval/okx/cancel' : '/api/naval/okx/' + encodeURIComponent(acct?.scopeId || '') + '/' + action;
-    if (action !== 'create-local' && action !== 'stop' && !acct) { toast('Brak lokalnego bota — polecenie nie zostało wysłane.'); return; }
+    const url = action === 'setup-ai' ? '/api/naval/okx/setup-ai' : action === 'create-local' ? '/api/naval/okx/create-local' : action === 'stop' && !acct ? '/api/naval/okx/cancel' : '/api/naval/okx/' + encodeURIComponent(acct?.scopeId || '') + '/' + action;
+    if (action !== 'setup-ai' && action !== 'create-local' && action !== 'stop' && !acct) { toast('Brak lokalnego bota — polecenie nie zostało wysłane.'); return; }
     pending.add(action); render(); toast('Wysłano: ' + action + '. Okna Windows (klucz, potwierdzenie, hasło) pojawią się osobno — sprawdź pasek zadań.');
-    const abort = new AbortController(), t = setTimeout(() => abort.abort(), 390000);
+    const abort = new AbortController(), t = setTimeout(() => abort.abort(), action==='setup-ai'?1500000:390000);
     try {
       const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Apex-Local': '1'}, body: JSON.stringify({commandId: crypto.randomUUID()}), signal: abort.signal});
       let body = null; try { body = await r.json(); } catch { body = null; }
@@ -238,6 +251,7 @@
   }
 
   $('stop-button').addEventListener('click', () => command('stop'));
+  $('setup-ai').addEventListener('click', () => command('setup-ai'));
   for (const b of document.querySelectorAll('[data-goto]')) b.addEventListener('click', () => navigate(b.dataset.goto));
   $('vps-details').addEventListener('toggle', () => { if (!$('vps-details').open || vpsLoaded) return; vpsLoaded = true; const s = document.createElement('script'); s.src = '/remote-controller.js'; s.defer = true; document.body.append(s); });
   window.addEventListener('beforeunload', e => { if (account()?.mode === 'RUNNING') { e.preventDefault(); e.returnValue = 'Bot APEX DZIAŁA. Zamknięcie panelu nie zatrzymuje bota; zamknięcie okna APEX przerwie jego pracę. Najpierw STOP.'; return e.returnValue; } });

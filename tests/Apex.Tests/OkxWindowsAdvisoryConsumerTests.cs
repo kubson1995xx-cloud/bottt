@@ -26,7 +26,7 @@ public sealed class OkxWindowsAdvisoryConsumerTests
             foreach(string tool in new[]{"vibe-trading","tradingagents"})
             {
                 string original=tool=="vibe-trading"?"BUY":"Overweight";
-                var native=new JsonObject { ["native"]=new JsonObject{["native_rating"]=original,["recommendation"]="BUY",["summary"]="Explicit synthetic test operand",["DatasetSha256"]=Digest,["tool_calls"]=2},["error"]=null };
+                var native=new JsonObject { ["native"]=new JsonObject{["native_rating"]=original,["recommendation"]="BUY",["summary"]="Explicit synthetic test operand",["module"]="synthetic/source.py",["orchestration_module"]="synthetic/graph.py",["DatasetSha256"]=Digest,["tool_calls"]=2},["error"]=null };
                 var report=new JsonObject{["Schema"]="apex-advisory-v1",["Status"]="ok",["Tool"]=tool,["Instrument"]="BTC-EUR",["QuoteCurrency"]="EUR",["AsOfUtc"]="2026-11-06T00:00:00Z",["ExpiresUtc"]="2026-11-07T00:00:00Z",["DatasetSha256"]=Digest,["Provider"]="openai-codex",["Model"]="gpt-6.1-sol",["Recommendation"]="BUY",["ExecutionAllowed"]=false,["EvidenceSources"]=new JsonArray("https://eea.okx.com/api/v5/market/candles"),["Summary"]="Synthetic test only",["SourceCommit"]=tool=="vibe-trading"?"8172827ec537146920e112a9952e8e7e063e218b":"9fa1196fffbcfd9de5146d2dd2869df84ab99838"};
                 Mutate?.Invoke(tool+".json",report);Mutate?.Invoke(tool+"-native.json",native);
                 string folder="generations/"+Generation+"/";

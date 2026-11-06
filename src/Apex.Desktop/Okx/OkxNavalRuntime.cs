@@ -12,6 +12,8 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     private readonly Lazy<IOkxExecutionSecretProvider> secrets;
     private readonly OkxCredentialUseRegistry credentialUses=new();
     private readonly string dataRoot;
+    internal string AdvisoryRoot {get;private set;}="";
+    internal OkxAdvisoryCoordinator? Advisory {get;private set;}
     private readonly List<OkxAccountConnectionService> accountServices=new();
     private bool disposed;
     internal IReadOnlyList<OkxScopeBinding> Bindings { get; private set; }
@@ -53,7 +55,7 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     internal string Reason=>Bindings.Count==0?"NOT_CONFIGURED":"ACTIVATION_REQUIRED";
     private OkxNavalRuntime(string admittedDataRoot,IReadOnlyList<OkxScopeBinding> bindings,Func<IOkxExecutionSecretProvider> secrets,IOkxProtectedActivationProvider activation)
     {
-        dataRoot=admittedDataRoot;var copy=bindings.ToArray();
+        dataRoot=admittedDataRoot;AdvisoryRoot=System.IO.Path.Combine(dataRoot,"advisory");var copy=bindings.ToArray();
         foreach(var binding in copy)_=OkxConfiguration.Paths(admittedDataRoot,binding);
         if(copy.Select(b=>b.Account.Environment).Distinct().Count()!=copy.Length||copy.Select(b=>b.ScopeId).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=copy.Length)throw new System.IO.InvalidDataException("OKX_SCOPE_INVALID");
         Bindings=Array.AsReadOnly(copy);this.secrets=new(secrets);Activation=new(activation,()=>DateTimeOffset.UtcNow);
@@ -62,7 +64,8 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     {
         OkxNavalRuntime? runtime=null;
         var provider=new WindowsOkxApprovalProvider(activationAdmitted:r=>runtime?.NativeActivationAdmitted(r)==true);
-        runtime=new(admittedDataRoot,bindings,()=>new WindowsOkxCredentialStore(admittedDataRoot),provider);return runtime;
+        runtime=new(admittedDataRoot,bindings,()=>new WindowsOkxCredentialStore(admittedDataRoot),provider);
+        if(OperatingSystem.IsWindows()){runtime.AdvisoryRoot=OkxAdvisoryCoordinator.LocalRoot;runtime.Advisory=new(runtime.AdvisoryRoot);}return runtime;
     }
     private bool NativeActivationAdmitted(OkxActivationRequest request)
     {
@@ -82,7 +85,7 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     internal static OkxNavalExecutionDispatcher ComposeOfflineExecutionForTests(Apex.Core.Naval.NavalExecutionTransactions transactions,
         Func<Apex.Adapters.Okx.Execution.IOkxSerializedDispatchFence,Apex.Adapters.Okx.Execution.OkxExecutionClient> offlineClientFactory)=>new(transactions,offlineClientFactory);
     internal ValueTask StartAsync(CancellationToken cancellation)
-    {cancellation.ThrowIfCancellationRequested();lock(sync){if(disposed)throw new ObjectDisposedException(nameof(OkxNavalRuntime));}return ValueTask.CompletedTask;}
+    {cancellation.ThrowIfCancellationRequested();lock(sync){if(disposed)throw new ObjectDisposedException(nameof(OkxNavalRuntime));Advisory?.Start();}return ValueTask.CompletedTask;}
     internal void RegisterAccountService(OkxAccountConnectionService service,string root,OkxScopeBinding binding)
     {
         lock(sync){if(disposed||root!=dataRoot||!Bindings.Contains(binding))throw new InvalidOperationException("OKX_CONNECTION_SCOPE_DENIED");accountServices.Add(service);}
@@ -157,7 +160,8 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         OkxAccountConnectionService[] services;
-        lock(sync){if(disposed)return;disposed=true;Activation.Close();services=accountServices.ToArray();}
+        lock(sync){if(disposed)return;disposed=true;Activation.Close();Advisory?.CancelAnalyses();services=accountServices.ToArray();}
         foreach(var service in services)await service.DisposeAsync().ConfigureAwait(false);
+        if(Advisory!=null)await Advisory.DisposeAsync().ConfigureAwait(false);
     }
 }

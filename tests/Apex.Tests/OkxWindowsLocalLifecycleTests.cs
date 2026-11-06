@@ -47,10 +47,11 @@ public sealed partial class OkxConditionalTradingTests
                 string instrument=fixture.Account.BrokerSession!.ReadState().NavalBroker!.Operational!.Intents.Last().Instrument;
                 fixture.Cycles.Add(new(instrument,peer.Client,peer.Attachment,peer.EntryOrderId,peer.ExitOrderId,peer.GeneratedAlgoId,peer.Size,f.Clock.GetUtcNow()));
             };
-            fixture.Peer.BeforeMutationResponse=kind=>{var c=fixture.Cycles.Last();if(kind=="cancel")c.Canceled=true;if(kind=="sell"){c.ExitClient=fixture.Peer.ExitClient;c.Sold=true;c.SellUtc=f.Clock.GetUtcNow();}};
+            fixture.Peer.BeforeMutationResponse=kind=>{var c=fixture.Cycles.Last();if(kind=="cancel"){c.Canceled=true;if(fixture.Cycles.Count==2)foreach(string pair in new[]{"BTC-EUR","ETH-EUR","SOL-EUR"})File.Delete(Path.Combine(f.Root,"advisory","reports",pair,"CURRENT.json"));}if(kind=="sell"){c.ExitClient=fixture.Peer.ExitClient;c.Sold=true;c.SellUtc=f.Clock.GetUtcNow();}};
             Assert.Equal("EXECUTE_ARMED_START_SEPARATE_CONDITIONAL_RISK",await Command("arm"));
             Assert.Equal("ORDINARY_DEMO_UNARMED_STOP_REQUIRED",await Command("prepare"));
             fixture.Market.Wait=false;
+            foreach(string pair in new[]{"BTC-EUR","ETH-EUR","SOL-EUR"})await SeedSyntheticAdvice(fixture,pair);
             string started=await Command("start");Assert.Equal("RUNNING",fixture.Loop.ReadStatus().Mode);
             for(int n=0;n<1200;n++)
             {
