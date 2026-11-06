@@ -186,6 +186,93 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(parse('\n'.join(map(json.dumps,valid)))['text'],'synthetic transport fixture')
 
 class ProbeTests(unittest.TestCase):
+    def assert_missing_root_refused(self, *, omitted):
+        import prerequisite
+        import runtime_contract as runtime
+        contract = runtime.RuntimeContract({})
+        # Admission would succeed: refusal must be at the public API boundary,
+        # not an unrelated Windows/source/hash guard or Path(None) conversion.
+        with patch.object(prerequisite, 'validate_contract', return_value=contract) as admission, \
+             patch.object(prerequisite, 'Path', wraps=Path) as filesystem, \
+             patch.object(prerequisite.subprocess, 'run') as launch:
+            error = None
+            try:
+                if omitted:
+                    prerequisite.probe_runtime(contract)
+                else:
+                    prerequisite.probe_runtime(contract, None)
+            except Exception as caught:
+                error = caught
+            admission.assert_not_called()
+            filesystem.assert_not_called()
+            launch.assert_not_called()
+            self.assertIsInstance(error, TypeError if omitted else ValueError)
+            self.assertIn('evidence_root', str(error))
+
+    def test_probe_omitted_root_refuses_before_admission_or_io(self):
+        self.assert_missing_root_refused(omitted=True)
+
+    def test_probe_none_root_refuses_before_admission_or_io(self):
+        self.assert_missing_root_refused(omitted=False)
+
+    def test_probe_explicit_root_runs_admitted_supervisor(self):
+        import prerequisite
+        import runtime_contract as runtime
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            contract, pins = ContractTests().fixture(base / 'fixture')
+            contract = runtime.RuntimeContract(contract.runtimes)
+            for name, row in contract.runtimes.items():
+                row['prefix'] = str(base / name / 'env')
+            root = base / 'caller-owned-evidence'
+            (root / 'evidence').mkdir(parents=True)
+            (root / 'closure').mkdir()
+            (root / 'closure/runtime-contract.json').write_text(json.dumps(dataclasses.asdict(contract)))
+            events = []
+            expected = {}
+            for name, row in contract.runtimes.items():
+                observed = {'python': row['python'], 'prefix': row['prefix'], 'platform': 'win32',
+                            'python_version': [3,14,0], 'import_ok': True}
+                if name == 'hermes':
+                    observed.update(bootstrap_ok=True, no_auth_refused=True,
+                                    auth_code='codex_auth_missing', inference_accepted=False)
+                else:
+                    observed.update(computation_ok=True, synthetic_public_input=True,
+                                    pandas_version='2.3.3' if name == 'vibe-trading' else '3.1.1')
+                expected[name] = observed
+
+            def admit(value):
+                events.append('admission')
+                return runtime.validate_contract(value, platform='win32')
+
+            def child(command, **kwargs):
+                name = command[3]
+                events.append(name)
+                self.assertEqual(command, [contract.runtimes[name]['python'], '-I',
+                    str(ROOT / 'native_probe.py'), name,
+                    str(root / 'closure/runtime-contract.json'), str(root / 'evidence' / (name + '-probe.json'))])
+                home = root / 'build' / name / 'probe-home'
+                self.assertEqual(kwargs['cwd'], home)
+                self.assertTrue(home.is_dir())
+                self.assertEqual(kwargs['env']['HOME'], str(home.resolve()))
+                # Only the external native child is stubbed; production admission,
+                # isolated directories/config, logs and observation checks run.
+                Path(command[-1]).write_text(json.dumps(expected[name]))
+                return SimpleNamespace(returncode=0, stdout='synthetic child observation\n', stderr='')
+
+            with patch.object(runtime, 'PINS', pins), \
+                 patch.object(prerequisite, 'validate_contract', side_effect=admit), \
+                 patch.object(prerequisite.subprocess, 'run', side_effect=child):
+                result = prerequisite.probe_runtime(contract, root)
+            self.assertEqual(events, ['admission', 'vibe-trading', 'tradingagents', 'hermes'])
+            self.assertEqual(result, prerequisite.ProbeResult(expected, True, False))
+            for name in expected:
+                self.assertEqual(json.loads((root / 'evidence' / (name + '-exit.json')).read_text())['exitCode'], 0)
+                self.assertEqual((root / 'evidence' / (name + '-stdout.log')).read_text(), 'synthetic child observation\n')
+            self.assertIn('adopt_external_logins: false',
+                          (root / 'build/hermes/probe-home/hermes/config.yaml').read_text())
+
     def test_observed_runtime_and_computation_must_match_contract(self):
         try: import prerequisite; validator = prerequisite.validate_observation
         except ModuleNotFoundError: validator = lambda *a: None

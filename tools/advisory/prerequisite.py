@@ -31,7 +31,9 @@ def validate_observation(name, expected, observed):
     return observed
 
 
-def probe_runtime(contract: RuntimeContract, evidence_root=None) -> ProbeResult:
+def probe_runtime(contract: RuntimeContract, evidence_root: Path) -> ProbeResult:
+    if evidence_root is None:
+        raise ValueError('evidence_root is required')
     validate_contract(contract)
     root = Path(evidence_root).resolve()
     observations = {}
