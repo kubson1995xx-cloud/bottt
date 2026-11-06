@@ -218,6 +218,7 @@ internal sealed class OperationalPeer : HttpMessageHandler, IOkxExecutionSecretP
     internal readonly List<OperationalSocket> Sockets = new();
     internal int SecretOpens, Approvals;
     internal Action? OnApproval;
+    internal Func<OkxActivationRequest,CancellationToken,ValueTask<bool>>? ActivationOverride;
     internal Action<string,JsonNode>? Mutate;
     internal Action<AtomicWriteBoundary>? WriteBoundary;
     internal IOkxProtectedBaselineProvider? BaselineOverride;
@@ -244,7 +245,7 @@ internal sealed class OperationalPeer : HttpMessageHandler, IOkxExecutionSecretP
     private static int nextUid=910000;
     public OkxExecutionCredentialLease Open(OkxScopeBinding binding,OkxScopePaths paths)
     { SecretOpens++; Assert.Equal(Binding,binding);return native?new WindowsOkxCredentialStore(Root).Open(binding,paths):new(binding,"DemoTradingApi",Key.ToArray(),Secret.ToArray(),Pass.ToArray()); }
-    public ValueTask<bool> ConfirmAsync(OkxActivationRequest request,CancellationToken ct)=>ValueTask.FromResult(true);
+    public ValueTask<bool> ConfirmAsync(OkxActivationRequest request,CancellationToken ct)=>ActivationOverride?.Invoke(request,ct)??ValueTask.FromResult(true);
     public ValueTask<OkxKeyScopeInspection?> InspectAsync(OkxScopeBinding binding,string fingerprint,CancellationToken ct)
         =>BaselineOverride?.InspectAsync(binding,fingerprint,ct)??ValueTask.FromResult<OkxKeyScopeInspection?>(new(fingerprint,"okx-dedicated-cash-no-funding-v1","synthetic-inspection","192.0.2.1"));
     public ValueTask<bool> ApproveAsync(NavalBaselineApprovalRequest request,CancellationToken ct)

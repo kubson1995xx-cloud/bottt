@@ -17,21 +17,27 @@ internal sealed class WindowsOkxLocalAttachment
     internal static async Task<WindowsOkxLocalAttachment?> RequestAsync(string root,OkxScopeBinding binding,OkxActivationPolicy activation,long generation,CancellationToken ct,object commitSync,Func<bool> current)
     {
         if(!OperatingSystem.IsWindows()||binding.Account.Environment!=NavalEnvironment.OkxDemo||!RemoteProfileAbsent(root))return null;
-        // Native DPAPI and exact physical origin are proven BEFORE asking for consent.
-        using var credential=new WindowsOkxCredentialStore(root).Open(binding,OkxConfiguration.Paths(root,binding));
-        if(credential.Provenance!="DemoTradingApi")return null;
-        using var store=OkxNavalStore.OpenNative(root,binding);store.Admit(false);
-        var origin=new NavalBrokerBinding(binding.Account,binding.MainUid,binding.ScopeId,binding.ConfigDigest,binding.CredentialBindingId,credential.Fingerprint,binding.SafetyVersion,store.StorageIdentity);
-        using var owner=NavalBrokerSession.OpenExisting(store,origin,new NativeClock());
-        if(owner.ReadState().Naval!.Mode!="STOP")return null;
-        var request=new OkxActivationRequest(binding,credential.Fingerprint,Guid.NewGuid(),generation,OkxActivationPurpose.LocalAttachment,DateTimeOffset.UtcNow.AddSeconds(120));
+        // Native DPAPI and physical origin are proven before consent, and rechecked
+        // after it. Do not hold Core's exclusive file lock while CredUI reopens the
+        // saved key for its own admission; no file-lock or ACL exemption is needed.
+        (string Fingerprint,string Snapshot) ValidateOrigin()
+        {
+            using var credential=new WindowsOkxCredentialStore(root).Open(binding,OkxConfiguration.Paths(root,binding));
+            if(credential.Provenance!="DemoTradingApi")throw new InvalidDataException("DEMO_CREDENTIAL_REQUIRED");
+            using var store=OkxNavalStore.OpenNative(root,binding);store.Admit(false);
+            var origin=new NavalBrokerBinding(binding.Account,binding.MainUid,binding.ScopeId,binding.ConfigDigest,binding.CredentialBindingId,credential.Fingerprint,binding.SafetyVersion,store.StorageIdentity);
+            using var owner=NavalBrokerSession.OpenExisting(store,origin,new NativeClock());
+            var state=owner.ReadState();if(state.Naval!.Mode!="STOP")throw new InvalidDataException("LOCAL_STOP_REQUIRED");
+            return (credential.Fingerprint,NavalJson.Hash(state));
+        }
+        var before=ValidateOrigin();
+        var request=new OkxActivationRequest(binding,before.Fingerprint,Guid.NewGuid(),generation,OkxActivationPurpose.LocalAttachment,DateTimeOffset.UtcNow.AddSeconds(120));
         var lease=await activation.RequestAsync(request,ct).ConfigureAwait(false);
         lock(commitSync)
         {
             if(lease==null||ct.IsCancellationRequested||!current()||!RemoteProfileAbsent(root)||!activation.TryConsume(lease,request,DateTimeOffset.UtcNow))return null;
-            // Store/owner lock remains held across approval; immutable origin is never edited.
-            store.Admit(false);_ = owner.ReadState();
-            return new(binding,credential.Fingerprint);
+            if(ValidateOrigin()!=before)return null;
+            return new(binding,before.Fingerprint);
         }
     }
     private sealed class NativeClock:INavalBrokerClock

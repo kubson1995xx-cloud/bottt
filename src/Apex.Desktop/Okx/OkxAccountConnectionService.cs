@@ -32,6 +32,10 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     private readonly SemaphoreSlim serial=new(1,1);
     private CancellationTokenSource? connection;
     private OkxExecutionObservationClient? reads;
+    private readonly object credentialSync=new();
+    private OkxExecutionCredentialLease? nativeConnectionCredential;
+    internal bool HasNativeCredential(string fingerprint){lock(credentialSync)return OperatingSystem.IsWindows()&&connected&&!disposed&&runtime.FiniteSafe&&nativeConnectionCredential?.Binding==binding&&nativeConnectionCredential.Fingerprint==fingerprint;}
+    internal string? NativeCredentialFingerprint{get{lock(credentialSync)return connected&&!disposed?nativeConnectionCredential?.Fingerprint:null;}}
     private object? lastReadDiagnostics,refusalOperands;
     internal object ReadDiagnostics()=>new{reads=(object?)reads?.ReadDiagnostics()??lastReadDiagnostics,refusal=status,operands=refusalOperands};
     private OkxObservationStream? stream;
@@ -120,6 +124,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
             connected=true;
             if(finite? !IsFiniteDemo : lease==null||!runtime.AuthorizeConnection(this,request,lease)){connected=false;status="ACTIVATION_REQUIRED";return false;}
             connection=new();context=new(Guid.NewGuid(),Guid.NewGuid());
+            if(OperatingSystem.IsWindows()){var admittedCredential=runtime.OpenCredential(binding,request.CredentialFingerprint);lock(credentialSync)nativeConnectionCredential=admittedCredential;}
             scope=new(binding.Account.Environment==NavalEnvironment.OkxDemo?"Demo":"Live",binding.Account.AccountId,binding.MainUid,binding.Account.QuoteCurrency,binding.CredentialBindingId);
             var provider=new SigningProvider(this,request.CredentialFingerprint);
             reads=readFactory(scope,provider,request.CredentialFingerprint,this);stream=streamFactory(scope,provider,request.CredentialFingerprint,this);
@@ -268,6 +273,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         if(stream!=null)await stream.DisposeAsync().ConfigureAwait(false);
         if(pumping!=null)await pumping.ConfigureAwait(false);
         reads=null;stream=null;pumping=null;
+        lock(credentialSync){nativeConnectionCredential?.Dispose();nativeConnectionCredential=null;}
     }
     private static bool SafeFailure(Exception ex)=>ex is InvalidOperationException or InvalidDataException or IOException or UnauthorizedAccessException or OperationCanceledException or TimeoutException or System.Text.Json.JsonException or Apex.Desktop.Services.WindowsDataException;
     private sealed class SigningProvider(OkxAccountConnectionService owner,string fingerprint) : IOkxSigningMaterialProvider
@@ -275,6 +281,11 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         public ValueTask<OkxSigningMaterial> OpenAsync(CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();if(!owner.connected||owner.disposed)throw new InvalidOperationException("CONNECTION_REVOKED");
+            if(OperatingSystem.IsWindows())lock(owner.credentialSync)
+            {
+                if(!owner.HasNativeCredential(fingerprint))throw new InvalidOperationException("CONNECTION_REVOKED");
+                return ValueTask.FromResult(owner.nativeConnectionCredential!.OpenSigningMaterial(owner.scope!));
+            }
             using var credential=owner.runtime.OpenCredential(owner.binding,fingerprint);
             return ValueTask.FromResult(credential.OpenSigningMaterial(owner.scope!));
         }

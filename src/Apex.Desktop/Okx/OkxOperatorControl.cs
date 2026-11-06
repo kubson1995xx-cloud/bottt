@@ -48,6 +48,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 connected=entry?.Account.IsConnected??false,mode=trading?.Mode??"STOP",code=trading?.Code??entry?.Account.Status??"NOT_CONNECTED",
                 armed=trading?.Armed??false,ready=trading?.Ready??false,revision=trading?.Revision,
                 cash=trading?.Cash.ToString(CultureInfo.InvariantCulture),held=trading?.Held.ToString(CultureInfo.InvariantCulture),
+                localOrdinary=runtime.IsWindowsOrdinary(b),instruments=trading?.Instruments,evaluation=trading?.Evaluation,
                 obligations=trading?.Obligations,inventory=trading?.Inventory,conditionalPolicy=trading?.ProductionProfileApproved??false,obligationsKnown=trading!=null,observations=entry?.Account.ReadAccountStatus(),keyState=WindowsOkxProvisioning.PassiveKeyState(config.DataDir,b),demoRead=demoReads.TryGetValue(b.ScopeId,out var read)?read:null};
         }).Cast<object>().Concat(readAccounts.Values.Select(a=>
         {
@@ -74,6 +75,8 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
             {
                 existing.Account.RevokePermissions();
                 if(action=="emergency")existing.Trading?.EmergencyStop();
+                Task? stopping;lock(sync){existing.LoopCancellation?.Cancel();stopping=existing.Loop;}
+                if(stopping!=null)await stopping.ConfigureAwait(false);
                 if(action=="disconnect")
                 {
                     await actionLane.WaitAsync(ct).ConfigureAwait(false);
@@ -141,7 +144,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 var permission=await runtime.Activation.RequestAsync(request,linked.Token).ConfigureAwait(false);
                 if(permission==null)return last="OBSERVE_CANCELLED_OR_EXPIRED";
                 if(!await entry.Account.ConnectAsync(request,permission,linked.Token).ConfigureAwait(false))return last=entry.Account.Status;
-                if(entry.Account.BrokerSession!=null)StartScheduler(entry);
+                if(entry.Account.BrokerSession!=null){entry.Trading=tradingFactory(entry.Account);if(!entry.Account.OrdinaryDemoPolicy)StartScheduler(entry);}
                 return last=entry.Account.Status;
             }
             if(!entries.TryGetValue(scope,out var current))return last="CONNECT_REQUIRED";
@@ -151,15 +154,33 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 StartScheduler(current);return last=current.Account.Status;
             }
             if(current.Trading==null)return last="BASELINE_REQUIRED";
+            if(action=="prepare")
+            {
+                if(!runtime.IsWindowsOrdinary(binding))return last="LOCAL_ORDINARY_DEMO_REQUIRED";
+                var status=current.Trading.ReadStatus();
+                if(status.Armed||status.Mode!="STOP")return last="ORDINARY_DEMO_UNARMED_STOP_REQUIRED";
+                await DrainScheduler(current).ConfigureAwait(false);
+                var prepared=await current.Trading.PrepareOrdinaryDemoAsync(linked.Token).ConfigureAwait(false);
+                lock(sync){if(generation!=epoch||linked.IsCancellationRequested)return last="LOCAL_ACTION_CANCELLED";return last=prepared.Code;}
+            }
             if(action=="arm")
             {
+                if(current.Account.OrdinaryDemoPolicy)await DrainScheduler(current).ConfigureAwait(false);
                 current.Trading.Stop();runtime.Activation.Revoke(); // Replacing/canceling permission never retains an older arm.
                 var request=new OkxActivationRequest(binding,runtime.CredentialFingerprint(binding),current.Account.TradingSessionId,epoch,OkxActivationPurpose.Execute,DateTimeOffset.UtcNow.AddSeconds(120));
                 var permission=await runtime.Activation.RequestAsync(request,linked.Token).ConfigureAwait(false);
                 if(permission==null)return last="EXECUTE_CANCELLED_OR_EXPIRED";
-                return last=current.Trading.Arm(request,permission)?"EXECUTE_ARMED_START_SEPARATE_CONDITIONAL_RISK":"EXECUTE_REFUSED";
+                if(!current.Trading.Arm(request,permission))return last="EXECUTE_REFUSED";
+                if(current.Account.OrdinaryDemoPolicy)await current.Trading.ReconcileAsync(linked.Token).ConfigureAwait(false);
+                lock(sync){if(generation!=epoch||linked.IsCancellationRequested){current.Trading.Stop();return last="LOCAL_ACTION_CANCELLED";}return last=current.Trading.ReadStatus().Armed?"EXECUTE_ARMED_START_SEPARATE_CONDITIONAL_RISK":"EXECUTE_REFUSED";}
             }
-            if(action=="start")return last=current.Trading.Start().Code;
+            if(action=="start")lock(sync)
+            {
+                if(generation!=epoch||linked.IsCancellationRequested)return last="LOCAL_ACTION_CANCELLED";
+                var started=current.Trading.Start();
+                if(started.Status==Apex.Core.Naval.NavalMutationStatus.Applied)StartScheduler(current);
+                return last=started.Code;
+            }
             if(action=="recover")return last=reservationId==null?"EXACT_RESERVATION_REQUIRED":(await current.Trading.ExitAsync(reservationId,linked.Token).ConfigureAwait(false)).Code;
             return last="ACTION_DENIED";
         }
@@ -173,10 +194,19 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     }
     private void StartScheduler(Entry entry)
     {
-        if(entry.Trading!=null)return;
-        entry.Trading=tradingFactory(entry.Account);
-        entry.LoopCancellation=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
-        entry.Loop=Schedule(entry,entry.LoopCancellation.Token);
+        lock(sync)
+        {
+            entry.Trading??=tradingFactory(entry.Account);
+            if(entry.Loop is {IsCompleted:false})return;
+            entry.LoopCancellation?.Dispose();entry.LoopCancellation=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            entry.Loop=Schedule(entry,entry.LoopCancellation.Token);
+        }
+    }
+    private async Task DrainScheduler(Entry entry)
+    {
+        Task? draining;lock(sync){entry.LoopCancellation?.Cancel();draining=entry.Loop;}
+        if(draining!=null)await draining.ConfigureAwait(false);
+        lock(sync){entry.Loop=null;entry.LoopCancellation?.Dispose();entry.LoopCancellation=null;}
     }
     private async Task Schedule(Entry entry,CancellationToken ct)
     {
@@ -187,9 +217,8 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     private async Task CloseEntry(string scope)
     {
         if(!entries.TryRemove(scope,out var entry))return;
-        entry.LoopCancellation?.Cancel();entry.Account.RevokePermissions();
-        if(entry.Loop!=null)await entry.Loop.ConfigureAwait(false);
-        await entry.Account.DisposeAsync().ConfigureAwait(false);entry.LoopCancellation?.Dispose();
+        entry.Account.RevokePermissions();await DrainScheduler(entry).ConfigureAwait(false);
+        await entry.Account.DisposeAsync().ConfigureAwait(false);
     }
     public async ValueTask DisposeAsync()
     {

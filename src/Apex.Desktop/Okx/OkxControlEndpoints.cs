@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Http;
 namespace Apex.Desktop.Okx;
 internal static class OkxControlEndpoints
 {
-    private static readonly string[] Actions={"connect","reconnect","disconnect","baseline","arm","start","stop","emergency","recover","diagnose","test-demo"};
+    private static readonly string[] Actions={"attach-local","prepare","connect","reconnect","disconnect","baseline","arm","start","stop","emergency","recover","diagnose","test-demo"};
     internal static bool IsPath(string? path)
     {
         if(path is "/api/naval/okx/status" or "/api/naval/okx/configure" or "/api/naval/okx/cancel")return true;

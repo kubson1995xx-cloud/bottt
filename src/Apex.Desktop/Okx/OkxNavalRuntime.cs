@@ -69,6 +69,7 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
         lock(sync)
         {
             if(disposed||!Bindings.Contains(request.Binding)||request.Purpose==OkxActivationPurpose.Execute&&!accountServices.Any(s=>s.IsConnected&&s.Binding==request.Binding&&s.TradingSessionId==request.Session))return false;
+            if(request.Purpose==OkxActivationPurpose.Execute&&OperatingSystem.IsWindows())return accountServices.Any(s=>s.Binding==request.Binding&&s.TradingSessionId==request.Session&&s.HasNativeCredential(request.CredentialFingerprint));
             try
             {
                 using var credential=secrets.Value.Open(request.Binding,OkxConfiguration.Paths(dataRoot,request.Binding));
@@ -119,6 +120,7 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
         lock(sync)
         {
             if(disposed||!Bindings.Contains(binding))throw new InvalidOperationException("OKX_CONNECTION_REVOKED");
+            if(OperatingSystem.IsWindows()&&accountServices.LastOrDefault(s=>s.Binding==binding&&s.IsConnected)?.NativeCredentialFingerprint is {} nativeFingerprint)return nativeFingerprint;
             using var lease=secrets.Value.Open(binding,OkxConfiguration.Paths(dataRoot,binding));return lease.Fingerprint;
         }
     }
@@ -137,6 +139,7 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
         {
             if(disposed||!FiniteSafe||!accountServices.Contains(service)||!Bindings.Contains(request.Binding)||accountServices.Any(s=>s!=service&&s.IsConnected)||
                 !Activation.TryConsume(lease,request,DateTimeOffset.UtcNow))return false;
+            if(request.Purpose==OkxActivationPurpose.Execute&&OperatingSystem.IsWindows())return service.HasNativeCredential(request.CredentialFingerprint);
             using var credential=secrets.Value.Open(request.Binding,OkxConfiguration.Paths(dataRoot,request.Binding));
             return credential.Binding==request.Binding&&credential.Fingerprint==request.CredentialFingerprint&&credentialUses.TryBind(request.Binding,credential.Fingerprint);
         }
