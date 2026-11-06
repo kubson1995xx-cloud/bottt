@@ -688,10 +688,9 @@ jobs:
   windowsAdvisoryRefresh:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-admission-20261105' && inputs.mode == 'windows-advisory-refresh'
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 12
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -703,20 +702,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.427'
-      - uses: actions/download-artifact@v4
-        with:
-          name: Windows-Advisory-Prerequisite-42236978414-1
-          run-id: 42236978414
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/advisory-accepted-prior
-      - name: Task2 only, real upstream graphs with finite fixture inference
+      - name: I1 native storage RED or full advisory GREEN, no upstream reinstall
         shell: pwsh
-        run: ./tools/windows/Test-WindowsAdvisoryRefresh.ps1 -Phase '${{ inputs.phase }}' -Prior '${{ runner.temp }}/advisory-accepted-prior'
+        run: ./tools/windows/Test-WindowsAdvisoryStore.ps1 -Phase '${{ inputs.phase }}'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Windows-Advisory-Refresh-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/windows-advisory-refresh/
+          name: Windows-Advisory-Store-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-advisory-store/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
