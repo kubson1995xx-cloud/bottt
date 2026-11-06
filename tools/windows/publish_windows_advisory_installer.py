@@ -6,7 +6,7 @@ BRANCH='apex-demo/controller-windows-admission-20261105'
 FILES=['tools/advisory/StrategyExport/AdvisoryStoreGuard.cs','tools/advisory/StrategyExport/Program.cs','tools/advisory/store.py','tools/advisory/local_install.py','tests/Apex.Tests/OkxWindowsAdvisorySetupTests.cs','tools/advisory/tests/test_native_installer_paths.py','tools/windows/Test-WindowsAdvisoryInstaller.ps1','tools/windows/publish_windows_advisory_installer.py']
 def run(*args,**kwargs):return subprocess.check_output(args,cwd=REPO,**kwargs).decode().strip()
 def main():
- p=argparse.ArgumentParser();p.add_argument('lane');p.add_argument('--base',required=True);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('lane');p.add_argument('--base',required=True);p.add_argument('--delivery',action='store_true');a=p.parse_args()
  assert a.lane.startswith('integration-') and a.lane.replace('-','').isalnum()
  root=REPO/'artifacts/operational-windows-advisory'/a.lane;root.mkdir(exist_ok=False)
  head=run('git','rev-parse','HEAD');index=REPO/'.git/index';ih=hashlib.sha256(index.read_bytes()).hexdigest()
@@ -18,7 +18,7 @@ def main():
   dest=root/'source'/rel;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data)
   blob=run('git','hash-object','-w','--stdin',input=data);run('git','update-index','--add','--cacheinfo','100644',blob,rel,env=env)
   rows.append({'path':rel,'sha256':hashlib.sha256(data).hexdigest()})
- for rel in FILES:add(rel,(REPO/rel).read_bytes())
+ for rel in (['tools/windows/publish_windows_advisory_installer.py'] if a.delivery else FILES):add(rel,(REPO/rel).read_bytes())
  workflow=run('git','show',a.base+':.github/workflows/windows-demo.yml')+'\n';marker='\n  windowsAdvisoryRefresh:\n';assert workflow.count(marker)==1
  job='''  windowsAdvisoryRefresh:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-admission-20261105' && inputs.mode == 'windows-advisory-refresh'
@@ -56,6 +56,7 @@ def main():
           if-no-files-found: error
           retention-days: 30
 '''
+ if a.delivery:job=run('git','show',a.base+':tools/windows/advisory-delivery-job.yml')+'\n'
  add('.github/workflows/windows-demo.yml',(workflow.split(marker)[0]+'\n'+job).encode())
  tree=run('git','write-tree',env=env);commit=run('git','commit-tree',tree,'-p',a.base,input=b'fix: isolate native advisory installer rejection\n')
  record={'base':a.base,'commit':commit,'tree':tree,'inputs':rows,'mainHead':head,'mainIndex':ih}
