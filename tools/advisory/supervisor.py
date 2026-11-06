@@ -55,14 +55,26 @@ class Supervisor:
         if self.hermes_home is None:raise ValueError('explicit local Hermes owner required')
         row=self.contract.runtimes['hermes'];home=self.hermes_home
         env=child_environment(home,row['python'],row['source'])
-        process=subprocess.Popen([row['python'],'-I',str(HERE/'inference_process.py'),str(seconds-6),row['source']],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=home,env=env)
+        import uuid
+        control=self.root/('cancel-'+uuid.uuid4().hex)
+        end=time.monotonic()+seconds
+        process=subprocess.Popen([row['python'],'-I',str(HERE/'inference_process.py'),str(seconds-6),row['source'],str(control)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,cwd=home,env=env)
         try:
-            out,_=process.communicate(prompt.encode('utf-8'),timeout=seconds)
-            if process.returncode:raise ValueError('Hermes inference unavailable')
+            incoming=prompt.encode('utf-8');cancel_sent=False;cancel_end=end-3
+            while True:
+                if self.cancel.is_set() and not cancel_sent:
+                    atomic_write(control,b'cancel');cancel_sent=True;cancel_end=min(cancel_end,time.monotonic()+3)
+                remaining=cancel_end-time.monotonic()
+                if remaining<=0:raise TimeoutError('supervised inference deadline')
+                try:
+                    out,_=process.communicate(incoming,timeout=min(.1,remaining));break
+                except subprocess.TimeoutExpired:incoming=None
+            if process.returncode or cancel_sent:raise ValueError('Hermes inference unavailable/cancelled')
             return strict_json(out)
         finally:
             if process.poll() is None:process.kill()
             process.wait(timeout=3)
+            if control.exists():control.unlink()
     def _analysis(self,tool,pair,cutoff,dataset,attempt,work):
         work.mkdir(parents=True,exist_ok=True,mode=0o700)
         data_path=work/'dataset.json';atomic_write(data_path,dataset)

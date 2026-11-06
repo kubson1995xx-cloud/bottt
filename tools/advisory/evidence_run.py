@@ -6,7 +6,7 @@ def run(lane,command):
     repo=Path(__file__).resolve().parents[2];root=repo/'artifacts/operational-windows-advisory'/lane
     root.mkdir(parents=True,exist_ok=False)
     files=list((repo/'tools/advisory').rglob('*'))+list((repo/'src/Apex.Core').rglob('*'))+list((repo/'src/Apex.Shared').rglob('*'))
-    files += [repo/'src/Apex.Desktop/Okx/OkxPublicMarketFeed.cs',repo/'src/Apex.Desktop/Okx/OkxAdvisoryCanonicalData.cs',repo/'Directory.Build.props',repo/'Directory.Build.targets',repo/'global.json']
+    files += [repo/'src/Apex.Desktop/Okx/OkxPublicMarketFeed.cs',repo/'src/Apex.Desktop/Okx/OkxAdvisoryCanonicalData.cs',repo/'src/Apex.Desktop/Services/WindowsPathSecurity.cs',repo/'Directory.Build.props',repo/'Directory.Build.targets',repo/'global.json']
     mapping=[]
     for p in files:
         if not p.is_file() or set(p.parts)&{'bin','obj','__pycache__'}:continue

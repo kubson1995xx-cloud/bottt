@@ -12,7 +12,7 @@ $files+=Get-Item (Join-Path $repo 'src/Apex.Desktop/Okx/OkxPublicMarketFeed.cs')
 $files+=Get-Item (Join-Path $repo 'src/Apex.Desktop/Okx/OkxAdvisoryCanonicalData.cs')
 $files+=Get-Item (Join-Path $repo 'src/Apex.Desktop/Services/WindowsPathSecurity.cs')
 $files+=Get-Item $PSCommandPath
-$files+=Get-Item (Join-Path $repo 'Directory.Build.props')
+foreach($name in @('Directory.Build.props','Directory.Build.targets','global.json')){if(Test-Path (Join-Path $repo $name)){$files+=Get-Item (Join-Path $repo $name)}}
 $map=@($files | ForEach-Object {
  $rel=[IO.Path]::GetRelativePath($repo,$_.FullName);$out=Join-Path (Join-Path $root 'source') $rel
  New-Item -ItemType Directory -Path (Split-Path $out) -Force | Out-Null

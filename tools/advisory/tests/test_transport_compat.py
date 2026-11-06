@@ -27,6 +27,20 @@ class TransportCompatibilityTests(unittest.TestCase):
         except ValueError as caught:error=str(caught)
         self.assertIsNone(error,'native-sized prompt was refused: '+str(error))
         self.assertEqual([prompt],received);self.assertEqual(['session.create','session.resume'],calls)
+    def test_child_cancellation_deadline(self):
+        import subprocess,tempfile,time,shutil
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);script=root/'inference_process.py'
+            shutil.copyfile(Path(__file__).resolve().parents[1]/'inference_process.py',script)
+            (root/'hermes_transport.py').write_text('import asyncio\nasync def request(prompt,seconds):\n await asyncio.sleep(10)\n return {}\n')
+            cancel=root/'cancel';cancel.write_bytes(b'cancel')
+            process=subprocess.Popen([sys.executable,str(script),'10',str(root),str(cancel)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            try:
+                try:out,err=process.communicate(b'public fixture prompt',timeout=1)
+                except subprocess.TimeoutExpired:self.fail('cancelled trusted child did not interrupt before deadline')
+            finally:
+                if process.poll() is None:process.kill();process.communicate()
+            self.assertNotEqual(0,process.returncode,'cancellation must not publish success')
     def test_prompt_over_ceiling_refused(self):
         with self.assertRaises(ValueError):asyncio.run(request('x'*250001,1))
 
