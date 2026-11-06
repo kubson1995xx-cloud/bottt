@@ -195,6 +195,12 @@ public sealed partial class OkxConditionalTradingTests
             Assert.Contains("function renderControls",await http.GetStringAsync(url+"/local-panel.js"));
         }
         await using var cdp=await MiniCdp.Start(Path.Combine(temp,"edge-"+Guid.NewGuid().ToString("N")));string sid=await cdp.NewPage();
+        // This source-only peer advances its TimeProvider to exercise quotas without real waits.
+        // Keep the browser's freshness clock in that SAME synthetic time domain. Do not change
+        // any response or financial value. The extracted production EXE tests use real Date.now.
+        var sourceClock=Dashboard(control).GetProperty("snapshot").GetProperty("generatedUtc").GetDateTimeOffset();
+        File.WriteAllText(Path.Combine(dir,"native-"+label+"-clocks.json"),JsonSerializer.Serialize(new{actualUtc=DateTimeOffset.UtcNow,syntheticUtc=sourceClock,browserClock="snapshot-generatedUtc-plus-monotonic-elapsed",sourceOnly=true}));
+        await cdp.Send("Page.addScriptToEvaluateOnNewDocument",new{source="(()=>{const now=Date.now,fetch=window.fetch.bind(window);let utc=null,mono=0;Date.now=()=>utc===null?now():utc+performance.now()-mono;window.fetch=async(...args)=>{const response=await fetch(...args);if(args[0]==='/api/naval/okx/local-dashboard'){const d=await response.clone().json();if(d.snapshot?.generatedUtc){utc=Date.parse(d.snapshot.generatedUtc);mono=performance.now();}}return response;};})()"},sid);
         await cdp.Send("Emulation.setDeviceMetricsOverride",new{width=1440,height=1350,deviceScaleFactor=1,mobile=false},sid);
         await cdp.Send("Page.navigate",new{url=url+"/local/#dashboard"},sid);
         string ready="(document.getElementById('state-pill')?.textContent||'').includes("+JsonSerializer.Serialize(expected)+")&&document.getElementById('data-notice').hidden&&document.getElementById('capital-cash').textContent!=='—'";
