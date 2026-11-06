@@ -60,7 +60,9 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     private volatile bool connected,disposed;
     private string status="NOT_CONNECTED";
     internal string Status=>status;
-    internal bool WindowsAdvisoryRequired=>runtime.IsWindowsOrdinary(binding);
+    // Release composition, not optional attachment/profile state. Every Windows
+    // nonfinite executor must filter new buys; finite proof/recovery remains separate.
+    internal bool WindowsAdvisoryRequired=>OperatingSystem.IsWindows()&&!runtime.IsFiniteDemo;
     internal string AdvisoryReportRoot=>Path.Combine(runtime.AdvisoryRoot,"reports");
     internal OkxAdvisoryCoordinator? AdvisoryCoordinator=>runtime.Advisory;
     internal NavalRiskResult RegisterConfirmedSignal(NavalEvaluationRequest request)=>session?.Coordinator.RegisterBrokerSignal(request)??new(NavalMutationStatus.Refused,"BROKER_REQUIRED",null,0);
