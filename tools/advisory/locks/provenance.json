@@ -1,0 +1,20 @@
+{
+  "vibe-trading": {
+    "nativeRun": 42234145199,
+    "sourceCommit": "431f87db0ac450a2d4ea1b0ef01ad4b1da90974a",
+    "lockSha256": "8596c4d5454973ad94bb275ea6bafb7ed1e95843bf7a9e8761bfd709089ce46a",
+    "resolutionReportSha256": "10e4fd7db52facfaf32ea57b0ee8b3ad88af07b6378f1096f0a71673cf5daca2",
+    "installedReportSha256": "b25610c553f40c2592fa18570d5e2d9d9ea45f437cfbb7125743eac6fdaa4b01",
+    "artifact": "Windows-Advisory-Prerequisite-42234145199-1",
+    "scope": "genuine native PyPI wheel-only resolution and --no-index --require-hashes install; pip check passed; import/computation not yet run"
+  },
+  "tradingagents": {
+    "nativeRun": 42234145199,
+    "sourceCommit": "431f87db0ac450a2d4ea1b0ef01ad4b1da90974a",
+    "lockSha256": "bccf6db373cb5c5cd8196f78f06b3740062bbce09f8fabee625d12cea577fbbe",
+    "resolutionReportSha256": "5df01d425fdb20a4ef54a003620dc70d7d31254403fb87e25b5e60e166e7f6f2",
+    "installedReportSha256": "036253b5ce90dc2c6fcb36fd6a7570519c1fff4f9af44b155712c168a92edfb6",
+    "artifact": "Windows-Advisory-Prerequisite-42234145199-1",
+    "scope": "genuine native PyPI wheel-only resolution and --no-index --require-hashes install; pip check passed; import/computation not yet run"
+  }
+}

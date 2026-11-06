@@ -80,6 +80,17 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(env['HOME'], str(Path(d).resolve()))
             self.assertIn('SYSTEMROOT', env)
 
+    def test_child_process_does_not_inherit_sentinel_keys(self):
+        import subprocess
+        builder=runtime.child_environment
+        with tempfile.TemporaryDirectory() as d, patch.dict(os.environ, {'OKX_SECRET':'synthetic-sentinel','OPENAI_API_KEY':'synthetic-sentinel','HERMES_TUI_GATEWAY_URL':'ws://synthetic'}):
+            env=builder(Path(d),Path(sys.executable))
+            # Executes real native stdlib/socket loading, not just dictionary checks.
+            code="import os,json,socket; s=socket.socket();s.close();print(json.dumps(sorted(os.environ)))"
+            child=subprocess.run([sys.executable,'-I','-c',code],env=env,capture_output=True,text=True,timeout=10,check=True)
+            keys=json.loads(child.stdout)
+            for key in ('OKX_SECRET','OPENAI_API_KEY','HERMES_TUI_GATEWAY_URL'): self.assertNotIn(key,keys)
+
 
 class TransportTests(unittest.TestCase):
     def transport(self):

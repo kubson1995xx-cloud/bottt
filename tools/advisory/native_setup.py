@@ -41,6 +41,13 @@ def prepare(root):
     if sys.version_info[:3]!=(3,14,0): raise ValueError('exact Python 3.14.0 required')
     git=shutil.which('git')
     if not git: raise ValueError('public source acquisition requires Git')
+    # Retain the real host interpreter/stdlib/DLL closure that venvs reference.
+    # A venv alone is not a Windows runtime and is not claimed to be relocatable.
+    base=Path(sys.base_prefix).resolve()
+    saved=root/'closure/python-base'
+    shutil.copytree(base,saved,ignore=shutil.ignore_patterns('__pycache__'))
+    base_map=[{'path':str(p.relative_to(saved)),'sha256':sha256(p)} for p in saved.rglob('*') if p.is_file()]
+    (root/'build/python-base-map-before.json').write_text(json.dumps({'consumed_root':str(base),'retained_root':str(saved),'files':base_map},indent=2))
     rows={}
     for name,pin in PINS.items():
         build=root/'build'/name; build.mkdir()
@@ -67,7 +74,19 @@ def prepare(root):
         if name=='vibe-trading':
             deps=[d for d in deps if re.split(r'[<>=!\[; @]',d,maxsplit=1)[0].lower() in VIBE_DEPS]
             if len(deps)!=len(VIBE_DEPS): raise ValueError('Vibe dependency manifest drift')
-        dependencies=build/'dependencies.in';dependencies.write_text('\n'.join(deps)+'\n')
+        dependencies=build/'dependencies.in'
+        if name=='hermes':
+            # Upstream uv applies a Pillow security override, but plain pip cannot
+            # satisfy browser-harness's contradictory Pillow pin. This tool-free
+            # gateway proof has NO browser tool; omit that unrelated package,
+            # without weakening Pillow or fabricating its dependency metadata.
+            omitted=[d for d in deps if d.startswith('browser-harness==')]
+            if len(omitted)!=1: raise ValueError('Hermes browser dependency manifest drift')
+            deps=[d for d in deps if d not in omitted]
+            (build/'dependency-scope.json').write_text(json.dumps({'scope':'tool-free gateway prerequisite, NOT complete Hermes installer',
+                'omitted':omitted,'reason':'native full-core ResolutionImpossible: browser-harness requires Pillow 12.3.0; Hermes security pin is 13.0.0',
+                'all_other_core_constraints_preserved':True},indent=2))
+        dependencies.write_text('\n'.join(deps)+'\n')
         runtime=root/'closure'/name/'env'
         command([sys.executable,'-m','venv',runtime],build/'venv.log',env=env,cwd=home)
         python=runtime/'Scripts/python.exe'

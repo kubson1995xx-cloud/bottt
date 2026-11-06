@@ -85,7 +85,15 @@ async def hermes(source):
     from hermes_cli.stream_json import StreamJsonEmitter
     from gateway.runtime_bootstrap_windows import NativeControlServer
     from hermes_cli.auth import resolve_codex_runtime_credentials, AuthError
-    from hermes_transport import is_missing_auth
+    from hermes_transport import is_missing_auth, check_policy
+    from hermes_cli.config import load_config
+    import subprocess
+    check_policy(load_config())
+    help_result=subprocess.run([sys.executable,'-m','hermes_cli.main','auth','add','--help'],
+                               cwd=source,capture_output=True,text=True,encoding='utf-8',timeout=30)
+    if help_result.returncode or '--browser' not in help_result.stdout:
+        raise ValueError('supported local subscription login entry unavailable')
+    (Path(sys.argv[3]).parent/'hermes-login-help.txt').write_text(help_result.stdout,encoding='utf-8')
     # Actual local canonical client starts/discovers the supported native owner;
     # no fake RPC server, tokens, paid key, inference or provider fallback.
     async with connect_gateway() as client:
