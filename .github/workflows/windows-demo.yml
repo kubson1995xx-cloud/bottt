@@ -5,7 +5,7 @@ on:
       mode:
         description: 'full-delivery packages; task1-source/task2-source/task3-source/task4-source validate only the named source prerequisite'
         type: choice
-        options: [okx-simple-connect-commit-red, okx-simple-connect-commit-green, okx-simple-connect-commit-delivery, okx-simple-connect-wait, okx-simple-connect-red, okx-simple-connect-green, okx-simple-connect-delivery, okx-enrollment-remaining, okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
+        options: [windows-local-package, okx-simple-connect-commit-red, okx-simple-connect-commit-green, okx-simple-connect-commit-delivery, okx-simple-connect-wait, okx-simple-connect-red, okx-simple-connect-green, okx-simple-connect-delivery, okx-enrollment-remaining, okx-enrollment-original, ui-repair-acceptance, ui-repair-delivery, ui-repair-original, full-delivery, okx-task1-source, task1-source, task2-source, task3-source, task4-source, task5-package, task6-acceptance]
         default: full-delivery
       ui_run_id:
         description: 'Immutable UI candidate artifact run for test-only acceptance'
@@ -625,6 +625,33 @@ jobs:
         with:
           name: Controller-Windows-Source-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/controller-windows-source/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+  windowsLocalPackage:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-admission-20261105' && inputs.mode == 'windows-local-package'
+    runs-on: windows-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.427'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Local edition package and extracted-EXE gate
+        shell: powershell
+        run: ./tools/windows/Test-WindowsLocalPackage.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-Local-Package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-local-package/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
