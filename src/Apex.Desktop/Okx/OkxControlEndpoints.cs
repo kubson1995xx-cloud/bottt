@@ -23,7 +23,7 @@ internal static class OkxControlEndpoints
         app.MapGet("/api/naval/okx/local-dashboard",()=>Results.Json(control.ReadLocalDashboard()));
         foreach(var (route,resource,type) in new[]{("/local/","local-panel.html","text/html; charset=utf-8"),("/local-panel.js","local-panel.js","text/javascript; charset=utf-8"),("/local-panel.css","local-panel.css","text/css; charset=utf-8")})
             app.MapGet(route,(HttpContext ctx)=>{ctx.Response.Headers["Cache-Control"]="no-store";return Results.Stream(typeof(OkxControlEndpoints).Assembly.GetManifestResourceStream("Apex.Desktop.Okx."+resource)!,type);});
-        app.MapGet("/local",()=>Results.Redirect("/local/"));
+        // ASP.NET treats trailing slashes equivalently; a second /local registration is ambiguous.
         app.MapPost("/api/naval/okx/configure",(Delegate)((HttpContext ctx)=>Command(ctx,"", "configure")));
         app.MapPost("/api/naval/okx/create-local",(Delegate)((HttpContext ctx)=>Command(ctx,"", "create-local")));
         app.MapPost("/api/naval/okx/cancel",(Delegate)((HttpContext ctx)=>Command(ctx,"", "cancel")));

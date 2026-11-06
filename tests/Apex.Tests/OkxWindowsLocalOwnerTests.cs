@@ -39,6 +39,38 @@ internal sealed class SyntheticLocalUi(string[]? lines,bool approve=true):IWindo
 
 public sealed class OkxWindowsLocalProvenanceTests
 {
+    [Fact]
+    [Trait("Gate","WindowsLocalExecution")]
+    public async Task Local_panel_embedded_documents_and_assets_are_served_without_an_account()
+    {
+        var builder=WebApplication.CreateSlimBuilder();builder.Logging.ClearProviders();builder.WebHost.ConfigureKestrel(k=>k.Listen(System.Net.IPAddress.Loopback,0));
+        await using var app=builder.Build();
+        app.Use(async(ctx,next)=>{try{await next();}catch(Exception e){ctx.Response.StatusCode=500;await Microsoft.AspNetCore.Http.HttpResponseWritingExtensions.WriteAsync(ctx.Response,e.GetType().Name+": "+e.Message);}});
+        app.UseRouting(); // Place route selection inside the diagnostic exception boundary.
+        // Only the static routes are exercised. Any accidental controller access must fail.
+        OkxControlEndpoints.Map(app,null!);await app.StartAsync();
+        string url=app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+        using var http=new System.Net.Http.HttpClient();
+        foreach(string path in new[]{"/local/","/local","/local-panel.js","/local-panel.css"})
+        {
+            using var response=await http.GetAsync(url+path);
+            Assert.True(response.IsSuccessStatusCode,path+" HTTP "+(int)response.StatusCode+" "+await response.Content.ReadAsStringAsync());
+        }
+        await app.StopAsync();
+    }
+    [Fact]
+    [Trait("Gate","WindowsLocalExecution")]
+    public void Local_panel_shell_navigation_accepts_only_the_exact_fixed_loopback_route()
+    {
+        Uri local=DesktopBrowser.BuildLocalUri(9119);ProcessStartInfo? request=null;
+        Assert.True(DesktopBrowser.TryOpen(local,p=>request=p));
+        Assert.NotNull(request);Assert.Equal("http://127.0.0.1:9119/local/",request.FileName);Assert.True(request.UseShellExecute);
+        foreach(string bad in new[]{"http://127.0.0.1:9119/local/?x=1","http://127.0.0.1:9119/local/#x","http://127.0.0.1:9119/local/extra","http://localhost:9119/local/","https://127.0.0.1:9119/local/","http://user@127.0.0.1:9119/local/"})
+        {
+            bool launched=false;Assert.False(DesktopBrowser.TryOpen(new Uri(bad),_=>launched=true));Assert.False(launched);
+        }
+        Assert.True(DesktopBrowser.TryOpen(DesktopBrowser.BuildUri(9119,true),_=>{}));
+    }
     private static NavalFiniteOperatorPremise P(string provenance,DateTimeOffset now,string? statement=null,string env="OkxDemo",string? digest=null,int minutes=20)=>
         new("finite-operator-premise-v1","current-market-funding-v1",NavalCurrentMarketFunding.TestId,digest??new string('a',64),statement??NavalCurrentMarketFunding.Statement,provenance,now.AddMinutes(-1),now.AddMinutes(minutes),env);
     [Fact]

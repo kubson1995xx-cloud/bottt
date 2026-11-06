@@ -25,8 +25,8 @@ internal static class DesktopBrowser
     internal static bool TryOpen(Uri uri, Action<ProcessStartInfo>? launcher)
     {
         if (!uri.IsAbsoluteUri || uri.Scheme != Uri.UriSchemeHttp || uri.Host != "127.0.0.1" ||
-            uri.Port is < 1 or > 65535 || uri.UserInfo != "" || uri.AbsolutePath != "/" ||
-            (uri.Query != "" && uri.Query != "?view=naval") || uri.Fragment != "") return false;
+            uri.Port is < 1 or > 65535 || uri.UserInfo != "" ||
+            !(uri.AbsolutePath == "/local/" && uri.Query == "" || uri.AbsolutePath == "/" && (uri.Query == "" || uri.Query == "?view=naval")) || uri.Fragment != "") return false;
         try
         {
             var request = new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true };
