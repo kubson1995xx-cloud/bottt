@@ -18,6 +18,7 @@ def main():
   blob=run('git','hash-object','-w','--stdin',input=data);run('git','update-index','--add','--cacheinfo','100644',blob,rel,env=env);rows.append({'path':rel,'sha256':hashlib.sha256(data).hexdigest()})
  files=['tools/advisory/'+r for r in ['store.py','budget.py','reports.py','supervisor.py','REFRESH.md','tests/test_store_descendants.py','StrategyExport/Program.cs']]
  if a.phase=='green' and (REPO/'tools/advisory/StrategyExport/AdvisoryStoreGuard.cs').exists():files.append('tools/advisory/StrategyExport/AdvisoryStoreGuard.cs')
+ if a.phase=='green':files += ['tools/advisory/'+r for r in ['tests/test_store_retained_graph.py','tests/fixtures/retained-native-store.zip','tests/fixtures/retained-native-store.json']]
  files+=['tools/windows/'+r for r in ['Test-WindowsAdvisoryStore.ps1','advisory-store-job.yml','publish_windows_advisory_store.py']]
  product={'tools/advisory/'+s for s in ['store.py','budget.py','reports.py','supervisor.py','StrategyExport/Program.cs']}
  for rel in files:

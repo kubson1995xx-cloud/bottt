@@ -15,7 +15,9 @@ if(args[0]=="--guard")
   stage=100;
   if(!Directory.Exists(path))Apex.Desktop.Services.WindowsPathSecurity.CreatePrivateDirectory(path);
   var root=Apex.Desktop.Services.WindowsPathSecurity.Open(path);leases.Add(root);Apex.Desktop.Services.WindowsPathSecurity.Validate(root,true);
-  Console.WriteLine("ADVISORY_STORE_ADMITTED");Console.Out.Flush();Console.ReadLine();
+  using var descendants=new AdvisoryStoreGuard(path);
+  stage=101;descendants.Scan(path); // Complete existing-tree preflight BEFORE Python opens SQLite.
+  descendants.Serve();
  }
  catch(Apex.Desktop.Services.WindowsDataException error){Console.WriteLine($"ADVISORY_STORE_REFUSED {stage} {error.Message}");Console.Out.Flush();}
  finally{foreach(var lease in leases)lease.Dispose();}

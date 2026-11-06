@@ -30,14 +30,18 @@ class RequestReservation:
     milliseconds:int
 
 class Budget:
-    def __init__(self,path,clock=None):
-        self.path=Path(path); self.clock=clock or (lambda:datetime.now(timezone.utc))
+    def __init__(self,path,clock=None,*,store=None):
+        self.path=Path(path); self.clock=clock or (lambda:datetime.now(timezone.utc));self.store=store
+        if store:store.stable_file(self.path)
         self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         with self._transaction() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY,day TEXT NOT NULL,pair TEXT NOT NULL,tool TEXT NOT NULL,deadline TEXT NOT NULL,digest TEXT NOT NULL,status TEXT NOT NULL,UNIQUE(day,pair,tool));
 CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,attempt TEXT NOT NULL,day TEXT NOT NULL,milliseconds INTEGER NOT NULL CHECK(milliseconds>0),observed_ms INTEGER, outcome TEXT NOT NULL);''')
     @contextmanager
     def _transaction(self):
+        # Main DB identity stays leased; journal/WAL/SHM must remain deletable by SQLite.
+        if self.store:
+            for suffix in ('','-journal','-wal','-shm'):self.store.inspect(Path(str(self.path)+suffix))
         db=sqlite3.connect(self.path,timeout=10,isolation_level=None)
         try:
             db.execute('PRAGMA synchronous=FULL');db.execute('BEGIN IMMEDIATE')

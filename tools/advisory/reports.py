@@ -4,6 +4,7 @@ Fixture inference is never published as v1 Status=ok. Native result/evidence is
 retained in immutable generation data; the old C# parser remains unchanged.
 """
 import hashlib,json,os,re,secrets,unicodedata
+from contextlib import nullcontext
 from pathlib import Path
 from datetime import timedelta
 from market_contract import *
@@ -23,13 +24,19 @@ def normalize(tool,rating):
     if tool=='tradingagents' and rating in MAPPING:return MAPPING[rating]
     raise ValueError('native rating refused')
 
-def atomic_write(path,raw):
-    path=Path(path);path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+def atomic_write(path,raw,*,store=None):
+    path=Path(path)
+    if store:store.directory(path.parent);store.inspect(path)
+    else:path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     if path.is_symlink() or (path.exists() and path.stat().st_nlink!=1):raise ValueError('unsafe target')
     temp=path.parent/('.'+path.name+'.'+secrets.token_hex(12))
     try:
         fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-        with os.fdopen(fd,'wb') as f:f.write(raw);f.flush();os.fsync(f.fileno())
+        with os.fdopen(fd,'wb') as f:
+            with store.reading(temp) if store else nullcontext():
+                f.write(raw);f.flush();os.fsync(f.fileno())
+        # The old pointer is inspected, not held across its legitimate replacement.
+        if store:store.inspect(path)
         os.replace(temp,path)
         if os.name!='nt':
             fd=os.open(path.parent,os.O_RDONLY)
@@ -63,25 +70,29 @@ def validate_report(report,data,now):
     if not utc(data['AsOfUtc'])<=now<utc(data['AsOfUtc'])+timedelta(days=1):raise ValueError('stale report')
     return report
 
-def publish_pair(root,data,results,fixture=False):
-    root=Path(root);generation=secrets.token_hex(16);folder=root/'generations'/generation;folder.mkdir(parents=True,mode=0o700)
+def publish_pair(root,data,results,fixture=False,*,store=None):
+    root=Path(root);generation=secrets.token_hex(16);folder=root/'generations'/generation
+    if store:store.directory(folder)
+    else:folder.mkdir(parents=True,mode=0o700)
     records={}
     for tool in TOOLS:
         entry=results[tool];native=entry.get('native');error=entry.get('error')
         report=make_report(tool,data,native,error,fixture)
         rb=encoded(report);nb=encoded(entry)
-        atomic_write(folder/(tool+'.json'),rb);atomic_write(folder/(tool+'-native.json'),nb)
+        atomic_write(folder/(tool+'.json'),rb,store=store);atomic_write(folder/(tool+'-native.json'),nb,store=store)
         rating=(native or {}).get('native_rating')
         records[tool]={'ReportSha256':dataset_digest(rb),'NativeSha256':dataset_digest(nb),'OriginalRecommendation':rating,'MappedRecommendation':normalize(tool,rating) if rating is not None else None,'State':'completed' if not error else 'failed'}
     manifest={'Schema':'apex-advisory-pair-v1','Generation':generation,'Instrument':data['Instrument'],'DatasetSha256':dataset_digest(canonical_snapshot(data['Instrument'],data['AsOfUtc'],data['Bars'])),'AsOfUtc':data['AsOfUtc'],'ExpiresUtc':(utc(data['AsOfUtc'])+timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ'),'Inference':'fixture' if fixture else 'genuine','Tools':records}
-    mb=encoded(manifest);atomic_write(folder/'manifest.json',mb)
-    atomic_write(root/'CURRENT.json',encoded({'Schema':'apex-advisory-pointer-v1','Generation':generation,'ManifestSha256':dataset_digest(mb)}))
+    mb=encoded(manifest);atomic_write(folder/'manifest.json',mb,store=store)
+    atomic_write(root/'CURRENT.json',encoded({'Schema':'apex-advisory-pointer-v1','Generation':generation,'ManifestSha256':dataset_digest(mb)}),store=store)
     return manifest
 
-def read_pair(root,data,now):
-    root=Path(root);pointer=strict_json((root/'CURRENT.json').read_bytes(),4096)
+def read_pair(root,data,now,*,store=None):
+    def read(path):
+        with store.reading(path) if store else nullcontext():return path.read_bytes()
+    root=Path(root);pointer=strict_json(read(root/'CURRENT.json'),4096)
     if set(pointer)!={'Schema','Generation','ManifestSha256'} or pointer['Schema']!='apex-advisory-pointer-v1' or not re.fullmatch('[a-f0-9]{32}',pointer['Generation']):raise ValueError('invalid generation pointer')
-    folder=root/'generations'/pointer['Generation'];raw=(folder/'manifest.json').read_bytes()
+    folder=root/'generations'/pointer['Generation'];raw=read(folder/'manifest.json')
     if dataset_digest(raw)!=pointer['ManifestSha256']:raise ValueError('manifest hash mismatch')
     m=strict_json(raw,16384)
     if set(m)!={'Schema','Generation','Instrument','DatasetSha256','AsOfUtc','ExpiresUtc','Inference','Tools'} or m['Schema']!='apex-advisory-pair-v1' or m['Generation']!=pointer['Generation'] or m['Instrument']!=data['Instrument'] or m['DatasetSha256']!=dataset_digest(canonical_snapshot(data['Instrument'],data['AsOfUtc'],data['Bars'])) or m['AsOfUtc']!=data['AsOfUtc'] or m['ExpiresUtc']!=(utc(data['AsOfUtc'])+timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ') or m['Inference'] not in ('fixture','genuine') or set(m['Tools'])!=set(TOOLS):raise ValueError('pair binding mismatch')
@@ -89,7 +100,7 @@ def read_pair(root,data,now):
     for tool in TOOLS:
         row=m['Tools'][tool]
         if set(row)!={'ReportSha256','NativeSha256','OriginalRecommendation','MappedRecommendation','State'}:raise ValueError('tool metadata schema')
-        rb=(folder/(tool+'.json')).read_bytes();nb=(folder/(tool+'-native.json')).read_bytes()
+        rb=read(folder/(tool+'.json'));nb=read(folder/(tool+'-native.json'))
         if dataset_digest(rb)!=row['ReportSha256'] or dataset_digest(nb)!=row['NativeSha256']:raise ValueError('report hash mismatch')
         report=validate_report(strict_json(rb,16384),data,now);entry=strict_json(nb)
         rating=(entry.get('native') or {}).get('native_rating')
