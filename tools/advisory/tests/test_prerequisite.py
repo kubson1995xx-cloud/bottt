@@ -220,7 +220,7 @@ class ProbeTests(unittest.TestCase):
         import runtime_contract as runtime
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as d:
-            base = Path(d)
+            base = Path(d).resolve()
             contract, pins = ContractTests().fixture(base / 'fixture')
             contract = runtime.RuntimeContract(contract.runtimes)
             for name, row in contract.runtimes.items():

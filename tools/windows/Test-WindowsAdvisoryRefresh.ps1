@@ -29,8 +29,9 @@ try {
  & $python -m unittest discover -s tools/advisory/tests -v *> (Join-Path $root 'evidence/unit-tests.log')
  $code=$LASTEXITCODE
  [ordered]@{exit=$code} | ConvertTo-Json | Set-Content (Join-Path $root 'evidence/unit-exit.json')
+ $export=Join-Path $repo 'tools/advisory/StrategyExport/bin/Debug/net8.0'
+ if(Test-Path $export){Copy-Item -LiteralPath $export -Destination (Join-Path $root 'closure/strategy-export') -Recurse}
  if($code -ne 0){throw 'native Task2 unit/integration boundary tests failed'}
- Copy-Item -LiteralPath (Join-Path $repo 'tools/advisory/StrategyExport/bin/Debug/net8.0') -Destination (Join-Path $root 'closure/strategy-export') -Recurse
  if($Phase -eq 'red'){throw 'RED unexpectedly passed'}
  & $python -X utf8 tools/advisory/native_graphs.py $root (Join-Path $root 'closure/runtime-contract.json') *> (Join-Path $root 'evidence/graphs.log')
  if($LASTEXITCODE -ne 0){throw 'native genuine graph orchestration with fixture inference failed'}

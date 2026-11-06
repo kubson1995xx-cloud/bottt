@@ -21,7 +21,7 @@ def main():
         blob=run('git','hash-object','-w','--stdin',input=data);run('git','update-index','--add','--cacheinfo','100644',blob,rel,env=env)
         rows.append({'path':rel,'sha256':hashlib.sha256(data).hexdigest()})
     # Only explicit Task2 files, never capture generated bin/obj or accepted dirty code.
-    files=['market_contract.py','budget.py','reports.py','ipc.py','supervisor.py','worker.py','store.py','vibe_compat.py','fixture_inference.py','inference_process.py','hermes_transport.py','native_reuse.py','native_graphs.py','evidence_run.py','REFRESH.md','tests/test_market_contract.py','tests/test_budget.py','tests/test_supervisor.py','tests/test_transport_compat.py','StrategyExport/Program.cs','StrategyExport/StrategyExport.csproj']
+    files=['market_contract.py','budget.py','reports.py','ipc.py','supervisor.py','worker.py','store.py','vibe_compat.py','fixture_inference.py','inference_process.py','hermes_transport.py','native_reuse.py','native_graphs.py','evidence_run.py','REFRESH.md','tests/test_market_contract.py','tests/test_budget.py','tests/test_supervisor.py','tests/test_prerequisite.py','tests/test_transport_compat.py','StrategyExport/Program.cs','StrategyExport/StrategyExport.csproj']
     for rel in files:add('tools/advisory/'+rel,(REPO/'tools/advisory'/rel).read_bytes())
     for rel in ['src/Apex.Desktop/Okx/OkxAdvisoryCanonicalData.cs','tools/windows/Test-WindowsAdvisoryRefresh.ps1','tools/windows/advisory-refresh-job.yml','tools/windows/publish_windows_advisory_refresh.py']:
         add(rel,(REPO/rel).read_bytes())

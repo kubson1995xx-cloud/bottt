@@ -6,16 +6,18 @@ if(args[0]=="--guard")
  if(!OperatingSystem.IsWindows())throw new Exception("native Windows required");
  string path=Path.GetFullPath(args[1]);
  if(!Path.IsPathFullyQualified(args[1]))throw new Exception("absolute store required");
- var leases=new List<Apex.Desktop.Services.WindowsPathSecurity.NativeObject>();
+ var leases=new List<Apex.Desktop.Services.WindowsPathSecurity.NativeObject>();int stage=0;
  try
  {
   var parent=new DirectoryInfo(Path.GetDirectoryName(path)!);
   var ancestors=new List<DirectoryInfo>();for(var p=parent;p!=null;p=p.Parent)ancestors.Add(p);ancestors.Reverse();
-  foreach(var p in ancestors){var h=Apex.Desktop.Services.WindowsPathSecurity.Open(p.FullName);Apex.Desktop.Services.WindowsPathSecurity.Validate(h,false);leases.Add(h);}
+  foreach(var p in ancestors){stage++;var h=Apex.Desktop.Services.WindowsPathSecurity.Open(p.FullName);leases.Add(h);Apex.Desktop.Services.WindowsPathSecurity.Validate(h,false);}
+  stage=100;
   if(!Directory.Exists(path))Apex.Desktop.Services.WindowsPathSecurity.CreatePrivateDirectory(path);
-  var root=Apex.Desktop.Services.WindowsPathSecurity.Open(path);Apex.Desktop.Services.WindowsPathSecurity.Validate(root,true);leases.Add(root);
+  var root=Apex.Desktop.Services.WindowsPathSecurity.Open(path);leases.Add(root);Apex.Desktop.Services.WindowsPathSecurity.Validate(root,true);
   Console.WriteLine("ADVISORY_STORE_ADMITTED");Console.Out.Flush();Console.ReadLine();
  }
+ catch(Apex.Desktop.Services.WindowsDataException error){Console.WriteLine($"ADVISORY_STORE_REFUSED {stage} {error.Message}");Console.Out.Flush();}
  finally{foreach(var lease in leases)lease.Dispose();}
  return;
 }

@@ -20,7 +20,12 @@ class StoreLease:
             thread=threading.Thread(target=lambda:q.put(process.stdout.readline(128)),daemon=True);thread.start()
             try:line=q.get(timeout=15)
             except queue.Empty:self.close();raise ValueError('native store admission timeout')
-            if line.strip()!=b'ADVISORY_STORE_ADMITTED':self.close();raise ValueError('native store admission refused')
+            if line.strip()!=b'ADVISORY_STORE_ADMITTED':
+                import re
+                reason=line.strip().decode('ascii',errors='replace')
+                self.close()
+                safe=reason if re.fullmatch(r'ADVISORY_STORE_REFUSED [0-9]{1,3} HOST_DATA_[A-Z_]+',reason) else 'NATIVE_HELPER_FAILED'
+                raise ValueError('native store admission refused: '+safe)
         else:
             # Portable offline lane only; production worker refuses non-Windows.
             for p in [root,*root.parents]:
@@ -31,7 +36,13 @@ class StoreLease:
         if self.process is None:return
         process=self.process;self.process=None
         try:
-            if process.poll() is None:process.stdin.write(b'close\n');process.stdin.flush();process.wait(timeout=5)
+            if process.poll() is None:
+                try:process.stdin.write(b'close\n');process.stdin.flush()
+                except OSError:pass  # Already-refused Windows helper can close its pipe first.
+                try:process.wait(timeout=5)
+                except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
         finally:
             if process.poll() is None:process.kill();process.wait(timeout=3)
-            for stream in (process.stdin,process.stdout):stream.close()
+            for stream in (process.stdin,process.stdout):
+                try:stream.close()
+                except OSError:pass

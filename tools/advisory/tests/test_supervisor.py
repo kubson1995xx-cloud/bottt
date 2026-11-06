@@ -77,6 +77,20 @@ class SupervisorTests(unittest.TestCase):
             script="from pathlib import Path;from supervisor import refresh_lock;\nwith refresh_lock(Path("+repr(str(path))+")) as locked:print(locked)"
             result=subprocess.run([sys.executable,'-c',script],env={**os.environ,'PYTHONPATH':str(Path(__file__).resolve().parents[1])},capture_output=True,text=True,timeout=20)
             self.assertEqual(0,result.returncode,result.stderr);self.assertEqual('False',result.stdout.strip())
+    def test_closed_tool_schema_without_unlocked_dependency(self):
+        definitions=[{'name':'technical_indicators','parameters':{'type':'object','properties':{'symbol':{'type':'string','enum':['BTC-EUR']}},'required':['symbol'],'additionalProperties':False}}]
+        valid='{"content":"","tool_calls":[{"name":"technical_indicators","args":{"symbol":"BTC-EUR"}}]}'
+        with patch.dict(sys.modules,{'jsonschema':None}):
+            dependency_error=None
+            try:parsed=parse_reply(valid,definitions,None)
+            except ImportError as error:dependency_error=str(error)
+            self.assertIsNone(dependency_error,'unlocked runtime dependency: '+str(dependency_error))
+            self.assertEqual('BTC-EUR',parsed['tool_calls'][0]['args']['symbol'])
+            for args in [{},{'symbol':'BTC-USDT'},{'symbol':'BTC-EUR','extra':True},{'symbol':True}]:
+                with self.subTest(args=args),self.assertRaises(ValueError):parse_reply(json.dumps({'content':'','tool_calls':[{'name':'technical_indicators','args':args}]}),definitions,None)
+            schema={'type':'object','$defs':{'Rating':{'type':'string','enum':['Hold','Buy']}},'properties':{'rating':{'$ref':'#/$defs/Rating'},'count':{'type':'integer','minimum':1}},'required':['rating','count'],'additionalProperties':False}
+            self.assertEqual({'rating':'Hold','count':1},parse_reply('{"rating":"Hold","count":1}',[],schema))
+            with self.assertRaises(ValueError):parse_reply('{"rating":"Hold","count":true}',[],schema)
     def test_unknown_and_oversized_ipc_refused_before_inference(self):
         base={'messages':[{'role':'human','content':'public'}],'tools':[],'schema':None}
         for payload in [{**base,'tools':[{'name':'shell','parameters':{}}]},{**base,'messages':[{'role':'human','content':'x'*250001}]}]:
