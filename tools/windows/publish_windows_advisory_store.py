@@ -17,9 +17,12 @@ def main():
   out=root/'source'/rel;out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(data)
   blob=run('git','hash-object','-w','--stdin',input=data);run('git','update-index','--add','--cacheinfo','100644',blob,rel,env=env);rows.append({'path':rel,'sha256':hashlib.sha256(data).hexdigest()})
  files=['tools/advisory/'+r for r in ['store.py','budget.py','reports.py','supervisor.py','REFRESH.md','tests/test_store_descendants.py','StrategyExport/Program.cs']]
- if (REPO/'tools/advisory/StrategyExport/AdvisoryStoreGuard.cs').exists():files.append('tools/advisory/StrategyExport/AdvisoryStoreGuard.cs')
+ if a.phase=='green' and (REPO/'tools/advisory/StrategyExport/AdvisoryStoreGuard.cs').exists():files.append('tools/advisory/StrategyExport/AdvisoryStoreGuard.cs')
  files+=['tools/windows/'+r for r in ['Test-WindowsAdvisoryStore.ps1','advisory-store-job.yml','publish_windows_advisory_store.py']]
- for rel in files:add(rel,(REPO/rel).read_bytes())
+ product={'tools/advisory/'+s for s in ['store.py','budget.py','reports.py','supervisor.py','StrategyExport/Program.cs']}
+ for rel in files:
+  data=subprocess.check_output(['git','show',a.base+':'+rel],cwd=REPO) if a.phase=='red' and rel in product else (REPO/rel).read_bytes()
+  add(rel,data)
  workflow=run('git','show',a.base+':.github/workflows/windows-demo.yml')+'\n';marker='\n  windowsAdvisoryRefresh:\n'
  assert workflow.count(marker)==1
  add('.github/workflows/windows-demo.yml',(workflow.split(marker)[0]+'\n'+(REPO/'tools/windows/advisory-store-job.yml').read_text()).encode())

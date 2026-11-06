@@ -16,8 +16,8 @@ class DescendantTests(unittest.TestCase):
     def setUp(self):
         self.base=Path(tempfile.gettempdir()).resolve()/('apex-store-i1-'+uuid.uuid4().hex)
         self.base_lease=StoreLease(self.base);self.services=[];self.links=[]
-        self.root=self.base/'store';self.root.mkdir(mode=0o700)
-        self.outside=self.base/'outside';self.outside.mkdir(mode=0o700)
+        self.root=self.base/'store';seed=StoreLease(self.root);seed.close()
+        self.outside=self.base/'outside';seed=StoreLease(self.outside);seed.close()
         self.raw=canonical_snapshot('BTC-EUR',CUTOFF,fixture())
     def tearDown(self):
         for s in self.services:s.close()
@@ -41,6 +41,7 @@ class DescendantTests(unittest.TestCase):
         else:path.chmod(0o777 if path.is_dir() else 0o666)
     def refused(self,existing=None):
         before=existing.read_bytes() if existing else None
+        pointer_existed=(self.root/'BTC-EUR/CURRENT.json').exists()
         refused=False;reason=None;status=None
         try:
             s=self.service()
@@ -53,13 +54,13 @@ class DescendantTests(unittest.TestCase):
         self.assertEqual([],outside_files,'outside tree mutated')
         if existing:self.assertEqual(before,existing.read_bytes(),'budget mutated before refusal')
         else:self.assertFalse((self.root/'budget.sqlite').exists(),'budget created before refusal')
-        self.assertFalse((self.root/'BTC-EUR/CURRENT.json').exists(),'publication before refusal')
+        self.assertEqual(pointer_existed,(self.root/'BTC-EUR/CURRENT.json').exists(),'publication before refusal')
     def test_pair_junction_exact_portable_shape(self):
         # Absolute 0700 root, BTC-EUR directory link outside, actual refresh,
         # injected analysis failure only to prevent any graph/model invocation.
         self.junction(self.root/'BTC-EUR');self.refused()
     def test_pair_broad_acl(self):
-        p=self.root/'BTC-EUR';p.mkdir(mode=0o700);self.broad(p);self.refused()
+        p=self.root/'BTC-EUR';p.mkdir(mode=0o777 if os.name=='nt' else 0o700);self.broad(p);self.refused()
     def test_budget_broad_acl_existing_no_mutation(self):
         s=self.service();s.close();p=self.root/'budget.sqlite';self.broad(p);self.refused(p)
     def test_budget_hardlink_existing_no_mutation(self):
@@ -67,14 +68,14 @@ class DescendantTests(unittest.TestCase):
     def test_budget_sidecar_junction(self):
         self.junction(self.root/'budget.sqlite-journal');self.refused()
     def test_report_generations_junction(self):
-        p=self.root/'BTC-EUR';p.mkdir(mode=0o700);self.junction(p/'generations');self.refused()
+        p=self.root/'BTC-EUR';p.mkdir(mode=0o777 if os.name=='nt' else 0o700);self.junction(p/'generations');self.refused()
     def test_attempt_directory_broad_acl(self):
-        p=self.root/'BTC-EUR/attempts/existing';p.mkdir(parents=True,mode=0o700);self.broad(p);self.refused()
+        p=self.root/'BTC-EUR/attempts/existing';p.mkdir(parents=True,mode=0o777 if os.name=='nt' else 0o700);self.broad(p);self.refused()
     def test_native_report_file_hardlink(self):
-        p=self.root/'BTC-EUR/generations'/('1'*32);p.mkdir(parents=True,mode=0o700)
+        p=self.root/'BTC-EUR/generations'/('1'*32);p.mkdir(parents=True,mode=0o777 if os.name=='nt' else 0o700)
         f=p/'vibe-trading-native.json';f.write_bytes(b'{}');os.link(f,self.base/'native-alias');self.refused()
     def test_current_wrong_type(self):
-        (self.root/'BTC-EUR/CURRENT.json').mkdir(parents=True,mode=0o700);self.refused()
+        (self.root/'BTC-EUR/CURRENT.json').mkdir(parents=True,mode=0o777 if os.name=='nt' else 0o700);self.refused()
     def test_created_after_initial_admission_refuses_before_attempt(self):
         s=self.service();p=self.root/'BTC-EUR';self.junction(p)
         before=(self.root/'budget.sqlite').read_bytes();denied=False
