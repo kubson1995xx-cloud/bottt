@@ -67,7 +67,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     internal string FundingFingerprint=>brokerBinding?.CredentialFingerprint??throw new InvalidOperationException("BROKER_BINDING_REQUIRED");
     internal TimeProvider ObservationClock=>clock;
     internal bool IsFiniteDemo=>runtime.IsFiniteDemo&&binding.Account.Environment==NavalEnvironment.OkxDemo;
-    internal bool OrdinaryDemoPolicy=>runtime.IsLinuxDemo&&!IsFiniteDemo&&binding.Account.Environment==NavalEnvironment.OkxDemo;
+    internal bool OrdinaryDemoPolicy=>(runtime.IsLinuxDemo||runtime.IsWindowsOrdinary(binding))&&!IsFiniteDemo&&binding.Account.Environment==NavalEnvironment.OkxDemo;
     internal bool ArmFiniteDemo()=>IsFiniteDemo&&runtime.FiniteSafe&&connected&&!disposed&&session!=null;
     internal NavalBrokerSession? BrokerSession=>session;
     internal OkxExecutionObservationClient? ObservationClient=>reads;
@@ -103,7 +103,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         Func<OkxExecutionScope,IOkxSigningMaterialProvider,string,IOkxObservationStreamFence,OkxObservationStream> streams,Func<OkxNavalStore>? storeFactory=null)
         =>new(runtime,root,binding,approval,clock,reads,streams,storeFactory??(()=>OkxNavalStore.ForTests(root,binding)));
     internal async Task<bool> ConnectAsync(OkxActivationRequest request,OkxActivationLease lease,CancellationToken cancellation)
-        =>!runtime.IsFiniteDemo&&await ConnectCoreAsync(request,lease,false,cancellation).ConfigureAwait(false);
+        =>!runtime.IsFiniteDemo&&request.Purpose==OkxActivationPurpose.Observe&&await ConnectCoreAsync(request,lease,false,cancellation).ConfigureAwait(false);
     internal static OkxAccountConnectionService CreateFiniteDemo(OkxNavalRuntime runtime,string root,OkxScopeBinding binding,IOkxProtectedBaselineProvider approval)
     {
         if(!runtime.IsFiniteDemo||binding.Account.Environment!=NavalEnvironment.OkxDemo)throw new InvalidOperationException("FINITE_DEMO_ONLY");
@@ -139,6 +139,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
                 if(!connected){session.Dispose();session=null;throw new InvalidOperationException("OBSERVATION_GAP");}
                 status="CONNECTED_STOP_RECONCILIATION_REQUIRED";return true;
             }
+            if(runtime.IsWindowsOrdinary(binding))throw new InvalidDataException("LOCAL_EXISTING_OWNER_REQUIRED_NO_BASELINE");
             if(IsFiniteDemo){store=storeFactory();brokerBinding=new(binding.Account,binding.MainUid,binding.ScopeId,binding.ConfigDigest,binding.CredentialBindingId,request.CredentialFingerprint,binding.SafetyVersion,store.StorageIdentity);}
             var observations=await OkxBrokerObservationMapper.CollectAsync(reads,context,binding,clock,stream.ReadState,linked.Token,FiniteBaselineAuthority(),runtime.FiniteNomination,runtime.FiniteFundingPremise).ConfigureAwait(false);
             original=observations;

@@ -22,8 +22,20 @@ internal sealed class OkxNavalRuntime : IAsyncDisposable
     internal Apex.Core.Naval.NavalFiniteOperatorPremise? FiniteFundingPremise { get; set; }
     private Func<bool>? finiteSafety;
     internal bool IsLinuxDemo { get; private init; }
+    private WindowsOkxLocalAttachment? localAttachment;
+    internal bool IsWindowsOrdinary(OkxScopeBinding binding)=>OperatingSystem.IsWindows()&&localAttachment?.Binding==binding&&!IsFiniteDemo&&!IsLinuxDemo;
+    internal async Task<bool> AttachWindowsExistingAsync(OkxScopeBinding binding,long epoch,CancellationToken ct,object commitSync,Func<bool> current)
+    {
+        lock(sync){if(disposed||IsFiniteDemo||IsLinuxDemo||!Bindings.Contains(binding)||accountServices.Any(s=>s.IsConnected))return false;}
+        var admitted=await WindowsOkxLocalAttachment.RequestAsync(dataRoot,binding,Activation,epoch,ct,commitSync,current).ConfigureAwait(false);
+        lock(commitSync)lock(sync)
+        {
+            if(admitted==null||ct.IsCancellationRequested||!current()||disposed||accountServices.Any(s=>s.IsConnected))return false;
+            localAttachment=admitted;Activation.Revoke();return true;
+        }
+    }
     private Func<bool>? linuxSafety;
-    internal bool FiniteSafe=>(!IsFiniteDemo||finiteSafety?.Invoke()==true)&&(!IsLinuxDemo||linuxSafety?.Invoke()==true);
+    internal bool FiniteSafe=>(!IsFiniteDemo||finiteSafety?.Invoke()==true)&&(!IsLinuxDemo||linuxSafety?.Invoke()==true)&&(localAttachment==null||WindowsOkxLocalAttachment.RemoteProfileAbsent(dataRoot));
     internal static OkxNavalRuntime ComposeLinuxDemo(string root,OkxScopeBinding binding,IOkxExecutionSecretProvider secrets,IOkxProtectedActivationProvider activation,Func<bool> safety)
     {
         if(!OperatingSystem.IsLinux()||binding.Account.Environment!=Apex.Core.Naval.NavalEnvironment.OkxDemo)throw new InvalidOperationException("LINUX_DEMO_ONLY");

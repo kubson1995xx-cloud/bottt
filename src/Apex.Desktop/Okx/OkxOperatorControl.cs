@@ -109,6 +109,11 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 return last=observation.Code;
             }
             var binding=runtime.Bindings.Single(b=>b.ScopeId==scope);
+            if(action=="attach-local")
+            {
+                if(entries.Values.Any(e=>e.Account.IsConnected)||binding.Account.Environment!=Apex.Core.Naval.NavalEnvironment.OkxDemo)return last="LOCAL_ATTACH_DISCONNECTED_DEMO_REQUIRED";
+                return last=await runtime.AttachWindowsExistingAsync(binding,epoch,linked.Token,sync,()=>generation==epoch&&!disposed).ConfigureAwait(false)?"LOCAL_EXISTING_DEMO_ATTACHED_STOP":"LOCAL_ATTACH_REFUSED_PRESERVED";
+            }
             if(action=="diagnose")
             {
                 string state=WindowsOkxProvisioning.PassiveKeyState(config.DataDir,binding);

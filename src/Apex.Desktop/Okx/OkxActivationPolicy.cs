@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 namespace Apex.Desktop.Okx;
-internal enum OkxActivationPurpose { Observe, Execute }
+internal enum OkxActivationPurpose { Observe, Execute, LocalAttachment=10 }
 internal sealed record OkxActivationRequest(OkxScopeBinding Binding, string CredentialFingerprint, Guid Session, long Generation, OkxActivationPurpose Purpose, DateTimeOffset ExpiresUtc);
 internal interface IOkxProtectedActivationProvider { ValueTask<bool> ConfirmAsync(OkxActivationRequest request, CancellationToken cancellation); }
 internal sealed class UnavailableOkxActivationProvider : IOkxProtectedActivationProvider
@@ -68,7 +68,7 @@ internal sealed class OkxActivationPolicy
     private static bool Valid(OkxActivationRequest request, DateTimeOffset now)
     {
         if (request == null || request.Binding == null || request.Session == Guid.Empty || request.Generation < 0 ||
-            request.Purpose is not (OkxActivationPurpose.Observe or OkxActivationPurpose.Execute) ||
+            request.Purpose is not (OkxActivationPurpose.Observe or OkxActivationPurpose.Execute or OkxActivationPurpose.LocalAttachment) ||
             !OkxCredentialUseRegistry.FingerprintValid(request.CredentialFingerprint) || request.ExpiresUtc <= now || request.ExpiresUtc - now > TimeSpan.FromSeconds(120)) return false;
         try { OkxConfiguration.ValidateBinding(request.Binding); return true; }
         catch (Exception e) when (e is InvalidDataException or ArgumentException or NullReferenceException) { return false; }
