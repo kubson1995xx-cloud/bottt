@@ -231,14 +231,22 @@ public sealed partial class OkxConditionalTradingTests
         internal OkxNavalRuntime Runtime=null!;internal OkxAccountConnectionService Account=null!;internal OkxOperationalTradingService Loop=null!;
         internal readonly List<MultiCycle> Cycles=new();
         internal EngineState Seed=null!;
+        internal Action EnterBenchmark=()=>{};
+        // Production Windows first-run creation wired to this synthetic exchange; only the
+        // native dialogs/CredUI are replaced by the supplied test surface.
+        internal WindowsOkxLocalEnrollment LocalEnrollment(IWindowsLocalEnrollmentUi ui)=>WindowsOkxLocalEnrollment.ForTests(ui,new(
+            (k,s,p,ct)=>OkxEnrollmentDiscoveryClient.RunAsync("Demo","DemoTradingApi",k,s,p,null,null,ct,F),
+            (runtime,root,binding,approval)=>OkxAccountConnectionService.ForTests(runtime,root,binding,approval,F.Clock,
+                (s,k,d,x)=>OkxExecutionObservationClient.ForTests(F,F.Clock,s,k,d,x,(t,c)=>{F.Clock.Advance(t);return Task.CompletedTask;}),
+                (s,k,d,x)=>OkxObservationStream.ForTests((u,c)=>Task.FromResult<WebSocket>(new OperationalSocket(u)),F.Clock,s,k,d,x),()=>OkxNavalStore.OpenNative(root,binding))));
         private MultiFixture(OperationalPeer f,FiniteDemoPeer history){F=f;History=history;Peer=new(f){CandleInstrument="SOL-EUR"};Market=new(Peer,Cycles);}
         private static int nextMixedUid=99220000;
-        internal static async Task<MultiFixture> Create(string availability="",bool windowsLocalSeed=false)
+        internal static async Task<MultiFixture> Create(string availability="",bool windowsLocalSeed=false,bool windowsLocalCreate=false)
         {
             string uid=Guid.NewGuid().ToString("N");
             string accountUid=Interlocked.Increment(ref nextMixedUid).ToString();
-            var binding=OkxConfiguration.Bind(new OkxNavalOptions{Schema="okx-naval-config-v1",Scopes=new[]{new OkxScopeOptions{ScopeId="account",Environment="OkxDemo",Region="EEA",ExpectedUid=accountUid,ExpectedMainUid=accountUid,QuoteCurrency="EUR",CredentialBindingId="key",SafetyVersion="okx-cash-v1"}}})[0];
-            var f=new OperationalPeer(binding:binding,finite:true,native:windowsLocalSeed);var h=new FiniteDemoPeer(f){BaseCurrency="SOL"};var fixture=new MultiFixture(f,h);bool benchmark=false;
+            var binding=OkxConfiguration.Bind(new OkxNavalOptions{Schema="okx-naval-config-v1",Scopes=new[]{new OkxScopeOptions{ScopeId=windowsLocalCreate?WindowsOkxLocalEnrollment.ScopeId:"account",Environment="OkxDemo",Region="EEA",ExpectedUid=accountUid,ExpectedMainUid=accountUid,QuoteCurrency="EUR",CredentialBindingId=windowsLocalCreate?WindowsOkxLocalEnrollment.CredentialBindingId:"key",SafetyVersion="okx-cash-v1"}}})[0];
+            var f=new OperationalPeer(binding:binding,finite:true,native:windowsLocalSeed||windowsLocalCreate,seedCredential:!windowsLocalCreate);var h=new FiniteDemoPeer(f){BaseCurrency="SOL"};var fixture=new MultiFixture(f,h);bool benchmark=false;
             f.Mutate=(p,b)=>
             {
                 OkxOrdinaryMixedAccountTests.Shape(f,h,p,b);
@@ -265,6 +273,8 @@ public sealed partial class OkxConditionalTradingTests
                 if(benchmark&&p is "/api/v5/trade/order" or "/api/v5/trade/orders-history" or "/api/v5/trade/orders-history-archive")
                     foreach(var row in b["data"]!.AsArray().Where(row=>row!["state"]!.GetValue<string>()=="filled")){row!["posSide"]=p=="/api/v5/trade/order"?"net":"";row["tradeQuoteCcy"]=p=="/api/v5/trade/order"?"":"EUR";}
             };
+            fixture.EnterBenchmark=()=>benchmark=true;
+            if(windowsLocalCreate)return fixture;
             try
             {
             f.Runtime.FiniteFundingPremise=(NavalFiniteOperatorPremise)OkxCurrentMarketFundingTests.Premise(f);await f.Connect();Assert.True(await f.Service.ApproveAndCreateAsync(default));

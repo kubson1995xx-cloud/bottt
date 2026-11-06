@@ -30,6 +30,10 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     private readonly ConcurrentDictionary<string,OkxReadAccount> readAccounts=new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string,Apex.Adapters.Okx.Execution.OkxEnrollmentObservation> readObservations=new(StringComparer.Ordinal);
     private bool disposed;
+    private readonly WindowsOkxLocalEnrollment localEnrollment;
+    private readonly WindowsLocalRunGuard runGuard=new();
+    internal bool KeepAwakeActive=>runGuard.Active;
+    internal uint KeepAwakeFlags=>runGuard.LastAppliedFlags;
     private sealed class Entry(OkxAccountConnectionService account)
     {
         internal readonly OkxAccountConnectionService Account=account;
@@ -37,9 +41,12 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
         internal CancellationTokenSource? LoopCancellation;
         internal Task? Loop;
     }
-    internal OkxOperatorControl(OkxNavalRuntime runtime,ConfigStore config,Func<OkxAccountConnectionService,OkxOperationalTradingService>? tradingFactory=null){this.runtime=runtime;this.config=config;this.tradingFactory=tradingFactory??(a=>OkxOperationalTradingService.Create(a));if(OperatingSystem.IsWindows())foreach(var a in new WindowsOkxReadStore(config.DataDir).List())readAccounts.TryAdd(a.ScopeId,a);}
+    internal OkxOperatorControl(OkxNavalRuntime runtime,ConfigStore config,Func<OkxAccountConnectionService,OkxOperationalTradingService>? tradingFactory=null,WindowsOkxLocalEnrollment? localEnrollment=null){this.runtime=runtime;this.config=config;this.tradingFactory=tradingFactory??(a=>OkxOperationalTradingService.Create(a));this.localEnrollment=localEnrollment??WindowsOkxLocalEnrollment.Native();if(OperatingSystem.IsWindows())foreach(var a in new WindowsOkxReadStore(config.DataDir).List())readAccounts.TryAdd(a.ScopeId,a);}
     internal object ReadStatus()=>new {mode=entries.Values.Any(e=>e.Trading?.ReadStatus().Mode=="RUNNING")?"RUNNING":"STOP",productionProfileApproved=entries.Values.Any(e=>e.Trading?.ReadStatus().ProductionProfileApproved==true),productionBlocker=entries.Count==0?ProductionBlocker:null,conditionalPolicyAvailable=true,
-        nativeAvailable=OperatingSystem.IsWindows()&&Environment.UserInteractive,lastResult=last,enrollmentStage,unboundStoreState=WindowsOkxProvisioning.PassiveUnboundState(config),
+        nativeAvailable=OperatingSystem.IsWindows()&&Environment.UserInteractive,lastResult=last,enrollmentStage,
+        executionMode=WindowsOkxLocalEnrollment.RemoteProfilePresent(config.DataDir)?"VPS":WindowsOkxLocalEnrollment.LocalScopeConfigured(config)?"LOCAL":"NOT_SELECTED",
+        localCreateAvailable=OperatingSystem.IsWindows()&&!WindowsOkxLocalEnrollment.RemoteProfilePresent(config.DataDir)&&!WindowsOkxLocalEnrollment.LocalScopeConfigured(config),
+        keepAwake=runGuard.Active,unboundStoreState=WindowsOkxProvisioning.PassiveUnboundState(config),
         requirements=new[]{"Dedykowany cash SPOT ≤1x, bez pożyczek; feeType=0: kupno fee w base, sprzedaż w quote; feeType=1: quote. Rzeczywiste fee i inventory netto są wiążące.","FOK z żądanym TP i SL; ochrona warunkowa po fill, możliwy brak ochrony i niechroniona reszta po anulowaniu", "Osobne uzbrojenie i START; STOP nie oznacza sprzedaży", "Katalog prywatny, świeże referencje USD/USDT do limitów; prywatny test DEMO pozostaje lokalnym działaniem użytkownika"},
         accounts=runtime.Bindings.Select(b=>
         {
@@ -77,6 +84,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
                 if(action=="emergency")existing.Trading?.EmergencyStop();
                 Task? stopping;lock(sync){existing.LoopCancellation?.Cancel();stopping=existing.Loop;}
                 if(stopping!=null)await stopping.ConfigureAwait(false);
+                RefreshGuard();
                 if(action=="disconnect")
                 {
                     await actionLane.WaitAsync(ct).ConfigureAwait(false);
@@ -91,6 +99,13 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
         {
             using var linked=CancellationTokenSource.CreateLinkedTokenSource(ct,lifetime.Token);
             long epoch;lock(sync){pending=linked;epoch=generation;}
+            if(action=="create-local")
+            {
+                if(entries.Values.Any(e=>e.Account.IsConnected))return last="DISCONNECT_BEFORE_CONFIGURATION";
+                string created=await localEnrollment.CreateAsync(config,runtime,linked.Token,s=>enrollmentStage=s).ConfigureAwait(false);
+                // A completed creation is reported as-is (owner exists in STOP); otherwise a newer STOP/cancel wins.
+                lock(sync)return last=enrollmentStage=created=="LOCAL_OWNER_CREATED_STOP_ATTACH_NEXT"||generation==epoch?created:"LOCAL_CREATE_CANCELLED";
+            }
             if(action=="configure")
             {
                 if(entries.Values.Any(e=>e.Account.IsConnected))return last="DISCONNECT_BEFORE_CONFIGURATION";
@@ -178,7 +193,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
             {
                 if(generation!=epoch||linked.IsCancellationRequested)return last="LOCAL_ACTION_CANCELLED";
                 var started=current.Trading.Start();
-                if(started.Status==Apex.Core.Naval.NavalMutationStatus.Applied)StartScheduler(current);
+                if(started.Status==Apex.Core.Naval.NavalMutationStatus.Applied){StartScheduler(current);runGuard.SetRunning(true);}
                 return last=started.Code;
             }
             if(action=="recover")return last=reservationId==null?"EXACT_RESERVATION_REQUIRED":(await current.Trading.ExitAsync(reservationId,linked.Token).ConfigureAwait(false)).Code;
@@ -213,6 +228,14 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
         try{await entry.Trading!.RunAsync(ct).ConfigureAwait(false);}
         catch(OperationCanceledException) when(ct.IsCancellationRequested){}
         catch(Exception e) when(e is not OutOfMemoryException){entry.Trading!.Stop();last="SCHEDULER_STOPPED_RECONNECT_REQUIRED";}
+        finally{RefreshGuard(entry);}
+    }
+    // Awake/close-warning only while a live scheduler loop is RUNNING.
+    private void RefreshGuard(Entry? ending=null)
+    {
+        bool running;
+        lock(sync)running=!disposed&&entries.Values.Any(e=>!ReferenceEquals(e,ending)&&e.Loop is {IsCompleted:false}&&e.LoopCancellation is {IsCancellationRequested:false}&&e.Trading?.ReadStatus().Mode=="RUNNING");
+        runGuard.SetRunning(running);
     }
     private async Task CloseEntry(string scope)
     {
@@ -224,6 +247,6 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     {
         lock(sync){if(disposed)return;disposed=true;generation++;pending?.Cancel();runtime.Activation.Revoke();lifetime.Cancel();}
         await actionLane.WaitAsync().ConfigureAwait(false);
-        try{foreach(var scope in entries.Keys)await CloseEntry(scope).ConfigureAwait(false);}finally{actionLane.Release();lifetime.Dispose();}
+        try{foreach(var scope in entries.Keys)await CloseEntry(scope).ConfigureAwait(false);}finally{actionLane.Release();lifetime.Dispose();runGuard.Dispose();}
     }
 }

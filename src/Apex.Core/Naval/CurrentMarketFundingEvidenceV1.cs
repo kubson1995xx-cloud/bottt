@@ -19,8 +19,12 @@ internal static class NavalCurrentMarketFunding
 {
     internal const string Statement="Nie będę wykonywać innych operacji podczas\nWirtualne środki i nie korzystałem z pożyczek";
     internal const string TestId="current-market-funding-bounded-demo-v1";
+    // Exactly two origins. Linux records keep the parent value; the Windows value is
+    // minted only by the native local-enrollment confirmation (WindowsOkxLocalEnrollment).
+    internal const string ParentProvenance="parent-confirmed-user";
+    internal const string WindowsLocalProvenance="windows-local-user-confirmed";
     internal static bool Premise(NavalFiniteOperatorPremise? p,DateTimeOffset at)=>p!=null&&p.Schema=="finite-operator-premise-v1"&&p.Policy=="current-market-funding-v1"&&
-        p.TestId==TestId&&p.Environment=="OkxDemo"&&p.Statement==Statement&&p.Provenance=="parent-confirmed-user"&&Hash(p.CredentialRecordDigest)&&
+        p.TestId==TestId&&p.Environment=="OkxDemo"&&p.Statement==Statement&&(p.Provenance==ParentProvenance||p.Provenance==WindowsLocalProvenance)&&Hash(p.CredentialRecordDigest)&&
         p.IssuedUtc.Offset==TimeSpan.Zero&&p.ExpiresUtc.Offset==TimeSpan.Zero&&p.ExpiresUtc>p.IssuedUtc&&p.ExpiresUtc-p.IssuedUtc<=TimeSpan.FromMinutes(30)&&p.IssuedUtc<=at&&at<p.ExpiresUtc;
     private static bool Hash(string? s)=>s!=null&&Regex.IsMatch(s,"\\A[a-f0-9]{64}\\z");
     private static bool Zero(NavalFundingAmount? a)=>a!=null&&a.Value==0&&Regex.IsMatch(a.Raw,"\\A-?0+(?:\\.0+)?\\z");

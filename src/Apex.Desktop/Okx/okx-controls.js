@@ -8,6 +8,8 @@
   function element(tag,text,parent=box){const e=document.createElement(tag);if(text)e.textContent=text;parent.append(e);return e;}
   element('h2','OKX — lokalny operator');
   element('p','Rzeczywista konfiguracja i stan hosta OKX — niezależne od historycznej, syntetycznej wizualizacji Naval. Samo otwarcie panelu nie łączy rachunku ani nie uruchamia handlu.');
+  const modeLabel=element('p','Tryb: …');modeLabel.id='okx-execution-mode';modeLabel.setAttribute('role','status');
+  const runningBanner=element('p','');runningBanner.id='okx-running-warning';runningBanner.setAttribute('role','alert');runningBanner.hidden=true;
   const details=element('details');details.open=true;element('summary','Konfiguracja i polecenia OKX',details);
   element('p','Cash SPOT ≤1x, bez pożyczek. feeType=0: fee kupna w base, sprzedaży w quote; feeType=1: quote. Sprzedaż obejmuje tylko własne inventory netto, z zachowaniem pyłu. TP/SL jest warunkowe po fill i może zawieść. Po anulowaniu i nieudanej/Unknown sprzedaży pozostaje niechroniony stan bez gwarantowanego czasu odzyskania. STOP nie oznacza sprzedaży. LIVE domyślnie OFF; osobne uzbrojenie i START. Prywatne DEMO wymaga Twojej lokalnej weryfikacji.',details);
   const label=element('label','Rachunek / środowisko OKX: ',details),select=element('select',null,label);select.id='okx-scope';
@@ -23,8 +25,10 @@
   function mount(){const slot=document.getElementById('okx-operator-slot');if(slot){slot.append(box);return true;}if(!naval){document.querySelector('.app .main')?.prepend(box);if(!box.isConnected)document.body.prepend(box);return true;}return false;}
   if(!mount()){const observer=new MutationObserver(()=>{if(mount())observer.disconnect();});observer.observe(document.body,{childList:true,subtree:true});}
   let state=null,healthy=false,polling=false;const pending=new Set();
-  const names=[['configure','Połącz konto OKX'],['reconnect','Połącz ponownie — READ-ONLY'],['cancel','Anuluj łączenie / STOP'],['diagnose','Sprawdź zapis klucza lokalnie (bez sieci)'],['test-demo','Test połączenia DEMO / odczytaj saldo — tylko odczyt'],['connect','Chronione Observe — połącz istniejący zakres'],['attach-local','Dołącz istniejący lokalny owner DEMO (nie START)'],['prepare','Przygotuj istniejący DEMO (nie START)'],['disconnect','Rozłącz / zmień konto'],['baseline','Zatwierdź rzeczywistą bazę'],['arm','Uzbrój Execute (nie START)'],['start','START — osobne polecenie'],['stop','STOP / cofnij zgody'],['emergency','Emergency Stop — sprawdź zobowiązania'],['recover','Redukuj wybrany własny stan — bez START / bez ponowienia Unknown'],['refresh','Odśwież status']];
+  const names=[['configure','Połącz konto OKX'],['create-local','Nowy lokalny bot na tym PC (DEMO, pierwsze uruchomienie)'],['reconnect','Połącz ponownie — READ-ONLY'],['cancel','Anuluj łączenie / STOP'],['diagnose','Sprawdź zapis klucza lokalnie (bez sieci)'],['test-demo','Test połączenia DEMO / odczytaj saldo — tylko odczyt'],['connect','Chronione Observe — połącz istniejący zakres'],['attach-local','Dołącz istniejący lokalny owner DEMO (nie START)'],['prepare','Przygotuj istniejący DEMO (nie START)'],['disconnect','Rozłącz / zmień konto'],['baseline','Zatwierdź rzeczywistą bazę'],['arm','Uzbrój Execute (nie START)'],['start','START — osobne polecenie'],['stop','STOP / cofnij zgody'],['emergency','Emergency Stop — sprawdź zobowiązania'],['recover','Redukuj wybrany własny stan — bez START / bez ponowienia Unknown'],['refresh','Odśwież status']];
   function enrollmentHelp(code){
+    if(code==='LOCAL_OWNER_CREATED_STOP_ATTACH_NEXT')return code+' — utworzono nowego lokalnego bota w STOP. Dalej: „Dołącz istniejący lokalny owner DEMO”, „Chronione Observe”, „Przygotuj”, „Uzbrój Execute”, potem START.';
+    if(code&&code.startsWith('LOCAL_'))return code+' — lokalny bot na tym PC. Nic nie wystartowało; stan zachowany. '+(code.includes('LIVE')||code.includes('KEYS_REFUSED')?'Użyj klucza z OKX → Demo Trading → API (Read + Trade, bez Withdraw). Klucze LIVE są odrzucane.':code.includes('EUR_CASH')?'Konto DEMO musi mieć saldo EUR.':code.includes('VPS')?'Ten komputer ma profil sterowania VPS; tryb lokalny jest niedostępny w tym katalogu danych.':'');
     if(code==='LOCAL_EXISTING_DEMO_ATTACHED_STOP')return code+' — istniejący właściciel związany z tym PC, STOP. Wymagane osobne Observe, PREPARE, Execute i START. To nie migracja historii z VPS.';
     if(code==='ORDINARY_DEMO_PREPARED'||code==='ORDINARY_DEMO_ALREADY_PREPARED')return code+' — ten sam kapitał i historia, bez nowej bazy. Osobne Execute i START nadal wymagane.';
     if(!code||code==='NOT_STARTED')return 'Połącz konto OKX: jeden lokalny formularz Windows, DEMO domyślne, LIVE zablokowane, trzy maskowane pola. Połącz wykonuje wyłącznie podpisany odczyt; UID, salda i rynki są wykrywane automatycznie. Chroniona zgoda Windows jest wymagana przed zapisem DPAPI. Bez Arm i START.';
@@ -49,6 +53,7 @@
     for(const b of actions.querySelectorAll('button')){
       const action=b.dataset.action,safety=['stop','emergency','disconnect'].includes(action);
       if(action==='cancel'){b.disabled=false;continue;}
+      if(action==='create-local'){const why=!healthy?'Brak potwierdzonego statusu':busy?'Trwa lokalne polecenie':connected?'Najpierw rozłącz rachunek':state?.nativeAvailable===false?'Wymagany interaktywny Windows':!state?.localCreateAvailable?'Lokalny bot już skonfigurowany albo ten PC jest w trybie VPS':'';b.disabled=!!why;b.title=why;continue;}
       if(current?.readOnly&&['attach-local','prepare','connect','baseline','arm','start','recover'].includes(action)){b.disabled=true;b.title='READ-ONLY. Lokalny handel na istniejącym koncie VPS wymaga chronionego transferu właściciela; brak nowej bazy lub drugiej alokacji.';continue;}
       if(action==='attach-local'&&(current?.environment!=='OkxDemo'||connected)){b.disabled=true;b.title='Wymagany rozłączony istniejący lokalny owner DEMO';continue;}
       if(action==='prepare'&&(!current?.localOrdinary||!current?.connected||current?.armed||current?.mode!=='STOP')){b.disabled=true;b.title='Wymagany dołączony i połączony lokalny owner DEMO w STOP bez Execute';continue;}
@@ -63,7 +68,10 @@
     try{
       const r=await fetch('/api/naval/okx/status',{cache:'no-store',signal:abort.signal});if(!r.ok)throw new Error('HTTP '+r.status);
       const next=await r.json();if(!next||!Array.isArray(next.accounts))throw new Error('Niepoprawna odpowiedź statusu');
-      state=next;healthy=true;options(select,state.accounts.map(a=>[a.scopeId,`${a.environment==='Live'?'LIVE':'DEMO'} | UID ${a.uid} | ${a.quote||'waluty osobno / READ-ONLY'} | ${a.scopeId}`]),'Brak konta OKX');
+      state=next;healthy=true;
+      const running=state.mode==='RUNNING';
+      modeLabel.textContent='Tryb: '+(state.executionMode==='LOCAL'?'Lokalnie (ten PC)':state.executionMode==='VPS'?'VPS':'nie wybrano — pierwsze uruchomienie: „Nowy lokalny bot na tym PC” albo parowanie z VPS')+(state.keepAwake?' • uśpienie komputera zablokowane, bot DZIAŁA':'');
+      runningBanner.hidden=!running;runningBanner.textContent=running?'UWAGA: bot DZIAŁA na tym komputerze. Nie zamykaj okna APEX (czarne okno konsoli) i nie wyłączaj ani nie usypiaj komputera. Aby zakończyć: najpierw STOP, potem zamknij okno.':'';options(select,state.accounts.map(a=>[a.scopeId,`${a.environment==='Live'?'LIVE':'DEMO'} | UID ${a.uid} | ${a.quote||'waluty osobno / READ-ONLY'} | ${a.scopeId}`]),'Brak konta OKX');
       const current=state.accounts.find(a=>a.scopeId===select.value);
       stage.textContent=enrollmentHelp(state.enrollmentStage);
       status.textContent=(current?JSON.stringify(current,null,2):'Brak konta. Połącz je w lokalnym formularzu Windows. Żadne prywatne połączenie nie jest uruchomione.')+'\nMagazyn starszych zakresów: '+(state.unboundStoreState||'status nieznany')+'\nAkceptowane read_only albo read_only,trade, wyłącznie odczyt. To nie P&L, baza kapitału ani zgoda na handel. Salda walut są oddzielne; brak salda oznacza brak obserwacji, nie wymyślone zero. Brak automatycznego rynku i USD/USDT. UI nie oferuje rotacji ani nadpisywania istniejących danych.';
@@ -72,11 +80,11 @@
   }
   async function command(action){
     if(action==='refresh'){await refresh();return;}
-    const scope=select.value,reservationId=recovery.value;if(!['configure','cancel'].includes(action)&&!scope){result.textContent='Brak konta OKX — polecenie nie zostało wysłane.';return;}
+    const scope=select.value,reservationId=recovery.value;if(!['configure','create-local','cancel'].includes(action)&&!scope){result.textContent='Brak konta OKX — polecenie nie zostało wysłane.';return;}
     pending.add(action);render();result.textContent='Wysłano '+action+'. Oczekiwanie na lokalną interakcję / wynik. Formularz i zgody są w osobnym oknie Windows „APEX”; sprawdź pasek zadań / Alt+Tab. Nie ponawiaj polecenia.';
     const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),390000);
     try{
-      const url=['configure','cancel'].includes(action)?'/api/naval/okx/'+action:`/api/naval/okx/${encodeURIComponent(scope)}/${action}`;
+      const url=['configure','create-local','cancel'].includes(action)?'/api/naval/okx/'+action:`/api/naval/okx/${encodeURIComponent(scope)}/${action}`;
       const payload={commandId:crypto.randomUUID()};if(action==='recover')payload.reservationId=reservationId;
       const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-Apex-Local':'1'},body:JSON.stringify(payload),signal:abort.signal});
       let body;try{body=await response.json();}catch{body=null;}
@@ -88,5 +96,6 @@
   for(const [action,text] of names){const b=element('button',text,actions);b.type='button';b.dataset.action=action;b.addEventListener('click',()=>command(action));}
   select.addEventListener('change',()=>{result.textContent='Wybrano inny zakres. Wybór nie uruchamia połączenia ani handlu.';render();});
   recovery.addEventListener('change',render);
+  window.addEventListener('beforeunload',e=>{if(state?.mode==='RUNNING'){e.preventDefault();e.returnValue='Bot APEX DZIAŁA. Zamknięcie panelu nie zatrzymuje bota; zamknięcie okna APEX przerwie jego pracę. Najpierw STOP.';return e.returnValue;}});
   render();void refresh();setInterval(refresh,2000);
 })();

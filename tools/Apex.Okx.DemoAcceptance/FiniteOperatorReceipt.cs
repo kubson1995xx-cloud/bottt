@@ -15,7 +15,7 @@ internal static class FiniteOperatorReceipt
         string path=Path.Combine(root,Name);if(!File.Exists(path))throw new OkxFiniteAccountRefusal("FINITE_OPERATOR_PREMISE_REQUIRED");OkxLinuxPrivate.AdmitFile(path);
         var bytes=File.ReadAllBytes(path);if(bytes.Length is <1 or >4096)throw new OkxFiniteAccountRefusal("FINITE_OPERATOR_PREMISE_REQUIRED");
         var premise=Parse(bytes);
-        if(!NavalCurrentMarketFunding.Premise(premise,DateTimeOffset.UtcNow)||premise.CredentialRecordDigest!=await vault.RecordIdentityAsync(ct).ConfigureAwait(false))throw new OkxFiniteAccountRefusal("FINITE_OPERATOR_PREMISE_INVALID_OR_WRONG_RECORD");
+        if(premise.Provenance!=NavalCurrentMarketFunding.ParentProvenance||!NavalCurrentMarketFunding.Premise(premise,DateTimeOffset.UtcNow)||premise.CredentialRecordDigest!=await vault.RecordIdentityAsync(ct).ConfigureAwait(false))throw new OkxFiniteAccountRefusal("FINITE_OPERATOR_PREMISE_INVALID_OR_WRONG_RECORD");
         return premise;
     }
     internal static async Task ProvisionAsync(string root,LinuxDemoCredentialVault vault,Stream input,CancellationToken ct)
@@ -26,7 +26,8 @@ internal static class FiniteOperatorReceipt
         while(count<bytes.Length){int n=await input.ReadAsync(bytes.AsMemory(count),ct).ConfigureAwait(false);if(n==0)break;count+=n;}
         if(count is <1 or >4096)throw new OkxFiniteAccountRefusal("FINITE_OPERATOR_PREMISE_INPUT_REFUSED");
         var p=Parse(bytes.AsSpan(0,count));
-        if(p.CredentialRecordDigest!="PARENT_BIND_CURRENT_ENCRYPTED_RECORD")throw new OkxFiniteAccountRefusal("FINITE_OPERATOR_PREMISE_INPUT_REFUSED");
+        // The Windows-local provenance is native-dialog-only and never accepted by this Linux CLI.
+        if(p.Provenance!=NavalCurrentMarketFunding.ParentProvenance||p.CredentialRecordDigest!="PARENT_BIND_CURRENT_ENCRYPTED_RECORD")throw new OkxFiniteAccountRefusal("FINITE_OPERATOR_PREMISE_INPUT_REFUSED");
         p=p with{CredentialRecordDigest=await vault.RecordIdentityAsync(ct).ConfigureAwait(false)};
         if(!NavalCurrentMarketFunding.Premise(p,DateTimeOffset.UtcNow))throw new OkxFiniteAccountRefusal("FINITE_OPERATOR_PREMISE_INPUT_REFUSED");
         string path=Path.Combine(root,Name);

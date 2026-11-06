@@ -113,6 +113,13 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
         if(!runtime.IsFiniteDemo||binding.Account.Environment!=NavalEnvironment.OkxDemo)throw new InvalidOperationException("FINITE_DEMO_ONLY");
         return new(runtime,root,binding,approval,TimeProvider.System,OkxExecutionObservationClient.Create,OkxObservationStream.Create,()=>OkxNavalStore.OpenLinuxFiniteDemo(root,binding));
     }
+    // Windows-local first-run owner creation only: finite-origin baseline on the
+    // native DPAPI/ACL store. Not reachable from the Linux hosts or the wire.
+    internal static OkxAccountConnectionService CreateWindowsLocalFinite(OkxNavalRuntime runtime,string root,OkxScopeBinding binding,IOkxProtectedBaselineProvider approval)
+    {
+        if(!OperatingSystem.IsWindows()||!runtime.IsFiniteDemo||runtime.IsLinuxDemo||binding.Account.Environment!=NavalEnvironment.OkxDemo||binding.Account.QuoteCurrency!="EUR")throw new InvalidOperationException("WINDOWS_LOCAL_FINITE_DEMO_ONLY");
+        return new(runtime,root,binding,approval,TimeProvider.System,OkxExecutionObservationClient.Create,OkxObservationStream.Create,()=>OkxNavalStore.OpenNative(root,binding));
+    }
     internal Task<bool> ConnectFiniteDemoAsync(string fingerprint,CancellationToken ct)
         =>ConnectCoreAsync(new(binding,fingerprint,Guid.NewGuid(),0,OkxActivationPurpose.Observe,DateTimeOffset.UtcNow.AddSeconds(120)),null,true,ct);
     private async Task<bool> ConnectCoreAsync(OkxActivationRequest request,OkxActivationLease? lease,bool finite,CancellationToken cancellation)

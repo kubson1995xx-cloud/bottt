@@ -225,7 +225,7 @@ internal sealed class OperationalPeer : HttpMessageHandler, IOkxExecutionSecretP
     internal async Task Connect(){if(Runtime.IsFiniteDemo){Assert.True(await Service.ConnectFiniteDemoAsync(Request.CredentialFingerprint,default),Service.Status);return;}var lease=await Runtime.Activation.RequestAsync(Request,default);Assert.NotNull(lease);Assert.True(await Service.ConnectAsync(Request,lease!,default),Service.Status);}
     internal string Target => Path.Combine(OkxConfiguration.Paths(Root, Binding).Authority, "naval_authority_broker_v2.json");
     internal static readonly byte[] Key=Encoding.ASCII.GetBytes("operational-synthetic-key"), Secret=Encoding.ASCII.GetBytes("operational-synthetic-secret"), Pass=Encoding.ASCII.GetBytes("operational-synthetic-pass");
-    internal OperationalPeer(string? root=null,OkxScopeBinding? binding=null,bool native=false,bool preserve=false,bool finite=false)
+    internal OperationalPeer(string? root=null,OkxScopeBinding? binding=null,bool native=false,bool preserve=false,bool finite=false,bool seedCredential=true)
     {
         this.native=native;this.preserve=preserve;
         Root=root??Path.Combine(native?Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData):(Environment.GetEnvironmentVariable("TMPDIR")??Path.GetTempPath()),"okx-operation-"+Guid.NewGuid().ToString("N"));
@@ -234,7 +234,7 @@ internal sealed class OperationalPeer : HttpMessageHandler, IOkxExecutionSecretP
         BalanceUtc=Clock.GetUtcNow().ToUnixTimeMilliseconds().ToString();
         string uid=Interlocked.Increment(ref nextUid).ToString();
         Binding=binding??OkxConfiguration.Bind(new OkxNavalOptions { Schema="okx-naval-config-v1", Scopes=new[] { new OkxScopeOptions { ScopeId="account",Environment="OkxDemo",Region="EEA",ExpectedUid=uid,ExpectedMainUid=uid,QuoteCurrency="USDC",CredentialBindingId="key",SafetyVersion="okx-cash-v1" } } })[0];
-        if(native)new WindowsOkxCredentialStore(Root).Create(Binding,OkxConfiguration.Paths(Root,Binding),"DemoTradingApi",Key,Secret,Pass);
+        if(native&&seedCredential)new WindowsOkxCredentialStore(Root).Create(Binding,OkxConfiguration.Paths(Root,Binding),"DemoTradingApi",Key,Secret,Pass);
         Runtime=finite?OkxNavalRuntime.ComposeFiniteDemo(Root,Binding,this,()=>true):OkxNavalRuntime.Compose(Root,new[]{Binding},this,this);
         Request=new(Binding,Convert.ToHexString(SHA256.HashData(Key)).ToLowerInvariant(),Guid.NewGuid(),0,OkxActivationPurpose.Observe,DateTimeOffset.UtcNow.AddSeconds(120));
         Service=OkxAccountConnectionService.ForTests(Runtime,Root,Binding,this,Clock,
