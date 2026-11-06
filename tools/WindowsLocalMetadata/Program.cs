@@ -10,4 +10,4 @@ var method=metadata.GetMethodDefinition((MethodDefinitionHandle)MetadataTokens.H
 var type=metadata.GetTypeDefinition(method.GetDeclaringType());
 string owner=metadata.GetString(type.Namespace)+"."+metadata.GetString(type.Name),name=metadata.GetString(method.Name);
 Console.WriteLine(JsonSerializer.Serialize(new{owner,name,token}));
-return owner=="Apex.Tests.SyntheticHostEntry"&&name=="Main"?0:91;
+return owner=="Apex.Tests.SyntheticHostEntry"&&(name=="Main"||name=="<Main>")?0:91;
