@@ -225,7 +225,7 @@ public sealed partial class NavalPortfolioCoordinator
             }
             _brokerQuotes=NavalJson.Clone(pass.Quotes);_brokerTimestamp=pass.CaptureTimestamp;
             if(pass.Quotes.Count==_definition.Catalog.Count)candidate=candidate with{Marks=pass.Quotes.ToDictionary(p=>p.Key,p=>p.Value.Bid)};
-            if(x.OrdinaryDemo is {} admission)
+            if(x.OrdinaryDemo is {Dust:not null} admission)
             {
                 var pinned=candidate.Reservations.Single(r=>r.Id==admission.Dust.Reservation);
                 if(!NavalOrdinaryDemoPolicy.Pinned(e,pinned)||pinned.Inventory!=admission.Dust.Quantity||pinned.AllocatedCost!=admission.Dust.Cost)obligations.Add("PINNED_DUST_CHANGED");

@@ -69,7 +69,12 @@ public sealed class OkxWindowsLocalProvenanceTests
         var literal=files.Where(p=>File.ReadAllText(p).Contains("windows-local-user-confirmed",StringComparison.Ordinal)).Select(Rel).ToArray();
         Assert.Equal(new[]{"src/Apex.Core/Naval/CurrentMarketFundingEvidenceV1.cs"},literal);
         var constant=files.Where(p=>File.ReadAllText(p).Contains("WindowsLocalProvenance",StringComparison.Ordinal)).Select(Rel).OrderBy(p=>p,StringComparer.Ordinal).ToArray();
-        Assert.Equal(new[]{"src/Apex.Core/Naval/CurrentMarketFundingEvidenceV1.cs","src/Apex.Desktop/Okx/WindowsOkxLocalEnrollment.cs"},constant);
+        // Core only checks it (premise validation, fresh-local admission); only the native enrollment produces it.
+        Assert.Equal(new[]{"src/Apex.Core/Naval/CurrentMarketFundingEvidenceV1.cs","src/Apex.Core/Naval/NavalOrdinaryDemoPolicy.cs","src/Apex.Desktop/Okx/WindowsOkxLocalEnrollment.cs"},constant);
+        var producers=files.Where(p=>File.ReadAllText(p).Contains("new NavalFiniteOperatorPremise(",StringComparison.Ordinal)).Select(Rel).ToArray();
+        Assert.Equal(new[]{"src/Apex.Desktop/Okx/WindowsOkxLocalEnrollment.cs"},producers);
+        string policy=File.ReadAllText(Path.Combine(dir!.FullName,"src/Apex.Core/Naval/NavalOrdinaryDemoPolicy.cs"));
+        Assert.Equal(1,policy.Split("WindowsLocalProvenance").Length-1);Assert.Contains("Provenance==NavalCurrentMarketFunding.WindowsLocalProvenance",policy);
     }
     [Fact]
     [Trait("Gate","WindowsLocalExecution")]
@@ -163,7 +168,7 @@ public sealed partial class OkxConditionalTradingTests
             Assert.Equal("LOCAL_OWNER_CREATED_STOP_ATTACH_NEXT",await control.ExecuteAsync("","create-local","create",default));
             Assert.All(f.Methods.Skip(requests),m=>Assert.Equal(System.Net.Http.HttpMethod.Get,m));Assert.Equal(0,fixture.Peer.Posts); // no test trade
             var offer=Assert.Single(ui.Offers);Assert.Equal(1,ui.Approvals);Assert.Equal(1,ui.Keys);
-            Assert.True(offer.EurCash>0);Assert.Contains("BTC",offer.ExcludedCurrencies);Assert.Contains("ETH",offer.ExcludedCurrencies);Assert.DoesNotContain("EUR",offer.ExcludedCurrencies);
+            Assert.True(offer.EurCash>0);Assert.Contains("BTC",offer.ExcludedCurrencies);Assert.Contains("SOL",offer.ExcludedCurrencies);Assert.DoesNotContain("ETH",offer.ExcludedCurrencies);Assert.DoesNotContain("EUR",offer.ExcludedCurrencies);
             string text=offer.Text();
             foreach(string required in new[]{"NOWĄ lokalną historię","oddzielną od historii bota na VPS","bot na VPS MUSI pozostać zatrzymany (STOP)","Kapitał bota = całe saldo EUR na tym koncie DEMO","są wykluczone i nie będą sprzedawane","Brak automatycznego START"})Assert.Contains(required,text);
             Assert.Contains("Kapitał bota = całe saldo EUR",ui.ApprovalText);
@@ -177,6 +182,9 @@ public sealed partial class OkxConditionalTradingTests
             Assert.Equal("EUR",obs.FiniteAllocation!.Quote);
             Assert.Equal(obs.Balances.Where(b=>b.Currency!="EUR").Select(b=>b.Currency).OrderBy(c=>c,StringComparer.Ordinal),obs.FiniteAllocation.Excluded.Select(b=>b.Currency).OrderBy(c=>c,StringComparer.Ordinal));
             Assert.True(obs.FiniteAllocation.Excluded.Count>=2);
+            Assert.Equal("ETH-EUR",Assert.Single(obs.Catalog).Instrument); // unheld finite-origin anchor
+            decimal heldBtc=obs.FiniteAllocation.Excluded.Single(b=>b.Currency=="BTC").Cash!.Value,heldSol=obs.FiniteAllocation.Excluded.Single(b=>b.Currency=="SOL").Cash!.Value;
+            Assert.True(heldBtc>0);Assert.Equal(decimal.Parse(MultiFixture.HeldSol,System.Globalization.CultureInfo.InvariantCulture),heldSol);
             Assert.Equal("STOP",created.Naval!.Mode);Assert.Empty(created.Naval.Fills);Assert.Equal(offer.EurCash,created.Naval.Accounts.Single().Cash);
             Assert.Empty(created.NavalBroker.Operational?.Intents??Array.Empty<NavalBrokerIntent>());
             var second=Status(control);
@@ -228,12 +236,26 @@ public sealed partial class OkxConditionalTradingTests
             Assert.Equal(before.Naval.Accounts.Single().Cash+fixture.Cycles.Sum(c=>-c.Size*110+c.Size*.999m*c.SellPrice*.999m),after.Naval.Accounts.Single().Cash);
             Assert.All(after.Naval.Reservations.Where(r=>r.QuarantineMark==null),r=>Assert.True(r.Inventory==0&&r.Pending==0&&!r.ReductionUnsettled&&r.TerminalCoverage));
             Assert.Equal("windows-local-user-confirmed",after.NavalBroker.Baseline.Observations.OperatorPremise!.Provenance);
+            // Excluded holdings: only own fills are ever sold or protected; pre-existing BTC/SOL never counted or consumed.
+            var afterX=after.NavalBroker.Operational!;
+            Assert.Equal(NavalOrdinaryDemoPolicy.FreshLocalId,afterX.OrdinaryDemo!.Policy);Assert.Null(afterX.OrdinaryDemo.Dust);Assert.Empty(afterX.OrdinaryDemo.HistoricalIntents);
+            Assert.Equal(new[]{"BTC-EUR","ETH-EUR","SOL-EUR"},afterX.OrdinaryCatalog!.Instruments.Select(i=>i.Instrument).OrderBy(i=>i,StringComparer.Ordinal));
+            Assert.DoesNotContain(after.Naval.Fills,a=>a.Fill.Instrument=="SOL-EUR");
+            foreach(string instrument in new[]{"BTC-EUR","ETH-EUR"})
+            {
+                decimal bought=after.Naval.Fills.Where(a=>a.Fill.Instrument==instrument&&!a.Fill.Reduction).Sum(a=>a.Fill.Quantity),sold=after.Naval.Fills.Where(a=>a.Fill.Instrument==instrument&&a.Fill.Reduction).Sum(a=>a.Fill.Quantity);
+                Assert.True(bought>0&&sold>0&&sold<=bought,instrument+" own sell exceeded own buy");
+                Assert.All(afterX.Protection.Where(q=>q.Instrument==instrument&&q.Quantity!=null),q=>Assert.True(q.Quantity<=bought,instrument+" protection sized beyond own fills"));
+            }
+            Assert.True(after.Naval.Fills.Where(a=>a.Fill.Instrument=="BTC-EUR").Sum(a=>a.Fill.Quantity)<heldBtc,"fixture must keep own BTC far below held BTC");
+            Assert.Equal(created.Naval.Accounts.Single().Cash,offer.EurCash);
+            Assert.Equal(NavalJson.Serialize(obs.FiniteAllocation.Excluded),NavalJson.Serialize(after.NavalBroker.Baseline.Observations.FiniteAllocation!.Excluded));
             int paths=f.Paths.Count;
             await using var restarted=OkxNavalRuntime.Compose(f.Root,new[]{f.Binding},f,f);
             await using var reopened=new OkxOperatorControl(restarted,new ConfigStore(f.Root),null,fixture.LocalEnrollment(new SyntheticLocalUi(SyntheticLocalUi.Exact)));
             Assert.False(restarted.IsWindowsOrdinary(f.Binding));Assert.Equal("CONNECT_REQUIRED",await reopened.ExecuteAsync(f.Binding.ScopeId,"start","restart-start",default));Assert.Equal(paths,f.Paths.Count);
             Assert.False(reopened.KeepAwakeActive);Assert.Equal("LOCAL",Status(reopened).GetProperty("executionMode").GetString());
-            Console.WriteLine("WINDOWS_LOCAL_CREATE_PASS nativeDPAPI=True provenance=windows-local-user-confirmed excluded="+obs.FiniteAllocation.Excluded.Count+" noTestTrade=True BTC_ETH_cycles=2 keepAwakeSetCleared=True restartSTOP=True");
+            Console.WriteLine("WINDOWS_LOCAL_CREATE_PASS nativeDPAPI=True provenance=windows-local-user-confirmed heldBTC="+heldBtc+" heldSOL="+heldSol+" excluded="+obs.FiniteAllocation.Excluded.Count+" noTestTrade=True BTC_ETH_cycles=2 keepAwakeSetCleared=True restartSTOP=True");
         }
         finally{await control.DisposeAsync();}
     }

@@ -20,13 +20,23 @@ internal static class NavalOrdinaryCatalogPolicy
         var original=NavalBrokerValidation.Definition(b.Baseline);
         return b.Operational?.OrdinaryCatalog==null?original:new(original.Id,original.Limits,original.Members,Catalog(b),original.Fees);
     }
-    internal static bool Shape(NavalBrokerState b,IReadOnlyList<NavalInstrument> catalog)=>
+    internal static bool Shape(NavalBrokerState b,IReadOnlyList<NavalInstrument> catalog)=>NavalOrdinaryDemoPolicy.FreshLocal(b)?FreshLocalShape(b,catalog):
         b.Baseline.Binding.Account.Environment==NavalEnvironment.OkxDemo&&b.Baseline.Binding.Account.QuoteCurrency=="EUR"&&
         b.Baseline.Observations.Catalog.Count==1&&b.Baseline.Observations.Catalog[0].Instrument=="SOL-EUR"&&
         catalog.Count is >=1 and <=3&&catalog.Select(i=>i.Instrument).Distinct(StringComparer.Ordinal).Count()==catalog.Count&&
         catalog.Select(i=>i.BaseCurrency).Distinct(StringComparer.Ordinal).Count()==catalog.Count&&
         b.Baseline.Observations.Catalog.All(catalog.Contains)&&
         catalog.All(i=>i.BaseCurrency is "BTC" or "ETH" or "SOL"&&i.Instrument==i.BaseCurrency+"-EUR"&&i.QuoteCurrency=="EUR"&&i.Quantum>0&&i.MinimumQuantity>0&&i.TickSize>0);
+    // Fresh Windows-local trading catalog is exactly BTC/ETH/SOL-EUR. The single
+    // unheld finite-origin anchor is kept only when it is one of those three.
+    private static bool FreshLocalShape(NavalBrokerState b,IReadOnlyList<NavalInstrument> catalog)
+    {
+        var anchor=b.Baseline.Observations.Catalog;
+        return b.Baseline.Binding.Account.Environment==NavalEnvironment.OkxDemo&&b.Baseline.Binding.Account.QuoteCurrency=="EUR"&&anchor.Count==1&&
+            catalog.Count==3&&catalog.Select(i=>i.Instrument).OrderBy(i=>i,StringComparer.Ordinal).SequenceEqual(NavalOrdinaryDemoPolicy.FreshLocalInstruments)&&
+            catalog.All(i=>i.Instrument==i.BaseCurrency+"-EUR"&&i.QuoteCurrency=="EUR"&&i.Quantum>0&&i.MinimumQuantity>0&&i.TickSize>0)&&
+            (!NavalOrdinaryDemoPolicy.FreshLocalInstruments.Contains(anchor[0].Instrument)||catalog.Contains(anchor[0]));
+    }
     internal static void Validate(NavalBrokerState b)
     {
         if(b.Operational?.OrdinaryCatalog is not {} c)return;

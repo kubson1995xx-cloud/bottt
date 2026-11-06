@@ -241,6 +241,7 @@ public sealed partial class OkxConditionalTradingTests
                 (s,k,d,x)=>OkxObservationStream.ForTests((u,c)=>Task.FromResult<WebSocket>(new OperationalSocket(u)),F.Clock,s,k,d,x),()=>OkxNavalStore.OpenNative(root,binding))));
         private MultiFixture(OperationalPeer f,FiniteDemoPeer history){F=f;History=history;Peer=new(f){CandleInstrument="SOL-EUR"};Market=new(Peer,Cycles);}
         private static int nextMixedUid=99220000;
+        internal const string HeldSol="3.5";
         internal static async Task<MultiFixture> Create(string availability="",bool windowsLocalSeed=false,bool windowsLocalCreate=false)
         {
             string uid=Guid.NewGuid().ToString("N");
@@ -250,6 +251,18 @@ public sealed partial class OkxConditionalTradingTests
             f.Mutate=(p,b)=>
             {
                 OkxOrdinaryMixedAccountTests.Shape(f,h,p,b);
+                if(windowsLocalCreate)
+                {
+                    // Pre-existing holdings: BTC and SOL are held (excluded), ETH is unheld (finite-origin anchor).
+                    if(p=="/api/v5/account/balance")
+                        foreach(var row in b["data"]![0]!["details"]!.AsArray())
+                        {
+                            string c=row!["ccy"]!.GetValue<string>();
+                            if(c is "SOL" or "ETH")foreach(string k in new[]{"cashBal","availBal","eq"})row[k]=c=="SOL"?HeldSol:"0";
+                        }
+                    if(p=="/api/v5/account/instruments"&&!benchmark)
+                    {var eth=b["data"]![0]!.DeepClone();eth["instId"]="ETH-USDC";eth["baseCcy"]="ETH";eth["lotSz"]="0.000001";eth["minSz"]="0.001";eth["tickSz"]="0.01";b["data"]!.AsArray().Add(eth);}
+                }
                 if(p=="/api/v5/account/instruments")
                 {
                     b["data"]![0]!["minSz"]="0.01";

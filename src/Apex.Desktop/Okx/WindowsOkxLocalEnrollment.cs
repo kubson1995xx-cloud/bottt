@@ -73,7 +73,7 @@ internal sealed class WindowsOkxLocalEnrollment
         try
         {
             var o=observed;
-            var offer=new WindowsLocalOwnerOffer(o.Uid,o.MainUid,Eur(o)!.Value,o.Balances.Select(b=>b.Currency).Where(c=>c!="EUR").Distinct(StringComparer.Ordinal).OrderBy(c=>c,StringComparer.Ordinal).ToArray(),o.Fingerprint);
+            var offer=new WindowsLocalOwnerOffer(o.Uid,o.MainUid,Eur(o)!.Value,o.Balances.Where(b=>b.Currency!="EUR"&&b.Cash.Value is >0m).Select(b=>b.Currency).Distinct(StringComparer.Ordinal).OrderBy(c=>c,StringComparer.Ordinal).ToArray(),o.Fingerprint);
             progress("LOCAL_CONFIRMATION_NATIVE_DIALOG");
             var typed=await ui.ConfirmAsync(offer,ct).ConfigureAwait(false);
             if(typed is not {Length:3}||typed[0]+"\n"+typed[1]!=NavalCurrentMarketFunding.Statement||typed[2]!=ConfirmationWord)return "LOCAL_CONFIRMATION_REFUSED_NOTHING_SAVED";

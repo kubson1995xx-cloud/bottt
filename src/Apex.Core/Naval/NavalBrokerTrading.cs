@@ -61,6 +61,8 @@ public sealed partial class NavalPortfolioCoordinator
         lock(_owner)
         {
             var e=_owner.Read();var s=e.Naval!;
+            if(NavalOrdinaryDemoPolicy.FreshLocal(e.NavalBroker!)&&e.NavalBroker!.Operational!.OrdinaryCatalog==null)
+                return Result(s,NavalMutationStatus.Refused,"ORDINARY_DEMO_FRESH_LOCAL_CATALOG_REQUIRED");
             if(e.NavalBroker!.Operational?.OrdinaryDemo==null&&e.NavalBroker.Operational?.DemoAcceptance is {} finite&&(_brokerAuthority is not INavalFiniteDemoAuthority{FiniteDemo:true}||finite.Session!=_brokerAuthority.SessionId||_clock.UtcNow>=finite.ExpiresUtc))
                 return Result(s,NavalMutationStatus.Refused,"FINITE_DEMO_RESTART_OR_DESKTOP_START_DENIED");
             if(e.NavalBroker!.Operational?.OrdinaryDemo==null&&e.NavalBroker.Baseline.Observations.FiniteAllocation is {} allocation&&(_brokerAuthority is not INavalFiniteDemoAuthority{FiniteDemo:true}||allocation.Connection!=_brokerAuthority.SessionId))

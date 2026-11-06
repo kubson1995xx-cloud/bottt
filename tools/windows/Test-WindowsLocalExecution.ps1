@@ -19,7 +19,7 @@ try {
  & dotnet (Join-Path $repo 'tools/WindowsLocalMetadata/bin/Release/net8.0/WindowsLocalMetadata.dll') (Join-Path $tests 'Apex.Tests.dll') *> (Join-Path $e 'entry-metadata.json')
  if($LASTEXITCODE -ne 0){throw 'Not the admitted friend entry; no fallback'}
  $old=$ErrorActionPreference
- try {$ErrorActionPreference='Continue'; & dotnet test $project -c Release --no-build --no-restore --filter 'Gate=WindowsLocalExecution&FullyQualifiedName!~Windows_local_first_run_creates_owner' --logger 'trx;LogFileName=local.trx' --results-directory $e -- xUnit.ParallelizeTestCollections=false *> (Join-Path $e 'local-tests.log');$code=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
+ try {$ErrorActionPreference='Continue'; & dotnet test $project -c Release --no-build --no-restore --filter 'Gate=WindowsLocalExecution' --logger 'trx;LogFileName=local.trx' --results-directory $e -- xUnit.ParallelizeTestCollections=false *> (Join-Path $e 'local-tests.log');$code=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
  [ordered]@{phase=$Phase;exit=$code;syntheticOnly=$true;privateBroker=$false;actualLinuxTransfer=$false;windows11=$false}|ConvertTo-Json|Set-Content (Join-Path $e 'local-summary.json')
  if($code -ne 0){throw 'Native local execution assertions failed; exact closure and TRX retained'}
 }finally{Pop-Location}

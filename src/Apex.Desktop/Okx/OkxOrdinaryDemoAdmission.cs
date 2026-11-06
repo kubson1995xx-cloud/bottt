@@ -30,8 +30,10 @@ internal sealed partial class OkxOperationalTradingService
         if(b.Operational?.OrdinaryCatalog!=null||b.Baseline.Binding.Account.QuoteCurrency!="EUR")return null;
         var at=clock.GetUtcNow();long timestamp=clock.GetTimestamp();var reads=account.ObservationClient!;var context=account.ObservationContext!;
         var observation=await reads.ReadInstrumentsAsync(context,ct).ConfigureAwait(false);var rows=Observed(observation);
-        var catalog=new List<NavalInstrument>(b.Baseline.Observations.Catalog);var digests=new List<string>{observation.ResponseDigest!};
-        foreach(string asset in new[]{"BTC","ETH"})
+        bool fresh=NavalOrdinaryDemoPolicy.FreshLocal(b);var anchor=b.Baseline.Observations.Catalog;
+        // Fresh Windows-local owner: trading catalog is exactly BTC/ETH/SOL-EUR; an anchor outside them is never traded.
+        var catalog=fresh?anchor.Where(i=>NavalOrdinaryDemoPolicy.FreshLocalInstruments.Contains(i.Instrument)).ToList():new List<NavalInstrument>(anchor);var digests=new List<string>{observation.ResponseDigest!};
+        foreach(string asset in fresh?new[]{"BTC","ETH","SOL"}.Where(a=>catalog.All(i=>i.BaseCurrency!=a)).ToArray():new[]{"BTC","ETH"})
         {
             var i=rows.SingleOrDefault(i=>i.Instrument==asset+"-EUR");
             if(i==null||i.BaseCurrency!=asset||i.InstrumentType!="SPOT"||i.State!="live"||i.CatalogQuote!="EUR"||!i.TradeQuoteCurrencies.Contains("EUR")||
@@ -41,6 +43,7 @@ internal sealed partial class OkxOperationalTradingService
                 fee.Timestamp.Utc==null||fee.Timestamp.Utc>clock.GetUtcNow()||clock.GetUtcNow()-fee.Timestamp.Utc>=TimeSpan.FromSeconds(30))continue;
             catalog.Add(new(i.Instrument,i.BaseCurrency,i.CatalogQuote,i.LotSize.Value.Value,i.MinimumSize.Value.Value,i.TickSize.Value.Value));digests.Add(feeRead.ResponseDigest!);
         }
+        if(fresh)return catalog.Count==3?session.AdmitOrdinaryCatalog(catalog,at,timestamp,NavalJson.Hash(digests)):new NavalRiskResult(NavalMutationStatus.Refused,"ORDINARY_DEMO_FRESH_LOCAL_CATALOG_UNAVAILABLE",null,0);
         // Do not seal an empty expansion: later fresh PREPARE may discover availability.
         return catalog.Count==b.Baseline.Observations.Catalog.Count?null:session.AdmitOrdinaryCatalog(catalog,at,timestamp,NavalJson.Hash(digests));
     }

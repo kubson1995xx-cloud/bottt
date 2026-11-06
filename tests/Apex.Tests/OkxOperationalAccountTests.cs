@@ -228,6 +228,7 @@ internal sealed class OperationalPeer : HttpMessageHandler, IOkxExecutionSecretP
     internal OperationalPeer(string? root=null,OkxScopeBinding? binding=null,bool native=false,bool preserve=false,bool finite=false,bool seedCredential=true)
     {
         this.native=native;this.preserve=preserve;
+        ResetStreamPacing();
         Root=root??Path.Combine(native?Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData):(Environment.GetEnvironmentVariable("TMPDIR")??Path.GetTempPath()),"okx-operation-"+Guid.NewGuid().ToString("N"));
         if(native&&OperatingSystem.IsWindows()){using var admission=WindowsPrivateData.Open(Root,AppContext.BaseDirectory);}
         else Directory.CreateDirectory(Root);
@@ -243,6 +244,14 @@ internal sealed class OperationalPeer : HttpMessageHandler, IOkxExecutionSecretP
     }
     private OkxNavalStore NativeObservedStore()=>(OkxNavalStore)Activator.CreateInstance(typeof(OkxNavalStore),System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic,null,new object[]{Root,Binding,false,(Action<AtomicWriteBoundary>)(b=>WriteBoundary?.Invoke(b)),false},null)!;
     private static int nextUid=910000;
+    // Each synthetic peer owns an independent synthetic clock. The production stream keeps a
+    // process-wide connect-pacing deadline (one real clock); a previous peer's ADVANCED synthetic
+    // clock must not leave that deadline minutes ahead of this peer's clock. Test isolation only.
+    internal static void ResetStreamPacing()
+    {
+        var t=typeof(OkxObservationStream);const System.Reflection.BindingFlags F=System.Reflection.BindingFlags.Static|System.Reflection.BindingFlags.NonPublic;
+        t.GetField("nextConnect",F)!.SetValue(null,default(DateTimeOffset));t.GetField("nextClock",F)!.SetValue(null,null);t.GetField("nextMono",F)!.SetValue(null,0L);
+    }
     public OkxExecutionCredentialLease Open(OkxScopeBinding binding,OkxScopePaths paths)
     { SecretOpens++; Assert.Equal(Binding,binding);return native?new WindowsOkxCredentialStore(Root).Open(binding,paths):new(binding,"DemoTradingApi",Key.ToArray(),Secret.ToArray(),Pass.ToArray()); }
     public ValueTask<bool> ConfirmAsync(OkxActivationRequest request,CancellationToken ct)=>ActivationOverride?.Invoke(request,ct)??ValueTask.FromResult(true);
