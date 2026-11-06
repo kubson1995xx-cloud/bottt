@@ -9,6 +9,14 @@ using Xunit;
 namespace Apex.Tests;
 public sealed partial class OkxConditionalTradingTests
 {
+    [Fact][Trait("Gate","WindowsAdvisoryIntegration")]
+    public async Task Windows_legacy_nonfinite_executor_cannot_bypass_AI_by_omitting_ordinary_attachment()
+    {
+        Assert.True(OperatingSystem.IsWindows());
+        await using var legacy=new OperationalPeer(native:true);
+        Assert.False(legacy.Service.OrdinaryDemoPolicy);Assert.True(legacy.Service.WindowsAdvisoryRequired);
+        await using var finite=new OperationalPeer(native:true,finite:true);Assert.False(finite.Service.WindowsAdvisoryRequired);
+    }
     private static async Task<MultiFixture> NativeAdvisoryFixture(Func<IOkxSerializedDispatchFence,IOkxSerializedDispatchFence>? wrap=null)
     {
         Assert.True(OperatingSystem.IsWindows());

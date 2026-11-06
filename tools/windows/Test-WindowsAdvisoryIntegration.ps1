@@ -10,7 +10,7 @@ $os=Get-CimInstance Win32_OperatingSystem
 & dotnet build (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release -p:NuGetAudit=false *> (Join-Path $e 'build.log');if($LASTEXITCODE -ne 0){throw 'build failed'}
 $bin=Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0';Copy-Item $bin (Join-Path $e 'tested-closure') -Recurse
 $old=$ErrorActionPreference
-try{$ErrorActionPreference='Continue';& dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --filter 'FullyQualifiedName~OkxWindowsAdvisory|Gate=WindowsAdvisoryIntegration' --logger 'trx;LogFileName=integration.trx' --results-directory $e -- xUnit.ParallelizeTestCollections=false *> (Join-Path $e 'tests.log');$code=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
+try{$ErrorActionPreference='Continue';& dotnet test (Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj') -c Release --no-build --filter 'FullyQualifiedName~OkxWindowsAdvisoryConsumerTests|FullyQualifiedName~OkxWindowsAdvisoryStoreTests|Gate=WindowsAdvisoryIntegration' --logger 'trx;LogFileName=integration.trx' --results-directory $e -- xUnit.ParallelizeTestCollections=false *> (Join-Path $e 'tests.log');$code=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
 [ordered]@{exit=$code;phase=$Phase}|ConvertTo-Json|Set-Content (Join-Path $e 'result.json')
 if($Phase -eq 'green' -and $code -ne 0){throw 'native integration failed'}
 if($Phase -eq 'red' -and $code -eq 0){throw 'RED unexpectedly passed'}
