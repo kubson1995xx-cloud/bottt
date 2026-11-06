@@ -147,34 +147,31 @@ public sealed partial class OkxConditionalTradingTests
         var web=new JsonSerializerOptions(JsonSerializerDefaults.Web);web.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
         for(int n=0;;n++){var d=JsonSerializer.SerializeToElement(control.ReadLocalDashboard(),web);if(d.GetProperty("snapshotState").GetString()!="CHANGED_RETRY"||n>40)return d;Thread.Sleep(25);}
     }
-    // Real local panel rendered by headless Edge from the real endpoints of this synthetic session.
-    // The DOM is checked for the expected state before a screenshot is accepted. CI evidence only.
+    // Real local panel rendered by headless Edge (DevTools protocol) from the real endpoints of this
+    // synthetic session. The rendered state is awaited before a screenshot is accepted. CI evidence only.
     private static async Task PanelScreens(OkxOperatorControl control,string label,string expected,params string[] views)
     {
         string? temp=Environment.GetEnvironmentVariable("RUNNER_TEMP");if(temp==null)return;
-        string edge=new[]{@"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",@"C:\Program Files\Microsoft\Edge\Application\msedge.exe"}.First(File.Exists);
         var builder=WebApplication.CreateSlimBuilder();builder.Logging.ClearProviders();builder.WebHost.ConfigureKestrel(k=>k.Listen(System.Net.IPAddress.Loopback,0));
         builder.Services.ConfigureHttpJsonOptions(o=>{o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());o.SerializerOptions.NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals;});
         await using var app=builder.Build();OkxControlEndpoints.Map(app,control);await app.StartAsync();
         string url=app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
         string dir=Path.Combine(temp,"controller-windows-source","screens");Directory.CreateDirectory(dir);
-        async Task<string> Edge(string view,string? png)
-        {
-            string profile=Path.Combine(temp,"edge-"+Guid.NewGuid().ToString("N"));
-            var psi=new ProcessStartInfo(edge){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
-            foreach(var a in new[]{"--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check","--hide-scrollbars","--user-data-dir="+profile,"--window-size=1440,1350","--virtual-time-budget=8000",png==null?"--dump-dom":"--screenshot="+png,url+"/local/#"+view})psi.ArgumentList.Add(a);
-            using var p=Process.Start(psi)!;var output=p.StandardOutput.ReadToEndAsync();_=p.StandardError.ReadToEndAsync();
-            await p.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(90));try{Directory.Delete(profile,true);}catch(IOException){}catch(UnauthorizedAccessException){}
-            return await output;
-        }
+        await using var cdp=await MiniCdp.Start(Path.Combine(temp,"edge-"+Guid.NewGuid().ToString("N")));string sid=await cdp.NewPage();
+        await cdp.Send("Emulation.setDeviceMetricsOverride",new{width=1440,height=1350,deviceScaleFactor=1,mobile=false},sid);
+        await cdp.Send("Page.navigate",new{url=url+"/local/#dashboard"},sid);
+        string ready="(document.getElementById('state-pill')?.textContent||'').includes("+JsonSerializer.Serialize(expected)+")&&document.getElementById('data-notice').hidden&&document.getElementById('capital-cash').textContent!=='—'";
+        if(!await cdp.Until(sid,ready,30))Assert.Fail("Rendered panel did not show "+expected+": "+await cdp.Text(sid,"document.getElementById('state-pill').textContent+' | '+document.getElementById('data-notice').textContent+' | '+document.getElementById('capital-cash').textContent"));
+        string dom=await cdp.Text(sid,"document.documentElement.outerHTML");Assert.DoesNotContain("USDT",dom);Assert.DoesNotContain("Prototyp",dom);
         foreach(string view in views)
         {
-            string dom=await Edge(view,null);
-            Assert.True(dom.Contains("id=\"state-pill\"")&&dom.Contains(expected),"Rendered panel did not show "+expected+" for "+view);
-            Assert.DoesNotContain("USDT",dom);Assert.DoesNotContain("Prototyp",dom);
-            string png=Path.Combine(dir,"native-"+label+"-"+view+".png");await Edge(view,png);
-            Assert.True(File.Exists(png)&&new FileInfo(png).Length>10000,"Panel screenshot missing: "+png);
+            await cdp.Text(sid,"location.hash="+JsonSerializer.Serialize("#"+view)+";''");
+            Assert.True(await cdp.Until(sid,"document.getElementById("+JsonSerializer.Serialize(view)+").classList.contains('active')",10),"View not shown: "+view);
+            await Task.Delay(300);
+            var image=await cdp.Send("Page.captureScreenshot",new{format="png"},sid);string png=Path.Combine(dir,"native-"+label+"-"+view+".png");
+            File.WriteAllBytes(png,Convert.FromBase64String(image.GetProperty("data").GetString()!));Assert.True(new FileInfo(png).Length>10000,"Panel screenshot empty: "+png);
         }
+        File.WriteAllText(Path.Combine(dir,"native-"+label+"-state.txt"),await cdp.Text(sid,"document.getElementById('state-pill').textContent+'\n'+document.getElementById('mode-pill').textContent+'\n'+document.getElementById('capital-cash').textContent+'\n'+document.getElementById('account-excluded').textContent"));
         await app.StopAsync();
     }
     private static string PowerRequests()
@@ -346,5 +343,50 @@ public sealed partial class OkxConditionalTradingTests
             var mismatch=await Create(new SyntheticLocalUi(lines));Assert.Equal("LOCAL_CONFIRMATION_REFUSED_NOTHING_SAVED",mismatch.Code);Assert.Single(mismatch.Ui.Offers);Assert.Equal(0,mismatch.Ui.Approvals);Nothing();
         }
         var cancelled=await Create(new SyntheticLocalUi(SyntheticLocalUi.Exact,approve:false));Assert.Equal("APPROVAL_USER_CANCELLED",cancelled.Code);Assert.Equal(1,cancelled.Ui.Approvals);Nothing();
+    }
+}
+
+// Minimal sequential DevTools client for the installed Edge (headless, private throwaway profile).
+internal sealed class MiniCdp:IAsyncDisposable
+{
+    private readonly System.Net.WebSockets.ClientWebSocket ws=new();private Process edge=null!;private string profile="";private int serial;
+    internal static async Task<MiniCdp> Start(string profile)
+    {
+        string exe=new[]{Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)}.Select(p=>Path.Combine(p,"Microsoft","Edge","Application","msedge.exe")).First(File.Exists);
+        Directory.CreateDirectory(profile);var c=new MiniCdp{profile=profile};
+        var psi=new ProcessStartInfo(exe){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
+        foreach(string a in new[]{"--headless=new","--disable-gpu","--hide-scrollbars","--user-data-dir="+profile,"--remote-debugging-port=0","--no-first-run","--no-default-browser-check","--disable-background-networking","about:blank"})psi.ArgumentList.Add(a);
+        c.edge=Process.Start(psi)!;_=c.edge.StandardOutput.ReadToEndAsync();_=c.edge.StandardError.ReadToEndAsync();
+        string file=Path.Combine(profile,"DevToolsActivePort");string[]? lines=null;var sw=Stopwatch.StartNew();
+        while(lines==null){if(sw.Elapsed>TimeSpan.FromSeconds(40)||c.edge.HasExited)throw new InvalidOperationException("Edge DevTools not ready");try{var l=File.ReadAllLines(file);if(l.Length==2&&int.TryParse(l[0],out _))lines=l;}catch(IOException){}if(lines==null)await Task.Delay(100);}
+        await c.ws.ConnectAsync(new Uri("ws://127.0.0.1:"+lines[0]+lines[1]),CancellationToken.None);return c;
+    }
+    internal async Task<JsonElement> Send(string method,object parameters,string? session=null)
+    {
+        int id=++serial;var bytes=JsonSerializer.SerializeToUtf8Bytes(new{id,method,@params=parameters,sessionId=session},new JsonSerializerOptions{DefaultIgnoreCondition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull});
+        await ws.SendAsync(bytes,System.Net.WebSockets.WebSocketMessageType.Text,true,CancellationToken.None);
+        var buffer=new byte[1<<16];using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while(true)
+        {
+            using var message=new MemoryStream();System.Net.WebSockets.WebSocketReceiveResult r;
+            do{r=await ws.ReceiveAsync(buffer,timeout.Token);message.Write(buffer,0,r.Count);}while(!r.EndOfMessage);
+            using var d=JsonDocument.Parse(message.ToArray());
+            if(d.RootElement.TryGetProperty("id",out var got)&&got.GetInt32()==id){if(d.RootElement.TryGetProperty("error",out var e))throw new InvalidOperationException("CDP "+method+" refused: "+e);return d.RootElement.GetProperty("result").Clone();}
+        }
+    }
+    internal async Task<string> NewPage()
+    {
+        var t=await Send("Target.createTarget",new{url="about:blank"});var a=await Send("Target.attachToTarget",new{targetId=t.GetProperty("targetId").GetString(),flatten=true});
+        string sid=a.GetProperty("sessionId").GetString()!;await Send("Page.enable",new{},sid);await Send("Runtime.enable",new{},sid);return sid;
+    }
+    internal async Task<string> Text(string sid,string expression)
+    {var r=(await Send("Runtime.evaluate",new{expression,returnByValue=true},sid)).GetProperty("result");return r.TryGetProperty("value",out var v)?v.ToString():"";}
+    internal async Task<bool> Until(string sid,string expression,int seconds)
+    {var sw=Stopwatch.StartNew();while(sw.Elapsed<TimeSpan.FromSeconds(seconds)){try{if(await Text(sid,"Boolean("+expression+")")=="True")return true;}catch(InvalidOperationException){}await Task.Delay(200);}return false;}
+    public async ValueTask DisposeAsync()
+    {
+        try{ws.Abort();}catch(Exception e) when(e is not OutOfMemoryException){}ws.Dispose();
+        try{if(!edge.HasExited){edge.Kill(true);await edge.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));}}catch(Exception e) when(e is InvalidOperationException or TimeoutException or System.ComponentModel.Win32Exception){}
+        for(int i=0;i<10&&Directory.Exists(profile);i++){try{Directory.Delete(profile,true);}catch(IOException){await Task.Delay(300);}catch(UnauthorizedAccessException){await Task.Delay(300);}}
     }
 }
