@@ -31,11 +31,14 @@ internal static class WindowsOkxDialog
         if(!OperatingSystem.IsWindows())return new(null,"INTERACTIVE_WINDOWS_REQUIRED");
         if(fields.Count>12)throw new ArgumentException("NATIVE_FIELD_LIMIT");
         using var memory=new MemoryStream();using var w=new BinaryWriter(memory,Encoding.Unicode,true);
-        int offset=connect?26:0;int height=100+offset+fields.Count*28;
+        // Long operator text (e.g. the Polish local-owner confirmation) must be fully visible, not clipped:
+        // grow the explanation by an estimate of wrapped lines (~70 chars per 334-DLU line, ~8 DLU per line).
+        int lines=System.Linq.Enumerable.Sum(explanation.Split((char)10),p=>Math.Max(1,(p.Length+69)/70));int explanationHeight=Math.Clamp(lines*8+4,38,240);int extra=explanationHeight-38;
+        int offset=(connect?26:0)+extra;int height=100+offset+fields.Count*28;
         w.Write(0x90C808C4u);w.Write(0u);w.Write((ushort)(4+fields.Count*2+(connect?2:0)));w.Write((short)0);w.Write((short)0);w.Write((short)350);w.Write((short)height);
         w.Write((ushort)0);w.Write((ushort)0);Text(w,title);w.Write((ushort)9);Text(w,"Segoe UI");
-        Item(w,0x50000000,8,6,334,38,90,0x82,explanation);
-        if(connect){Item(w,0x50000000,8,46,150,18,80,0x82,"DEMO — tylko odczyt");Item(w,0x58000000,170,46,170,18,81,0x80,"LIVE — zablokowane");}
+        Item(w,0x50000000,8,6,334,explanationHeight,90,0x82,explanation);
+        if(connect){Item(w,0x50000000,8,46+extra,150,18,80,0x82,"DEMO — tylko odczyt");Item(w,0x58000000,170,46+extra,170,18,81,0x80,"LIVE — zablokowane");}
         for(int i=0;i<fields.Count;i++)
         {
             Item(w,0x50000000,8,offset+46+i*28,334,10,200+i,0x82,fields[i].Label);
