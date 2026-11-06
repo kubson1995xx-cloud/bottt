@@ -19,7 +19,9 @@ def main():
   blob=run('git','hash-object','-w','--stdin',input=data);run('git','update-index','--add','--cacheinfo','100644',blob,rel,env=env)
   rows.append({'path':rel,'sha256':hashlib.sha256(data).hexdigest()})
  for rel in (['tools/windows/publish_windows_advisory_installer.py'] if a.delivery else FILES):add(rel,(REPO/rel).read_bytes())
- workflow=run('git','show',a.base+':.github/workflows/windows-demo.yml')+'\n';marker='\n  windowsAdvisoryRefresh:\n';assert workflow.count(marker)==1
+ workflow=run('git','show',a.base+':.github/workflows/windows-demo.yml')+'\n';marker='\n  windowsAdvisoryRefresh:\n'
+ if workflow.count(marker)==0 and workflow.count('\nwindowsAdvisoryRefresh:\n')==1:marker='\nwindowsAdvisoryRefresh:\n' # Exact previously refused indentation-only publication.
+ assert workflow.count(marker)==1
  job='''  windowsAdvisoryRefresh:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/apex-demo/controller-windows-admission-20261105' && inputs.mode == 'windows-advisory-refresh'
     runs-on: windows-latest
@@ -56,8 +58,12 @@ def main():
           if-no-files-found: error
           retention-days: 30
 '''
- if a.delivery:job=run('git','show',a.base+':tools/windows/advisory-delivery-job.yml')+'\n'
- add('.github/workflows/windows-demo.yml',(workflow.split(marker)[0]+'\n'+job).encode())
+ if a.delivery:job=subprocess.check_output(['git','show',a.base+':tools/windows/advisory-delivery-job.yml'],cwd=REPO).decode()
+ assert job.startswith('  windowsAdvisoryRefresh:\n')
+ updated=workflow.split(marker)[0]+'\n'+job
+ import yaml
+ parsed=yaml.safe_load(updated);assert 'windowsAdvisoryRefresh' in parsed['jobs'] and 'windowsAdvisoryRefresh' not in parsed
+ add('.github/workflows/windows-demo.yml',updated.encode())
  tree=run('git','write-tree',env=env);commit=run('git','commit-tree',tree,'-p',a.base,input=b'fix: isolate native advisory installer rejection\n')
  record={'base':a.base,'commit':commit,'tree':tree,'inputs':rows,'mainHead':head,'mainIndex':ih}
  (root/'publication.json').write_text(json.dumps(record,indent=2));(root/'installer.diff').write_text(run('git','diff',a.base,commit))
