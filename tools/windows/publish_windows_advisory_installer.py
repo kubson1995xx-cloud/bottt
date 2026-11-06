@@ -3,7 +3,7 @@ import argparse,hashlib,json,os,subprocess,time
 from pathlib import Path
 REPO=Path(__file__).resolve().parents[2]
 BRANCH='apex-demo/controller-windows-admission-20261105'
-FILES=['tools/advisory/StrategyExport/AdvisoryStoreGuard.cs','tools/advisory/StrategyExport/Program.cs','tools/advisory/store.py','tools/advisory/local_install.py','tests/Apex.Tests/OkxWindowsAdvisorySetupTests.cs','tools/windows/Test-WindowsAdvisoryInstaller.ps1','tools/windows/publish_windows_advisory_installer.py']
+FILES=['tools/advisory/StrategyExport/AdvisoryStoreGuard.cs','tools/advisory/StrategyExport/Program.cs','tools/advisory/store.py','tools/advisory/local_install.py','tests/Apex.Tests/OkxWindowsAdvisorySetupTests.cs','tools/advisory/tests/test_native_installer_paths.py','tools/windows/Test-WindowsAdvisoryInstaller.ps1','tools/windows/publish_windows_advisory_installer.py']
 def run(*args,**kwargs):return subprocess.check_output(args,cwd=REPO,**kwargs).decode().strip()
 def main():
  p=argparse.ArgumentParser();p.add_argument('lane');p.add_argument('--base',required=True);a=p.parse_args()

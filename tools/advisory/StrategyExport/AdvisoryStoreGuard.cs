@@ -26,7 +26,9 @@ internal sealed class AdvisoryStoreGuard : IDisposable
     WindowsPathSecurity.NativeObject Open(string path)
     {
         faultPath = path; faultStage = "Open"; actualDirectory = -1; links = 0;
-        return WindowsPathSecurity.Open(path);
+        // Python/.NET legitimately create pinned upstream files past MAX_PATH.
+        // Change only native pathname representation; all handle checks stay intact.
+        return WindowsPathSecurity.Open(path.Length >= 260 ? "\\\\?\\" + path : path);
     }
     internal AdvisoryStoreGuard(string root) { this.root = root; }
     string Bound(string path)

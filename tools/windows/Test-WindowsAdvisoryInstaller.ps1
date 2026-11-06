@@ -21,6 +21,12 @@ try{
  & dotnet publish (Join-Path $repo 'tools/advisory/StrategyExport/StrategyExport.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:NuGetAudit=false -o $helper *> (Join-Path $e 'helper-build.log')
  if($LASTEXITCODE -ne 0){throw 'Native helper build failed'}
  $bundle=Join-Path $extracted 'AI'
+ Copy-Item (Join-Path $bundle 'ApexAdvisoryStoreGuard.exe') (Join-Path $e 'old-delivery05-guard.exe')
+ $env:APEX_INSTALLER_OLD_GUARD=Join-Path $e 'old-delivery05-guard.exe'
+ $env:APEX_INSTALLER_NEW_GUARD=Join-Path $helper 'StrategyExport.exe'
+ $env:APEX_INSTALLER_PATH_EVIDENCE=Join-Path $e 'native-path-control.json'
+ & python -B (Join-Path $repo 'tools/advisory/tests/test_native_installer_paths.py') -v *> (Join-Path $e 'native-path-control.log')
+ if($LASTEXITCODE -ne 0){throw 'Same-root native old/new long-path control failed'}
  # Explicit diagnostic/correction overlay only; preserve the original retained ZIP byte-for-byte.
  Copy-Item (Join-Path $helper 'StrategyExport.exe') (Join-Path $bundle 'ApexAdvisoryStoreGuard.exe') -Force
  foreach($name in @('store.py','local_install.py')){Copy-Item (Join-Path $repo ('tools/advisory/'+$name)) (Join-Path $bundle ('bridge/'+$name)) -Force}
