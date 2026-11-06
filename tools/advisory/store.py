@@ -11,7 +11,9 @@ from contextlib import contextmanager
 class StoreRefused(ValueError):pass
 
 class StoreLease:
-    def __init__(self,root,guard=None):
+    def __init__(self,root,guard=None,*,timeout=15):
+        if type(timeout)is not int or not 1<=timeout<=180:raise StoreRefused('native store timeout refused')
+        self.timeout=timeout
         self.process=None;self.root=root=Path(root);self.io=threading.RLock();self.handles={};self.closed=False
         if not root.is_absolute():raise StoreRefused('absolute advisory root required')
         # Do not resolve symlinks before native admission.
@@ -40,7 +42,7 @@ class StoreLease:
             self.scan()
     def _line(self):
         q=queue.Queue();threading.Thread(target=lambda:q.put(self.process.stdout.readline(128)),daemon=True).start()
-        try:return q.get(timeout=15)
+        try:return q.get(timeout=self.timeout)
         except queue.Empty:self.close();raise StoreRefused('native store admission timeout')
     def _command(self,operation,path):
         with self.io:

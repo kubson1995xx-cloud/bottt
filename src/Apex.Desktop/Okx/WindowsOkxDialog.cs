@@ -52,7 +52,7 @@ internal static class WindowsOkxDialog
         void ClearFields(IntPtr window){for(int i=0;i<fields.Count;i++)SetDlgItemTextW(window,100+i,"");}
         DialogProc callback=(window,message,a,b)=>
         {
-            if(message==0x110){SetTimer(window,new IntPtr(1),100,IntPtr.Zero);ShowWindow(window,5);SetForegroundWindow(window);BringWindowToTop(window);SetFocus(GetDlgItem(window,100));return IntPtr.Zero;}
+            if(message==0x110){SetTimer(window,new IntPtr(1),100,IntPtr.Zero);ShowWindow(window,5);SetForegroundWindow(window);BringWindowToTop(window);SetFocus(GetDlgItem(window,fields.Count==0?1:100));return IntPtr.Zero;}
             if(message==0x113&&sending?.IsCompleted==true){string? error=sending.IsCompletedSuccessfully?sending.Result:"CONNECT_LOCAL_REFUSED";sending=null;if(error==null&&!operation.IsCancellationRequested){ClearFields(window);EndDialog(window,new IntPtr(1));return new IntPtr(1);}if(result!=null)foreach(var value in result)CryptographicOperations.ZeroMemory(value);result=null;EnableWindow(GetDlgItem(window,1),true);SetDlgItemTextW(window,91,error??"CONNECT_CANCELLED");SetFocus(GetDlgItem(window,100));}
             if(message==0x113&&(ct.IsCancellationRequested||Environment.TickCount64>=until)){operation.Cancel();ClearFields(window);EndDialog(window,new IntPtr(2));return new IntPtr(1);}
             if(message==0x10){operation.Cancel();ClearFields(window);EndDialog(window,new IntPtr(2));return new IntPtr(1);}

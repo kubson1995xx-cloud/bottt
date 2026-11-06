@@ -18,7 +18,7 @@ def main():
  for rel in ['src/Apex.Desktop/Okx/OkxAccountConnectionService.cs','src/Apex.Desktop/Okx/OkxOperationalTradingService.cs','src/Apex.Desktop/Okx/WindowsOkxAdvisoryStore.cs','src/Apex.Desktop/Okx/OkxAdvisoryCoordinator.cs','src/Apex.Desktop/Okx/OkxAdvisoryAdmission.cs','tests/Apex.Tests/OkxWindowsAdvisoryEntryTests.cs']:
   if (REPO/rel).exists():files.append(rel)
  if a.delivery:
-  files += ['src/Apex.Desktop/Okx/'+r for r in ['OkxNavalRuntime.cs','OkxOperatorControl.cs','OkxControlEndpoints.cs','WindowsOkxAdvisorySetup.cs','local-panel.html','local-panel.js']]
+  files += ['src/Apex.Desktop/Okx/'+r for r in ['OkxNavalRuntime.cs','OkxOperatorControl.cs','OkxControlEndpoints.cs','WindowsOkxAdvisorySetup.cs','WindowsOkxDialog.cs','local-panel.html','local-panel.js']]
   files += ['tools/advisory/'+r for r in ['local_install.py','local_companion.py','build_bundle.py','store.py','ipc.py','budget.py','tests/test_local_install.py','tests/test_native_messages.py','tests/test_budget.py','tests/fixtures/vibe-real-native-second-request.json']]
   files += ['tools/windows/'+r for r in ['Test-WindowsLocalPackage.ps1','Test-WindowsAdvisoryDelivery.ps1','advisory-delivery-job.yml','AI-START.pl.md']]
   files += ['tests/'+r for r in ['Apex.Tests/OkxWindowsAdvisorySetupTests.cs','Apex.Tests/OkxWindowsLocalLifecycleTests.cs','Apex.Tests/OkxWindowsLocalOwnerTests.cs','Apex.ControllerComposition.Tests/LocalPackagedTests.cs','panel/local-panel.test.cjs','package/safe_extract.py']]

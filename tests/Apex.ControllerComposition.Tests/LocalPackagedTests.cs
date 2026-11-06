@@ -112,6 +112,7 @@ public sealed class LocalPackagedTests
                 await WindowsTestHost.Until(()=>Task.FromResult((wizard=Window("APEX — lokalne narzędzia AI"))!=IntPtr.Zero),"Extracted native AI setup wizard missing");
                 string words=Children(wizard);Assert.Contains("Bez VPS",words);Assert.Contains("48",words);Assert.Contains("900",words);
                 SetForegroundWindow(wizard);Assert.True(SpinWait.SpinUntil(()=>GetForegroundWindow()==wizard,3000));keybd_event(0x1B,0,0,UIntPtr.Zero);keybd_event(0x1B,0,2,UIntPtr.Zero);
+                await WindowsTestHost.Until(()=>Task.FromResult(Window("APEX — lokalne narzędzia AI")==IntPtr.Zero),"Native setup ESC did not close its zero-field dialog");
                 await browser.Wait(sid,"document.getElementById('ai-entry')!==null&&!document.getElementById('setup-ai').disabled","Cancelled setup did not return to panel");
                 WindowsTestHost.Evidence("extracted-advisory-setup",new{actualExtractedExe=true,pointer=true,nativeWizard=true,cancelled=true,userSubscriptionLoginTested=false,genuineInference=false});
             }

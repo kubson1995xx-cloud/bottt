@@ -43,7 +43,9 @@ def install(bundle,root):
  bundle=Path(bundle).resolve();root=Path(root).absolute();verify_bundle(bundle)
  from store import StoreLease
  # Guard is the independently published self-contained source-linked native inspector.
- checkpoint('native-root-admission');with_store=StoreLease(root,bundle/'ApexAdvisoryStoreGuard.exe')
+ # Complete runtime closures contain tens of thousands of files; this is an
+ # installer-only bounded inspection deadline, not a report-store guard bypass.
+ checkpoint('native-root-admission');with_store=StoreLease(root,bundle/'ApexAdvisoryStoreGuard.exe',timeout=180)
  target=root/'installed'
  try:
   if target.exists():
@@ -77,5 +79,6 @@ def install(bundle,root):
 if __name__=='__main__':
  try:install(Path(sys.argv[1]),Path(sys.argv[2]));print('AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED')
  except Exception as error:
-  print('AI_INSTALL_FAILURE_'+STAGE+'_'+type(error).__name__,file=sys.stderr,flush=True)
+  kind={'native store admission timeout':'NativeScanTimeout','unsafe advisory descendant refused':'UnsafeDescendant','native store lease unavailable':'NativeLeaseUnavailable'}.get(str(error),type(error).__name__)
+  print('AI_INSTALL_FAILURE_'+STAGE+'_'+kind,file=sys.stderr,flush=True)
   print('AI_INSTALL_REFUSED_PARTIAL_PRESERVED');sys.exit(2)
