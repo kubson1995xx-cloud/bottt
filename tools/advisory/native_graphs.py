@@ -15,14 +15,16 @@ def main(root,contract_file):
     for i in range(260):
         close=1000+i+(i%7)*2
         rows.append([str(int((end-timedelta(days=260-i)).timestamp())*1000),str(close-1),str(close+3),str(close-3),str(close),str(1000+i),'1'])
+    import tempfile,uuid,shutil
+    service_root=Path(tempfile.gettempdir()).resolve()/('apex-advisory-graphs-'+uuid.uuid4().hex)
     service=None;observed=[]
     try:
         for pair in INSTRUMENTS:
             raw=canonical_snapshot(pair,cutoff,rows);data=decode_snapshot(raw,pair,cutoff)
             inference=FiniteInference(pair,cutoff)
-            service=Supervisor(root/'service',contract,inference=inference,fixture=True,clock=lambda:end+timedelta(hours=12),request_ms=18000)
+            service=Supervisor(service_root,contract,inference=inference,fixture=True,clock=lambda:end+timedelta(hours=12),request_ms=18000)
             result=service.refresh(pair,cutoff,raw)
-            manifest,entries=read_pair(root/'service'/pair,data,end+timedelta(hours=12))
+            manifest,entries=read_pair(service_root/pair,data,end+timedelta(hours=12))
             reused=service.refresh(pair,cutoff,raw)
             result_row={'pair':pair,'status':asdict(result),'reused_generation':reused.manifest['Generation']==manifest['Generation'],'requests':inference.calls,'prompt_sizes':inference.prompt_sizes,'tools':entries}
             observed.append(result_row)
@@ -35,4 +37,7 @@ def main(root,contract_file):
         print('NATIVE_SIX_GENUINE_GRAPHS_WITH_FIXTURE_INFERENCE_PASS; NO_GENUINE_MODEL_OUTPUT')
     finally:
         if service:service.close()
+        if service_root.exists():
+            shutil.copytree(service_root,root/'service')
+            shutil.rmtree(service_root)
 if __name__=='__main__':main(Path(sys.argv[1]).resolve(),Path(sys.argv[2]).resolve())

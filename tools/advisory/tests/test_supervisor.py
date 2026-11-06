@@ -16,10 +16,21 @@ def fixture_native(tool,raw):
 
 class SupervisorTests(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.raw=canonical_snapshot('BTC-EUR',CUTOFF,fixture());self.data=strict_json(self.raw);self.instances=[]
+        self.base_lease=None;self.temp=None
+        if os.name=='nt':
+            import uuid
+            from store import StoreLease
+            self.root=Path(tempfile.gettempdir()).resolve()/('apex-advisory-test-'+uuid.uuid4().hex)
+            self.base_lease=StoreLease(self.root)
+        else:
+            self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
+        self.raw=canonical_snapshot('BTC-EUR',CUTOFF,fixture());self.data=strict_json(self.raw);self.instances=[]
     def tearDown(self):
         for s in self.instances:s.close()
-        self.temp.cleanup()
+        if self.base_lease:
+            import shutil
+            self.base_lease.close();shutil.rmtree(self.root)
+        if self.temp:self.temp.cleanup()
     def service(self):
         s=Supervisor(self.root/'store',RuntimeContract({}),fixture=True,clock=lambda:NOW);self.instances.append(s);return s
     def test_matching_restart_reuses_generation_and_no_second_attempt(self):
