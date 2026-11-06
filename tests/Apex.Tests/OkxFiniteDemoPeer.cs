@@ -58,7 +58,11 @@ internal sealed class FiniteDemoPeer(OperationalPeer owner) : HttpMessageHandler
         if(path.Contains("orders-algo",StringComparison.Ordinal))return; // exact algo detail below is authoritative; empty account-wide surfaces.
         if(path=="/api/v5/trade/order-algo")
         {
-            var state=State();var reservation=state.Naval!.Reservations.Single(r=>r.Intent.CommandId==state.NavalBroker!.Operational!.DemoAcceptance!.EntryCommand);
+            var state=State();
+            // Only the finite acceptance's own algo is answered here; an owner without finite history
+            // (Windows-local fresh owner) is served by the ordinary multi-instrument peer.
+            if(state.NavalBroker?.Operational?.DemoAcceptance is not {} acceptance)return;
+            var reservation=state.Naval!.Reservations.Single(r=>r.Intent.CommandId==acceptance.EntryCommand);
             var a=Oracle("stream-algo-schema.json","detail");a["instId"]=Instrument;a["algoId"]="889";a["algoClOrdId"]=Attachment;a["ordType"]="oco";a["side"]="sell";a["tdMode"]="cash";a["tradeQuoteCcy"]=owner.Binding.Account.QuoteCurrency;a["sz"]=N(GrossProtection?BuyQuantity:BuyQuantity-BuyFee);a["state"]=ProtectionCanceled?"canceled":"live";
             a["slTriggerPx"]=N(reservation.Intent.StopPrice);a["tpTriggerPx"]=N(reservation.Intent.TakeProfitPrice);a["slOrdPx"]="-1";a["tpOrdPx"]="-1";a["tpTriggerPxType"]="last";a["slTriggerPxType"]="last";a["cTime"]=at;a["uTime"]=at;a["ordIdList"]=new JsonArray();
             body["data"]=new JsonArray(a);return;

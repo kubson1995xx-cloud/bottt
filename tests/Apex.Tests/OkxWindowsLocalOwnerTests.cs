@@ -221,7 +221,7 @@ public sealed partial class OkxConditionalTradingTests
             for(int n=0;n<1200;n++)
             {
                 var state=fixture.Account.BrokerSession!.ReadState();if(state.Naval!.Fills.Count==4&&fixture.Loop.ReadStatus().Mode=="RUNNING")break;
-                Assert.True(n<1199,"Native scheduler stalled "+fixture.Loop.ReadStatus().Code+" "+string.Join(",",fixture.Loop.ReadStatus().Obligations)+" posts="+fixture.Peer.Posts+" fills="+state.Naval.Fills.Count);await Task.Delay(25);
+                Assert.True(n<1199,"Native scheduler stalled "+fixture.Loop.ReadStatus().Code+" last="+Status(control).GetProperty("lastResult").GetString()+" "+string.Join(",",fixture.Loop.ReadStatus().Obligations)+" posts="+fixture.Peer.Posts+" fills="+state.Naval.Fills.Count);await Task.Delay(25);
             }
             Assert.Equal("OPERATOR_STOP",await Command("stop"));
             for(int n=0;n<200&&control.KeepAwakeActive;n++)await Task.Delay(25);

@@ -23,6 +23,7 @@ public sealed partial class OkxConditionalTradingTests
     {
         if(scenario=="catalog")await MultiCatalogCase();
         else if(scenario=="cycles")await MultiCyclesCase();
+        else if(scenario=="fresh-cycles")await MultiFreshCyclesCase();
         else if(scenario.StartsWith("availability-",StringComparison.Ordinal))await MultiAvailabilityCase(scenario[13..]);
         else if(scenario.StartsWith("invariant-",StringComparison.Ordinal))await MultiInvariantCase(scenario[10..]);
         else return 98;
@@ -90,6 +91,43 @@ public sealed partial class OkxConditionalTradingTests
         Assert.Contains("BTC-EUR",fixture.Market.Candles);Assert.Contains("ETH-EUR",fixture.Market.Candles);
         await loop.DisposeAsync();await fixture.Account.DisconnectAsync();Assert.True(fixture.Account.OpenExisting(),fixture.Account.Status);Assert.Equal("STOP",fixture.Account.Coordinator!.Snapshot().Mode);
         Assert.Equal(new[]{"BTC-EUR","ETH-EUR","SOL-EUR"},NavalOrdinaryCatalogPolicy.Catalog(fixture.Account.BrokerSession!.ReadState().NavalBroker!).Select(i=>i.Instrument).OrderBy(i=>i,StringComparer.Ordinal));
+    }
+    [Fact]
+    public Task Fresh_local_owner_RunAsync_BTC_ETH_cycles_excluded_BTC_SOL_untouched()=>OkxSyntheticClockIsolationTests.Run("multi-fresh-cycles");
+    private static async Task MultiFreshCyclesCase()
+    {
+        if(!OperatingSystem.IsLinux())return; // Linux ordinary host; the native Windows variant is the gate test.
+        await using var fixture=await MultiFixture.Create(freshLinux:true);var loop=fixture.Loop;var before=fixture.Account.BrokerSession!.ReadState();
+        var started=loop.Start();Assert.True(started.Status==NavalMutationStatus.Applied,started.Code);Assert.Equal("RUNNING",loop.ReadStatus().Mode);
+        fixture.Market.Wait=false;
+        using var cancel=new CancellationTokenSource(TimeSpan.FromSeconds(40));var running=loop.RunAsync(cancel.Token);
+        try
+        {
+            for(int n=0;n<600;n++)
+            {
+                var status=loop.ReadStatus();var state=fixture.Account.BrokerSession.ReadState();
+                if(running.IsFaulted)await running;
+                if(state.Naval!.Fills.Count==4&&status.Mode=="RUNNING")break;
+                Assert.True(n<599,"Fresh scheduler stalled: "+status.Code+" / "+string.Join(",",status.Obligations)+" posts="+fixture.Peer.Posts+" fills="+state.Naval.Fills.Count);
+                await Task.Delay(25);
+            }
+        }
+        finally{loop.Stop();cancel.Cancel();try{await running;}catch(OperationCanceledException){}}
+        var after=fixture.Account.BrokerSession.ReadState();var x=after.NavalBroker!.Operational!;
+        Assert.Equal(new[]{"BTC-EUR","ETH-EUR"},fixture.Cycles.Select(c=>c.Instrument).OrderBy(i=>i,StringComparer.Ordinal).ToArray());Assert.All(fixture.Cycles,c=>Assert.True(c.Sold&&c.Canceled));
+        Assert.Equal(NavalJson.Serialize(before.NavalBroker!.Baseline),NavalJson.Serialize(after.NavalBroker.Baseline));
+        Assert.Equal(before.Naval!.Accounts.Single().Cash+fixture.Cycles.Sum(c=>-c.Size*110+c.Size*.999m*c.SellPrice*.999m),after.Naval!.Accounts.Single().Cash);
+        Assert.All(after.Naval.Reservations,r=>Assert.True(r.Inventory==0&&r.Pending==0&&!r.ReductionUnsettled&&r.TerminalCoverage&&r.QuarantineMark==null));
+        Assert.DoesNotContain(after.Naval.Fills,a=>a.Fill.Instrument=="SOL-EUR");Assert.Null(x.OrdinaryDemo!.Dust);
+        var excluded=after.NavalBroker.Baseline.Observations.FiniteAllocation!.Excluded;
+        Assert.Equal(decimal.Parse(MultiFixture.HeldSol,CultureInfo.InvariantCulture),excluded.Single(b=>b.Currency=="SOL").Cash);Assert.True(excluded.Single(b=>b.Currency=="BTC").Cash>0);
+        foreach(string instrument in new[]{"BTC-EUR","ETH-EUR"})
+        {
+            decimal bought=after.Naval.Fills.Where(a=>a.Fill.Instrument==instrument&&!a.Fill.Reduction).Sum(a=>a.Fill.Quantity),sold=after.Naval.Fills.Where(a=>a.Fill.Instrument==instrument&&a.Fill.Reduction).Sum(a=>a.Fill.Quantity);
+            Assert.True(bought>0&&sold>0&&sold<=bought,instrument);
+            Assert.All(x.Protection.Where(q=>q.Instrument==instrument&&q.Quantity!=null),q=>Assert.True(q.Quantity<=bought,instrument+" protection beyond own fills"));
+        }
+        Assert.Empty(x.Obligations);
     }
     private static string MultiN(decimal n)=>n.ToString(CultureInfo.InvariantCulture);
     private static void MultiCapture(string name,string value)
@@ -242,16 +280,16 @@ public sealed partial class OkxConditionalTradingTests
         private MultiFixture(OperationalPeer f,FiniteDemoPeer history){F=f;History=history;Peer=new(f){CandleInstrument="SOL-EUR"};Market=new(Peer,Cycles);}
         private static int nextMixedUid=99220000;
         internal const string HeldSol="3.5";
-        internal static async Task<MultiFixture> Create(string availability="",bool windowsLocalSeed=false,bool windowsLocalCreate=false)
+        internal static async Task<MultiFixture> Create(string availability="",bool windowsLocalSeed=false,bool windowsLocalCreate=false,bool freshLinux=false)
         {
             string uid=Guid.NewGuid().ToString("N");
             string accountUid=Interlocked.Increment(ref nextMixedUid).ToString();
-            var binding=OkxConfiguration.Bind(new OkxNavalOptions{Schema="okx-naval-config-v1",Scopes=new[]{new OkxScopeOptions{ScopeId=windowsLocalCreate?WindowsOkxLocalEnrollment.ScopeId:"account",Environment="OkxDemo",Region="EEA",ExpectedUid=accountUid,ExpectedMainUid=accountUid,QuoteCurrency="EUR",CredentialBindingId=windowsLocalCreate?WindowsOkxLocalEnrollment.CredentialBindingId:"key",SafetyVersion="okx-cash-v1"}}})[0];
+            var binding=OkxConfiguration.Bind(new OkxNavalOptions{Schema="okx-naval-config-v1",Scopes=new[]{new OkxScopeOptions{ScopeId=windowsLocalCreate||freshLinux?WindowsOkxLocalEnrollment.ScopeId:"account",Environment="OkxDemo",Region="EEA",ExpectedUid=accountUid,ExpectedMainUid=accountUid,QuoteCurrency="EUR",CredentialBindingId=windowsLocalCreate||freshLinux?WindowsOkxLocalEnrollment.CredentialBindingId:"key",SafetyVersion="okx-cash-v1"}}})[0];
             var f=new OperationalPeer(binding:binding,finite:true,native:windowsLocalSeed||windowsLocalCreate,seedCredential:!windowsLocalCreate);var h=new FiniteDemoPeer(f){BaseCurrency="SOL"};var fixture=new MultiFixture(f,h);bool benchmark=false;
             f.Mutate=(p,b)=>
             {
                 OkxOrdinaryMixedAccountTests.Shape(f,h,p,b);
-                if(windowsLocalCreate)
+                if(windowsLocalCreate||freshLinux)
                 {
                     // Pre-existing holdings: BTC and SOL are held (excluded), ETH is unheld (finite-origin anchor).
                     if(p=="/api/v5/account/balance")
@@ -290,6 +328,30 @@ public sealed partial class OkxConditionalTradingTests
             if(windowsLocalCreate)return fixture;
             try
             {
+            if(freshLinux)
+            {
+                // Same Core owner shape as the Windows first-run (windows-local provenance, no history, held BTC/SOL),
+                // driven through the Linux ordinary host so the trading phase runs in-process with visible exceptions.
+                f.Runtime.FiniteFundingPremise=((NavalFiniteOperatorPremise)OkxCurrentMarketFundingTests.Premise(f)) with{Provenance=NavalCurrentMarketFunding.WindowsLocalProvenance};
+                await f.Connect();Assert.True(await f.Service.ApproveAndCreateAsync(default),f.Service.Status);await f.Service.DisconnectAsync();benchmark=true;
+                fixture.Runtime=OkxNavalRuntime.ComposeLinuxDemo(f.Root,f.Binding,f,f,()=>true);fixture.Account=AccountFor(f,fixture.Runtime);
+                var freshRequest=f.Request with{Session=Guid.NewGuid()};var freshLease=await fixture.Runtime.Activation.RequestAsync(freshRequest,default);Assert.True(await fixture.Account.ConnectAsync(freshRequest,freshLease!,default),fixture.Account.Status);
+                fixture.Loop=OkxOperationalTradingService.Create(fixture.Account,f.Clock,(s,k,d,x)=>OkxExecutionClient.ForTests(fixture.Peer,f.Clock,s,k,d,x),fixture.Market);
+                fixture.Seed=fixture.Account.BrokerSession!.ReadState();Assert.Empty(fixture.Seed.Naval!.Fills);
+                Assert.Equal("ORDINARY_DEMO_PREPARED",(await fixture.Loop.PrepareOrdinaryDemoAsync(default)).Code);
+                Assert.Equal(new[]{"BTC-EUR","ETH-EUR","SOL-EUR"},fixture.Loop.ReadStatus().Instruments.OrderBy(i=>i,StringComparer.Ordinal).ToArray());
+                freshRequest=freshRequest with{Purpose=OkxActivationPurpose.Execute,Session=fixture.Account.TradingSessionId};freshLease=await fixture.Runtime.Activation.RequestAsync(freshRequest,default);Assert.True(fixture.Loop.Arm(freshRequest,freshLease!));
+                await fixture.Loop.ReconcileAsync(default);
+                fixture.Peer.BeforeResponse=()=>
+                {
+                    var peer=fixture.Peer;Assert.InRange(peer.Size*110,0m,10m);peer.ExpectedSellSize=peer.Size*.999m;peer.ProtectionCanceled=false;
+                    int n=fixture.Cycles.Count;peer.EntryOrderId=(1777+n*10).ToString();peer.ExitOrderId=(1778+n*10).ToString();peer.GeneratedAlgoId=(1889+n*10).ToString();
+                    string instrument=fixture.Account.BrokerSession!.ReadState().NavalBroker!.Operational!.Intents.Last().Instrument;
+                    fixture.Cycles.Add(new(instrument,peer.Client,peer.Attachment,peer.EntryOrderId,peer.ExitOrderId,peer.GeneratedAlgoId,peer.Size,f.Clock.GetUtcNow()));
+                };
+                fixture.Peer.BeforeMutationResponse=kind=>{var c=fixture.Cycles.Last();if(kind=="cancel")c.Canceled=true;if(kind=="sell"){c.ExitClient=fixture.Peer.ExitClient;c.Sold=true;c.SellUtc=f.Clock.GetUtcNow();}};
+                return fixture;
+            }
             f.Runtime.FiniteFundingPremise=(NavalFiniteOperatorPremise)OkxCurrentMarketFundingTests.Premise(f);await f.Connect();Assert.True(await f.Service.ApproveAndCreateAsync(default));
             await using(var finite=OkxOperationalTradingService.Create(f.Service,f.Clock,(s,k,d,x)=>OkxExecutionClient.ForTests(h,f.Clock,s,k,d,x),h))
             {
