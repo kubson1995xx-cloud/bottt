@@ -66,6 +66,34 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
         })).ToArray()};
     internal bool IsDemo(string scope)=>readAccounts.ContainsKey(scope)||runtime.Bindings.Any(b=>b.ScopeId==scope&&b.Account.Environment==Apex.Core.Naval.NavalEnvironment.OkxDemo);
     internal bool Known(string scope)=>readAccounts.ContainsKey(scope)||runtime.Bindings.Any(b=>b.ScopeId==scope);
+    // Read-only local panel model. Reuses the controller snapshot projection (no protocol change),
+    // plus sealed limits, marks/equity of the open owner and the Core strategy constants. No identity,
+    // credential, path or command authority; absent/stale data stays null so the panel shows "—".
+    internal object ReadLocalDashboard()
+    {
+        var binding=runtime.Bindings.FirstOrDefault(b=>b.Account.Environment==Apex.Core.Naval.NavalEnvironment.OkxDemo);
+        Entry? entry=null;if(binding!=null)entries.TryGetValue(binding.ScopeId,out entry);
+        var session=entry?.Account.BrokerSession;var trading=entry?.Trading;bool connected=entry?.Account.IsConnected??false;
+        OkxControllerSnapshot? snapshot=null;string snapshotState=connected?"NO_TRADING_OWNER":"DISCONNECTED";
+        if(connected&&trading!=null){try{snapshot=trading.ReadControllerSnapshot();snapshotState=snapshot.Connected?"CURRENT":"DISCONNECTED";}catch(System.IO.InvalidDataException){snapshotState="CHANGED_RETRY";}}
+        object? equity=null,limits=null,marks=null;
+        if(connected&&session!=null)
+        {
+            var state=session.ReadState();var b=state.NavalBroker!;var s=state.Naval!;var definition=Apex.Core.Naval.NavalOrdinaryCatalogPolicy.Definition(b);var view=session.Coordinator.Snapshot();
+            equity=new{dayKey=s.DayKey,dayStartEquity=s.DayStartEquity>0?s.DayStartEquity:(decimal?)null,liquidationEquity=s.LiquidationEquity,dailyRemaining=view.DailyRemaining,drawdownRemaining=view.DrawdownRemaining,dailyLatch=s.DailyLatch,drawdownLatch=s.DrawdownLatch,reconciledUtc=s.ReconciledUtc};
+            var l=definition.Limits;
+            limits=new{quote=b.Baseline.Binding.Account.QuoteCurrency,tradePct=l.TradePct,dailyPct=l.DailyPct,drawdownPct=l.DrawdownPct,maxLeverage=l.MaxLeverage,centralMax=l.CentralMax,alphaMax=l.AlphaMax,bravoMax=l.BravoMax,
+                ordinaryEntryCapQuote=OkxOperationalTradingService.OrdinaryEntryCapQuote,entryFeeRate=definition.Fees.EntryRate,exitFeeRate=definition.Fees.ExitRate};
+            marks=definition.Catalog.OrderBy(i=>i.Instrument,StringComparer.Ordinal).Select(i=>new{instrument=i.Instrument,bid=s.Marks.TryGetValue(i.Instrument,out var m)?m:(decimal?)null,reconciledUtc=s.ReconciledUtc}).ToArray();
+        }
+        var alpha=Apex.Core.Naval.NavalFleetProfiles.Get(Apex.Core.Naval.NavalFleet.Alpha);var bravo=Apex.Core.Naval.NavalFleetProfiles.Get(Apex.Core.Naval.NavalFleet.Bravo);
+        bool same=alpha.Settings==bravo.Settings&&alpha.ResearchAtrDays==bravo.ResearchAtrDays&&alpha.ResearchStopAtr==bravo.ResearchStopAtr&&alpha.ResearchTakeProfitR==bravo.ResearchTakeProfitR;
+        var strategy=new{name="Naval D1",selectionFixed=true,sameForAllFleets=same,entryDays=bravo.Settings.EntryDays,exitDays=bravo.Settings.ExitDays,btcSmaDays=bravo.Settings.BtcSmaDays,
+            atrDays=bravo.ResearchAtrDays,stopAtr=bravo.ResearchStopAtr,takeProfitR=bravo.ResearchTakeProfitR,instruments=Apex.Core.Naval.NavalOrdinaryDemoPolicy.FreshLocalInstruments};
+        var trade=trading?.ReadStatus();
+        return new{schema="apex-local-dashboard-v1",generatedUtc=DateTimeOffset.UtcNow,scopeId=binding?.ScopeId,connected,localOrdinary=binding!=null&&runtime.IsWindowsOrdinary(binding),
+            snapshotState,snapshot,equity,limits,marks,strategy,evaluation=trade?.Evaluation,obligations=trade?.Obligations,instruments=trade?.Instruments,lastResult=last};
+    }
     private bool Register(string scope,string id)
     {
         lock(sync){if(disposed||commands.Count>=512||!commands.Add(scope+":"+id))return false;return true;}

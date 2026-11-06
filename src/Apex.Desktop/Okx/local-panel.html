@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="theme-color" content="#0b1220" />
+<title>APEX — bot lokalny (OKX DEMO)</title>
+<link rel="stylesheet" href="/local-panel.css" />
+</head>
+<body>
+<div class="mobile-top"><div class="logo"><div class="mark">A</div><div class="logotxt">APEX<small>TRADING AI</small></div></div><span class="pill amber">OKX DEMO</span></div>
+<div class="app">
+<aside class="sidebar">
+ <div class="logo"><div class="mark">A</div><div class="logotxt">APEX<small>TRADING AI</small></div></div>
+ <div><p class="side-title">MENU GŁÓWNE</p><nav class="nav" id="desktop-nav" aria-label="Widoki panelu"></nav></div>
+ <div class="side-bottom"><strong><span class="signal" id="side-signal"></span><span id="side-mode">Tryb: —</span></strong><div class="small">OKX DEMO · cash SPOT · ten komputer.<br>Okno konsoli APEX musi pozostać otwarte.</div></div>
+</aside>
+<main class="main">
+<header class="header">
+ <div><div class="eyebrow">APEX / OKX DEMO · SPOT EUR</div><h1 class="page-title" id="page-title">Pulpit</h1><p class="subtitle" id="page-subtitle">Najważniejsze informacje w jednym miejscu.</p></div>
+ <div class="header-right"><span class="pill amber">OKX DEMO</span><span class="pill" id="mode-pill">Tryb: —</span><span class="pill" id="state-pill"><span class="dot"></span> —</span></div>
+</header>
+<div class="notice" id="data-notice" role="status" hidden></div>
+<div class="notice warn" id="running-notice" role="alert" hidden>Bot DZIAŁA na tym komputerze. Nie zamykaj okna APEX i nie wyłączaj ani nie usypiaj komputera. Aby zakończyć: najpierw STOP, potem zamknij okno.</div>
+
+<section id="dashboard" class="view active">
+ <div class="cards">
+  <div class="card metric"><div class="meta">Kapitał bota (EUR) <span class="metric-icon">€</span></div><div class="num stale" id="capital-cash">—</div><div class="foot" id="capital-foot">Gotówka bota — dostępna po połączeniu (Observe)</div></div>
+  <div class="card metric"><div class="meta">Saldo konta OKX DEMO <span class="metric-icon">◎</span></div><div class="num stale" id="account-eur">—</div><div class="foot" id="account-excluded">Wykluczone waluty: —</div></div>
+  <div class="card metric" id="daily-card" hidden><div class="meta">Zmiana wyceny dziś <span class="metric-icon">↗</span></div><div class="num" id="daily-pnl">—</div><div class="foot" id="daily-foot">Od początku dnia (UTC)</div></div>
+  <div class="card metric"><div class="meta">Otwarte pozycje <span class="metric-icon">◈</span></div><div class="num stale" id="open-count">—</div><div class="foot">Wyłącznie własne pozycje bota</div></div>
+  <div class="card metric"><div class="meta">Ryzyko dzienne <span class="metric-icon">◇</span></div><div class="num stale" id="daily-limit">—</div><div class="foot" id="daily-remaining">Limit dzienny z konfiguracji bota</div></div>
+ </div>
+ <div class="section-grid">
+  <div class="card card-pad" id="chart-card">
+   <div class="section-heading"><div><h2>Zrealizowany wynik</h2><p>Z własnych transakcji bota (średni koszt), obliczone w panelu</p></div></div>
+   <div class="chart-stats"><strong id="chart-value">—</strong><span id="chart-change"></span></div>
+   <div class="chart-wrap" id="chart-wrap" hidden><svg id="equity-chart" viewBox="0 0 760 230" preserveAspectRatio="none" role="img" aria-label="Zrealizowany wynik z własnych transakcji"></svg></div>
+   <div class="empty" id="chart-empty">Brak zamkniętych transakcji bota — wykres pojawi się po pierwszym wyjściu.</div>
+   <div class="chart-note" id="chart-note"></div>
+  </div>
+  <div class="card card-pad" id="control-card">
+   <div class="section-heading"><div><h2>Sterowanie botem</h2><p>Kolejne kroki — każdy wymaga Twojej decyzji</p></div><span class="pill" id="bot-pill"><span class="dot"></span> —</span></div>
+   <div class="status-row"><div><strong id="bot-title">Stan nieznany</strong><small id="bot-desc">Pobieranie statusu…</small></div><span id="bot-icon">◉</span></div>
+   <ol class="stepper" id="stepper"></ol>
+   <button class="btn btn-danger full" id="stop-button" type="button">■ Zatrzymaj awaryjnie (STOP)</button>
+   <div class="divider"></div>
+   <div class="label-row"><span>Aktywna strategia</span><strong id="strategy-name">—</strong></div>
+   <div class="label-row"><span>Rynek</span><strong>OKX DEMO · cash SPOT · EUR</strong></div>
+   <div class="label-row"><span>Tryb</span><span class="badge alt" id="mode-badge">—</span></div>
+   <div class="label-row"><span>Uśpienie komputera</span><strong id="keepawake">—</strong></div>
+   <div class="divider"></div>
+   <div class="setting"><div><div class="setting-title">Powiadomienia w panelu</div><div class="setting-note">Tylko komunikaty tego okna; nie zmienia bota</div></div><label class="toggle"><input type="checkbox" id="notify-toggle" checked aria-label="Powiadomienia w panelu"><span></span></label></div>
+  </div>
+ </div>
+ <div class="card table-card"><div class="section-heading pad-head"><div><h2>Otwarte pozycje</h2><p>Własne pozycje bota (tylko odczyt)</p></div><button class="btn btn-ghost btn-sm" type="button" data-goto="positions">Zobacz wszystkie →</button></div><div class="table-overflow"><table class="data-table"><thead><tr><th>Para</th><th>Ilość</th><th>Koszt śr.</th><th>Aktualna cena</th><th>Niezreal. P&amp;L</th><th>Ochrona SL/TP</th></tr></thead><tbody id="positions-dash"></tbody></table></div></div>
+ <div class="bottom-grid">
+  <div class="card card-pad"><div class="section-heading"><div><h2>Ostatnia aktywność</h2><p>Rzeczywiste zdarzenia: polecenia, transakcje, oceny, STOP</p></div><span class="pill">LOKALNIE</span></div><div class="feed" id="activity-feed"></div></div>
+  <div class="card card-pad"><div class="section-heading"><div><h2>Obserwowane rynki</h2><p>Ostatnie wyceny (bid) z rekonsyliacji bota</p></div><span class="pill">EUR</span></div><div class="market" id="markets"></div></div>
+ </div>
+</section>
+
+<section id="positions" class="view"><div class="card"><div class="card-pad"><h2 class="panel-title">Pozycje</h2><p class="panel-desc">Wyłącznie własne pozycje bota. Tylko odczyt — wyjścia wykonuje strategia (SL/TP lub sygnał wyjścia). Waluty wykluczone nie są pozycjami bota.</p></div><div class="table-overflow"><table class="data-table"><thead><tr><th>Para</th><th>Ilość</th><th>W toku</th><th>Koszt (z opłatą)</th><th>Koszt śr.</th><th>Aktualna cena</th><th>Niezreal. P&amp;L</th><th>Ochrona SL/TP</th></tr></thead><tbody id="positions-full"></tbody></table></div></div></section>
+
+<section id="strategies" class="view"><div class="strategies"><div class="card strategy" id="strategy-card"><div class="label-row"><strong id="strategy-title">—</strong><span class="pill green">AKTYWNA · STAŁA</span></div><p id="strategy-desc">—</p><div class="kv" id="strategy-params"></div><div><span class="tag">WYBÓR STRATEGII JEST STAŁY — TYLKO ODCZYT</span></div></div></div></section>
+
+<section id="history" class="view"><div class="card"><div class="card-pad"><h2 class="panel-title">Historia transakcji</h2><p class="panel-desc" id="history-desc">Własne transakcje bota (fills) z opłatami. Tylko odczyt.</p></div><div class="table-overflow"><table class="data-table"><thead><tr><th>Data</th><th>Para</th><th>Operacja</th><th>Ilość</th><th>Cena</th><th>Brutto (EUR)</th><th>Opłata</th><th>Netto</th></tr></thead><tbody id="history-rows"></tbody></table></div></div></section>
+
+<section id="settings" class="view">
+ <div class="settings-grid">
+  <div class="card card-pad"><h2 class="panel-title">Zarządzanie ryzykiem</h2><p class="panel-desc">Limity z zapieczętowanej konfiguracji bota — tylko odczyt, panel ich nie zmienia.</p><div class="kv" id="risk-limits"></div></div>
+  <div class="card card-pad"><h2 class="panel-title">Połączenie</h2><p class="panel-desc">Ten komputer handluje bezpośrednio na OKX DEMO.</p><div class="kv" id="connection-info"></div><p class="helper">Klucz API jest zapisany zaszyfrowany (Windows DPAPI) w prywatnym katalogu Twojego profilu i nigdy nie jest wyświetlany ani wysyłany do panelu.</p></div>
+ </div>
+ <details class="card vps" id="vps-details"><summary>Wersja VPS — sterowanie botem na serwerze (tylko jeśli używasz VPS)</summary><div class="vps-body"><p class="helper">Ta sekcja dotyczy wyłącznie wersji z botem na VPS. W trybie lokalnym nie jest potrzebna. Bot na VPS musi być zatrzymany, jeśli używa tego samego konta OKX DEMO.</p><div id="okx-operator-slot"></div></div></details>
+</section>
+</main>
+</div>
+<nav class="mobile-nav" id="mobile-nav" aria-label="Widoki panelu"></nav>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/local-panel.js" defer></script>
+</body>
+</html>

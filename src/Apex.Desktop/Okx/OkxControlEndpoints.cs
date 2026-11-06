@@ -11,7 +11,7 @@ internal static class OkxControlEndpoints
     private static readonly string[] Actions={"attach-local","prepare","connect","reconnect","disconnect","baseline","arm","start","stop","emergency","recover","diagnose","test-demo"};
     internal static bool IsPath(string? path)
     {
-        if(path is "/api/naval/okx/status" or "/api/naval/okx/configure" or "/api/naval/okx/create-local" or "/api/naval/okx/cancel")return true;
+        if(path is "/api/naval/okx/status" or "/api/naval/okx/local-dashboard" or "/api/naval/okx/configure" or "/api/naval/okx/create-local" or "/api/naval/okx/cancel")return true;
         var p=path?.Split('/');return p is {Length:6}&&p[1]=="api"&&p[2]=="naval"&&p[3]=="okx"&&OkxConfiguration.Identifier(p[4])&&Actions.Contains(p[5],StringComparer.Ordinal);
     }
     internal static void Map(WebApplication app,OkxOperatorControl control)
@@ -19,6 +19,11 @@ internal static class OkxControlEndpoints
         app.MapGet("/okx-controls.js",()=>Results.Stream(typeof(OkxControlEndpoints).Assembly.GetManifestResourceStream("Apex.Desktop.Okx.okx-controls.js")!,"text/javascript; charset=utf-8"));
         app.MapGet("/okx-controls.css",()=>Results.Stream(typeof(OkxControlEndpoints).Assembly.GetManifestResourceStream("Apex.Desktop.Okx.okx-controls.css")!,"text/css; charset=utf-8"));
         app.MapGet("/api/naval/okx/status",()=>Results.Json(control.ReadStatus()));
+        // Local Windows edition panel: static embedded page + one read-only model. No mutation route added.
+        app.MapGet("/api/naval/okx/local-dashboard",()=>Results.Json(control.ReadLocalDashboard()));
+        foreach(var (route,resource,type) in new[]{("/local/","local-panel.html","text/html; charset=utf-8"),("/local-panel.js","local-panel.js","text/javascript; charset=utf-8"),("/local-panel.css","local-panel.css","text/css; charset=utf-8")})
+            app.MapGet(route,(HttpContext ctx)=>{ctx.Response.Headers["Cache-Control"]="no-store";return Results.Stream(typeof(OkxControlEndpoints).Assembly.GetManifestResourceStream("Apex.Desktop.Okx."+resource)!,type);});
+        app.MapGet("/local",()=>Results.Redirect("/local/"));
         app.MapPost("/api/naval/okx/configure",(Delegate)((HttpContext ctx)=>Command(ctx,"", "configure")));
         app.MapPost("/api/naval/okx/create-local",(Delegate)((HttpContext ctx)=>Command(ctx,"", "create-local")));
         app.MapPost("/api/naval/okx/cancel",(Delegate)((HttpContext ctx)=>Command(ctx,"", "cancel")));

@@ -368,7 +368,10 @@ namespace Apex.Desktop
                 startupObserver?.Invoke("services", newsService);
                 cts.Token.ThrowIfCancellationRequested();
 
-                var uri = DesktopBrowser.BuildUri(port, naval != null);
+                // A PC without a paired VPS controller opens the local edition panel; the VPS
+                // controller stays reachable there under Ustawienia and on /naval/.
+                var uri = naval != null && OperatingSystem.IsWindows() && WindowsOkxLocalAttachment.RemoteProfileAbsent(dataDir)
+                    ? DesktopBrowser.BuildLocalUri(port) : DesktopBrowser.BuildUri(port, naval != null);
                 log.Info($"APEX Desktop {AccountManager.HostVersion} uruchomiony: {uri.AbsoluteUri}  (dane: {dataDir})");
                 log.Info($"Bridge configured. WebSocket: ws://127.0.0.1:{port}/bridge | TCP: 127.0.0.1:{config.Config.BridgeTcpPort}");
                 log.Info("Handel na kontach LIVE: TRWALE WYŁĄCZONY (wersja DEMO).");

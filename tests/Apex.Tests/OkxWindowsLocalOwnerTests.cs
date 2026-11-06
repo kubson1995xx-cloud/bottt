@@ -13,6 +13,12 @@ using Apex.Adapters.Okx.Execution;
 using Apex.Core.Naval;
 using Apex.Desktop.Okx;
 using Apex.Desktop.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 namespace Apex.Tests;
 
@@ -135,6 +141,42 @@ public sealed class OkxLinuxCliProvenanceTests
 public sealed partial class OkxConditionalTradingTests
 {
     private static JsonElement Status(OkxOperatorControl c)=>JsonSerializer.SerializeToElement(c.ReadStatus());
+    private static JsonElement Dashboard(OkxOperatorControl control)
+    {
+        // Same camelCase web JSON the panel receives over HTTP.
+        var web=new JsonSerializerOptions(JsonSerializerDefaults.Web);web.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        for(int n=0;;n++){var d=JsonSerializer.SerializeToElement(control.ReadLocalDashboard(),web);if(d.GetProperty("snapshotState").GetString()!="CHANGED_RETRY"||n>40)return d;Thread.Sleep(25);}
+    }
+    // Real local panel rendered by headless Edge from the real endpoints of this synthetic session.
+    // The DOM is checked for the expected state before a screenshot is accepted. CI evidence only.
+    private static async Task PanelScreens(OkxOperatorControl control,string label,string expected,params string[] views)
+    {
+        string? temp=Environment.GetEnvironmentVariable("RUNNER_TEMP");if(temp==null)return;
+        string edge=new[]{@"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",@"C:\Program Files\Microsoft\Edge\Application\msedge.exe"}.First(File.Exists);
+        var builder=WebApplication.CreateSlimBuilder();builder.Logging.ClearProviders();builder.WebHost.ConfigureKestrel(k=>k.Listen(System.Net.IPAddress.Loopback,0));
+        builder.Services.ConfigureHttpJsonOptions(o=>{o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());o.SerializerOptions.NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals;});
+        await using var app=builder.Build();OkxControlEndpoints.Map(app,control);await app.StartAsync();
+        string url=app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+        string dir=Path.Combine(temp,"controller-windows-source","screens");Directory.CreateDirectory(dir);
+        async Task<string> Edge(string view,string? png)
+        {
+            string profile=Path.Combine(temp,"edge-"+Guid.NewGuid().ToString("N"));
+            var psi=new ProcessStartInfo(edge){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true};
+            foreach(var a in new[]{"--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check","--hide-scrollbars","--user-data-dir="+profile,"--window-size=1440,1350","--virtual-time-budget=8000",png==null?"--dump-dom":"--screenshot="+png,url+"/local/#"+view})psi.ArgumentList.Add(a);
+            using var p=Process.Start(psi)!;var output=p.StandardOutput.ReadToEndAsync();_=p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(90));try{Directory.Delete(profile,true);}catch(IOException){}catch(UnauthorizedAccessException){}
+            return await output;
+        }
+        foreach(string view in views)
+        {
+            string dom=await Edge(view,null);
+            Assert.True(dom.Contains("id=\"state-pill\"")&&dom.Contains(expected),"Rendered panel did not show "+expected+" for "+view);
+            Assert.DoesNotContain("USDT",dom);Assert.DoesNotContain("Prototyp",dom);
+            string png=Path.Combine(dir,"native-"+label+"-"+view+".png");await Edge(view,png);
+            Assert.True(File.Exists(png)&&new FileInfo(png).Length>10000,"Panel screenshot missing: "+png);
+        }
+        await app.StopAsync();
+    }
     private static string PowerRequests()
     {
         using var p=Process.Start(new ProcessStartInfo("powercfg","/requests"){RedirectStandardOutput=true,RedirectStandardError=true,UseShellExecute=false})!;
@@ -213,6 +255,7 @@ public sealed partial class OkxConditionalTradingTests
             };
             fixture.Peer.BeforeMutationResponse=kind=>{var c=fixture.Cycles.Last();if(kind=="cancel")c.Canceled=true;if(kind=="sell"){c.ExitClient=fixture.Peer.ExitClient;c.Sold=true;c.SellUtc=f.Clock.GetUtcNow();if(fixture.Cycles.Count(v=>v.Sold)==2)fixture.Market.Wait=true;}}; // exactly two cycles: flat candles after the 2nd exit
             Assert.Equal("EXECUTE_ARMED_START_SEPARATE_CONDITIONAL_RISK",await Command("arm"));
+            await PanelScreens(control,"armed","ARMED","dashboard");
             fixture.Market.Wait=false;
             await Command("start");Assert.Equal("RUNNING",fixture.Loop.ReadStatus().Mode);
             Assert.True(control.KeepAwakeActive);Assert.Equal(WindowsLocalRunGuard.EsContinuous|WindowsLocalRunGuard.EsSystemRequired,control.KeepAwakeFlags);
@@ -223,6 +266,19 @@ public sealed partial class OkxConditionalTradingTests
                 var state=fixture.Account.BrokerSession!.ReadState();if(state.Naval!.Fills.Count==4&&fixture.Loop.ReadStatus().Mode=="RUNNING")break;
                 Assert.True(n<1199,"Native scheduler stalled "+fixture.Loop.ReadStatus().Code+" last="+Status(control).GetProperty("lastResult").GetString()+" "+string.Join(",",fixture.Loop.ReadStatus().Obligations)+" posts="+fixture.Peer.Posts+" fills="+state.Naval.Fills.Count);await Task.Delay(25);
             }
+            // Read-only local panel model over the real RUNNING session: real values only.
+            var d=Dashboard(control);Assert.Equal("CURRENT",d.GetProperty("snapshotState").GetString());
+            var snap=d.GetProperty("snapshot");Assert.Equal("RUNNING",snap.GetProperty("mode").GetString());
+            Assert.Equal(4,snap.GetProperty("history").GetProperty("total").GetInt32());
+            var balancesJson=snap.GetProperty("balances").GetProperty("items").EnumerateArray().ToArray();
+            var solRow=balancesJson.Single(b=>b.GetProperty("currency").GetString()=="SOL");Assert.True(solRow.GetProperty("excluded").GetBoolean());Assert.Equal(decimal.Parse(MultiFixture.HeldSol,System.Globalization.CultureInfo.InvariantCulture),solRow.GetProperty("total").GetDecimal());
+            Assert.True(balancesJson.Single(b=>b.GetProperty("currency").GetString()=="BTC").GetProperty("excluded").GetBoolean());Assert.False(balancesJson.Single(b=>b.GetProperty("currency").GetString()=="EUR").GetProperty("excluded").GetBoolean());
+            Assert.Equal(fixture.Account.Coordinator!.Snapshot().Cash,snap.GetProperty("capital").GetProperty("cash").GetDecimal());
+            var sealedLimits=NavalOrdinaryCatalogPolicy.Definition(fixture.Account.BrokerSession!.ReadState().NavalBroker!).Limits;
+            Assert.Equal(sealedLimits.DailyPct,d.GetProperty("limits").GetProperty("dailyPct").GetDecimal());Assert.Equal(sealedLimits.TradePct,d.GetProperty("limits").GetProperty("tradePct").GetDecimal());
+            Assert.Equal(40,d.GetProperty("strategy").GetProperty("entryDays").GetInt32());Assert.Equal(30,d.GetProperty("strategy").GetProperty("exitDays").GetInt32());Assert.Equal(200,d.GetProperty("strategy").GetProperty("btcSmaDays").GetInt32());
+            Assert.Equal(new[]{"BTC-EUR","ETH-EUR","SOL-EUR"},d.GetProperty("marks").EnumerateArray().Select(m=>m.GetProperty("instrument").GetString()));
+            await PanelScreens(control,"running","RUNNING","dashboard","positions","history","settings");
             Assert.Equal("OPERATOR_STOP",await Command("stop"));
             for(int n=0;n<200&&control.KeepAwakeActive;n++)await Task.Delay(25);
             Assert.False(control.KeepAwakeActive);Assert.Equal(WindowsLocalRunGuard.EsContinuous,control.KeepAwakeFlags);

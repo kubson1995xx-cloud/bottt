@@ -78,14 +78,32 @@ public sealed class LocalPackagedTests
         using var r=await host.Http.PostAsJsonAsync(path,new{commandId=Guid.NewGuid().ToString("N")});r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString()!;
     }
-    private static async Task<string> Label(string baseUri,string root,string evidence,string expected)
+    // Real Edge on the EXTRACTED EXE's /local/ panel: mode pill, honest disconnected "—" state, every
+    // requested view, and the collapsed "Wersja VPS" section still mounting the VPS controller.
+    private static async Task<string> Label(string baseUri,string root,string evidence,string expected,params string[] views)
     {
         await using var browser=await WindowsCdpBrowser.StartAsync(root+"-browser");string sid=await browser.NewPage();
-        await browser.Navigate(sid,new Uri(new Uri(baseUri),"/naval/").AbsoluteUri);
-        await browser.Wait(sid,"document.querySelector('#okx-execution-mode')?.textContent.startsWith("+JsonSerializer.Serialize(expected)+")===true","Mode label not rendered: "+expected);
-        string text=(await browser.Evaluate(sid,"document.querySelector('#okx-execution-mode').textContent")).GetString()!;
+        await browser.CommandAsync("Emulation.setDeviceMetricsOverride",new{width=1440,height=1350,deviceScaleFactor=1,mobile=false},sid);
+        await browser.Navigate(sid,new Uri(new Uri(baseUri),"/local/#dashboard").AbsoluteUri);
+        await browser.Wait(sid,"document.querySelector('#mode-pill')?.textContent.startsWith("+JsonSerializer.Serialize(expected)+")===true","Mode label not rendered: "+expected);
+        string text=(await browser.Evaluate(sid,"document.querySelector('#mode-pill').textContent")).GetString()!;
+        string dom=(await browser.Evaluate(sid,"document.documentElement.outerHTML")).GetString()!;
+        foreach(string banned in new[]{"USDT","XRP","Prototyp","IndexDipBuy","Pauza"})Assert.DoesNotContain(banned,dom);
+        Assert.Equal("—",(await browser.Evaluate(sid,"document.getElementById('capital-cash').textContent")).GetString());
+        Assert.True((await browser.Evaluate(sid,"!document.getElementById('data-notice').hidden&&document.getElementById('data-notice').textContent.includes('nie jest połączony')")).GetBoolean(),"Disconnected state not explicit");
         string? dir=Environment.GetEnvironmentVariable("APEX_COMPOSITION_EVIDENCE");
-        if(dir!=null){var image=await browser.CommandAsync("Page.captureScreenshot",new{format="png"},sid);File.WriteAllBytes(Path.Combine(dir,evidence+".png"),Convert.FromBase64String(image.GetProperty("data").GetString()!));}
+        foreach(string view in views.Length==0?new[]{"dashboard"}:views)
+        {
+            await browser.Evaluate(sid,"location.hash="+JsonSerializer.Serialize("#"+view));
+            await browser.Wait(sid,"document.getElementById("+JsonSerializer.Serialize(view)+").classList.contains('active')","View not shown: "+view);
+            if(view=="settings")
+            {
+                await browser.Evaluate(sid,"document.getElementById('vps-details').open=true");
+                await browser.Wait(sid,"document.querySelector('#vps-details #remote-controller')!==null&&(document.querySelector('#remote-state')?.textContent||'').length>0","VPS controller did not mount under Ustawienia");
+                Assert.True((await browser.Evaluate(sid,"document.getElementById('remote-controller').compareDocumentPosition(document.getElementById('control-card'))&Node.DOCUMENT_POSITION_PRECEDING")).GetInt32()!=0,"VPS section must not sit above the local controls");
+            }
+            if(dir!=null){var image=await browser.CommandAsync("Page.captureScreenshot",new{format="png"},sid);File.WriteAllBytes(Path.Combine(dir,evidence+"-"+view+".png"),Convert.FromBase64String(image.GetProperty("data").GetString()!));}
+        }
         return text;
     }
     [Fact] public async Task Extracted_EXE_first_run_local_enrollment_screens_LIVE_refused_confirmation_then_secure_approval_nothing_saved()
@@ -99,7 +117,8 @@ public sealed class LocalPackagedTests
             var first=await OkxStatus(host);
             Assert.Equal("NOT_SELECTED",first.GetProperty("executionMode").GetString());Assert.True(first.GetProperty("localCreateAvailable").GetBoolean());Assert.False(first.GetProperty("keepAwake").GetBoolean());Assert.Equal("STOP",first.GetProperty("mode").GetString());
             string script=await host.Http.GetStringAsync("/okx-controls.js");Assert.Contains("Lokalnie (ten PC)",script);Assert.Contains("create-local",script);
-            stage="LABEL";string label=await Label(host.Http.BaseAddress!.AbsoluteUri,root,"extracted-local-first-run","Tryb: nie wybrano");
+            stage="LABEL";string label=await Label(host.Http.BaseAddress!.AbsoluteUri,root,"extracted-first-run","Tryb: nie wybrano","dashboard");
+            string page=await host.Http.GetStringAsync("/local/");Assert.Contains("Sterowanie botem",page);Assert.DoesNotContain("<script>",page);
             stage="CREATE_POST";var creating=Post(host,"/api/naval/okx/create-local");
             IntPtr form=IntPtr.Zero;
             await WindowsTestHost.Until(()=>Task.FromResult((form=Window("APEX — lokalny bot: klucz OKX DEMO"))!=IntPtr.Zero),"Native DEMO key form missing");
@@ -147,7 +166,10 @@ public sealed class LocalPackagedTests
             {
                 await using var host=new CompositionTests.Host(root);var s=await OkxStatus(host);
                 Assert.Equal("LOCAL",s.GetProperty("executionMode").GetString());Assert.False(s.GetProperty("localCreateAvailable").GetBoolean());Assert.Equal("STOP",s.GetProperty("mode").GetString());Assert.False(s.GetProperty("keepAwake").GetBoolean());
-                string label=restart==0?await Label(host.Http.BaseAddress!.AbsoluteUri,root,"extracted-local-mode","Tryb: Lokalnie (ten PC)"):"";
+                string label=restart==0?await Label(host.Http.BaseAddress!.AbsoluteUri,root,"extracted-local","Tryb: Lokalnie (ten PC)","dashboard","positions","strategies","history","settings"):"";
+                var dash=await host.Http.GetFromJsonAsync<JsonElement>("/api/naval/okx/local-dashboard");
+                Assert.Equal("apex-local-dashboard-v1",dash.GetProperty("schema").GetString());Assert.Equal("DISCONNECTED",dash.GetProperty("snapshotState").GetString());
+                Assert.Equal(JsonValueKind.Null,dash.GetProperty("snapshot").ValueKind);Assert.Equal(JsonValueKind.Null,dash.GetProperty("limits").ValueKind);Assert.Equal(40,dash.GetProperty("strategy").GetProperty("entryDays").GetInt32());
                 string start=await Post(host,"/api/naval/okx/"+WindowsOkxLocalEnrollment.ScopeId+"/start");Assert.Equal("CONNECT_REQUIRED",start);
                 string stop=await Post(host,"/api/naval/okx/"+WindowsOkxLocalEnrollment.ScopeId+"/stop");Assert.Equal("OPERATOR_STOP",stop);
                 var after=await OkxStatus(host);Assert.Equal("STOP",after.GetProperty("mode").GetString());Assert.False(after.GetProperty("keepAwake").GetBoolean());

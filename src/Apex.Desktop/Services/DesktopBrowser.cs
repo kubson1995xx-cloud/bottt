@@ -11,6 +11,13 @@ internal static class DesktopBrowser
         return new Uri($"http://127.0.0.1:{port}/" + (navalEnabled ? "?view=naval" : ""));
     }
 
+    // Local Windows edition panel (no VPS controller profile on this PC). Same fixed loopback authority.
+    internal static Uri BuildLocalUri(int port)
+    {
+        if (port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
+        return new Uri($"http://127.0.0.1:{port}/local/");
+    }
+
     internal static bool TryOpen(Uri uri) => TryOpen(uri, null);
 
     // Only the external shell operation is replaceable, per source-test call.

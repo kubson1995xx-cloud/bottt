@@ -32,6 +32,8 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
     public string? ProtectionProfile=>protection;
     public bool FiniteDemo=>account.IsFiniteDemo;
     public bool OrdinaryDemoPolicy=>account.OrdinaryDemoPolicy;
+    // Ordinary DEMO per-entry quote debit cap (unchanged value, named so the read-only panel reports the same number).
+    internal const decimal OrdinaryEntryCapQuote=10m;
     internal bool ArmFiniteDemo(){armed=account.ArmFiniteDemo();return armed;}
     private bool EntryObservationPending=>session.ReadState().NavalBroker!.Operational is {} x&&x.Intents.Any(i=>i.Operation==NavalExecutionOperation.Submit&&!i.Reduction&&i.Stage!=NavalExecutionStage.NotSent&&!x.SettledIntents.Contains(i.Id));
     internal string Status=>disposed?"DISPOSED":!SourceCurrent?"DISCONNECTED_STOP":protection==null?OkxConditionalCashSpotPolicy.Refusal:!armed?"EXECUTE_ARMING_REQUIRED":session.Coordinator.Snapshot().Mode=="RUNNING"&&EntryObservationPending?"ENTRY_OBSERVATION_PENDING":session.Coordinator.Snapshot().Reason;
@@ -150,7 +152,7 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
             var unitHolds=NavalCashRiskPolicy.Holds(unit,definition,state.Naval!.Marks);decimal equity=state.Naval.LiquidationEquity??0;
             decimal capital=Math.Min(state.Naval.Accounts.Sum(a=>a.Cash)+state.Naval.Reservations.Sum(r=>r.AllocatedCost),equity);
             decimal quantity=Math.Min(quote.AskQuantity,Math.Min(capital*definition.Limits.TradePct/100/unitHolds.RiskHold,state.Naval.Accounts.Single().Cash/NavalCashRiskPolicy.Held(unitHolds)));
-            if(OrdinaryDemoPolicy)quantity=Math.Min(quantity,10m/NavalCashRiskPolicy.BuyDebit(1,price,definition.Fees));
+            if(OrdinaryDemoPolicy)quantity=Math.Min(quantity,OrdinaryEntryCapQuote/NavalCashRiskPolicy.BuyDebit(1,price,definition.Fees));
             if(definition.Fees.EntryInBase&&definition.Fees.EntryRate>0)
             {
                 try{quantity=NetLotQuantity(quantity,spec.Quantum,definition.Fees.EntryRate);}
