@@ -14,3 +14,4 @@ try{$ErrorActionPreference='Continue';& dotnet test (Join-Path $repo 'tests/Apex
 [ordered]@{exit=$code;phase=$Phase}|ConvertTo-Json|Set-Content (Join-Path $e 'result.json')
 if($Phase -eq 'green' -and $code -ne 0){throw 'native integration failed'}
 if($Phase -eq 'red' -and $code -eq 0){throw 'RED unexpectedly passed'}
+exit 0

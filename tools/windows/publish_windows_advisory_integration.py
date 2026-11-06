@@ -15,7 +15,7 @@ def main():
   dest=root/'source'/rel;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(data)
   blob=run('git','hash-object','-w','--stdin',input=data);run('git','update-index','--add','--cacheinfo','100644',blob,rel,env=env);rows.append({'path':rel,'sha256':hashlib.sha256(data).hexdigest()})
  files=['src/Apex.Desktop/Okx/OkxAdvisorySnapshot.cs','tests/Apex.Tests/OkxWindowsAdvisoryConsumerTests.cs','tests/Apex.Tests/OkxWindowsAdvisoryStoreTests.cs','tools/windows/Test-WindowsAdvisoryIntegration.ps1','tools/windows/publish_windows_advisory_integration.py']
- for rel in ['src/Apex.Desktop/Okx/WindowsOkxAdvisoryStore.cs','src/Apex.Desktop/Okx/OkxAdvisoryCoordinator.cs','src/Apex.Desktop/Okx/OkxAdvisoryAdmission.cs','tests/Apex.Tests/OkxWindowsAdvisoryEntryTests.cs']:
+ for rel in ['src/Apex.Desktop/Okx/OkxAccountConnectionService.cs','src/Apex.Desktop/Okx/OkxOperationalTradingService.cs','src/Apex.Desktop/Okx/WindowsOkxAdvisoryStore.cs','src/Apex.Desktop/Okx/OkxAdvisoryCoordinator.cs','src/Apex.Desktop/Okx/OkxAdvisoryAdmission.cs','tests/Apex.Tests/OkxWindowsAdvisoryEntryTests.cs']:
   if (REPO/rel).exists():files.append(rel)
  for rel in files:add(rel,(REPO/rel).read_bytes())
  workflow=run('git','show',a.base+':.github/workflows/windows-demo.yml')+'\n';marker='\n  windowsAdvisoryRefresh:\n';assert workflow.count(marker)==1

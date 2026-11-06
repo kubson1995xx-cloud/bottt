@@ -136,6 +136,7 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
                 return exit;
             }
             if(decision.Action!=NavalAction.EntrySignal)return Refuse(decision.Reason);
+            if(!AdmitAdvice(request,decision.StableId,cutoff))return Refuse(advisoryEntryCode);
             var registration=account.RegisterConfirmedSignal(request);if(registration.Status is not (NavalMutationStatus.Applied or NavalMutationStatus.Duplicate))return registration;
             state=session.ReadState();string command="d1-"+NavalJson.Hash(decision.StableId);
             if(state.Naval!.Commands.Any(c=>c.SignalId==decision.StableId))return Refuse("SIGNAL_CONSUMED");
@@ -173,6 +174,7 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
             state=session.ReadState();var x=state.NavalBroker!.Operational!;string id="entry-"+command;
             var durable=new NavalBrokerIntent(id,reserved.ReservationId!,NavalExecutionOperation.Submit,instrument,prepared.OriginalClientId,null,prepared.CopyBody(),prepared.Digest,deadline,SessionId,state.Naval!.Generation,state.Naval.Sequence,x.StopEpoch,state.DurableRevision+1,NavalExecutionStage.Prepared);
             var stored=session.Prepare(durable);if(stored.Status!=NavalMutationStatus.Applied)return stored;
+            BindAdvice(decision.StableId,id,prepared);
             current=id;var outcome=await client.SubmitAsync(prepared,ct).ConfigureAwait(false);
             var mapped=new NavalExecutionOutcome(outcome.Disposition==OkxWriteDisposition.Acknowledged?NavalDispatchDisposition.Acknowledged:outcome.Disposition==OkxWriteDisposition.ProvenNotSent?NavalDispatchDisposition.NotSent:NavalDispatchDisposition.Unknown,
                 outcome.OriginalClientId,outcome.OrderId,outcome.Disposition==OkxWriteDisposition.Acknowledged?"TRANSPORT_ACK":outcome.Disposition==OkxWriteDisposition.ProvenNotSent?"TRANSPORT_NOT_SENT":"TRANSPORT_UNKNOWN",outcome.Code,outcome.SCode,outcome.SubCode);
@@ -180,7 +182,7 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
         }
         catch(Exception e) when(e is IOException or InvalidOperationException or ArgumentException or OverflowException or System.Text.Json.JsonException or HttpRequestException or OperationCanceledException)
         {EvaluationCode(evaluated?"EXECUTION_FAILED":"EVALUATION_FAILED");return session.Coordinator.Stop("BROKER_LOOP_INCOMPLETE");}
-        finally{current=null;lane.Release();}
+        finally{entryAdvice=null;current=null;lane.Release();}
     }
     // If rate=a/b in lowest terms, gross lots must be a multiple of b for
     // scheduled net lots to be integral. Integer arithmetic avoids decimal's
@@ -212,14 +214,14 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
     }
     private static string N(decimal n)=>n.ToString("0.############################",CultureInfo.InvariantCulture);
     public bool CanDispatch(OkxPreparedRequest request,DateTimeOffset now)=>false;
-    public IDisposable? TryEnterDispatch(OkxPreparedRequest request,DateTimeOffset now)=>current==null||!PreparedAdmission(request)?null:session.EnterDispatch(current,request.Digest,now);
-    internal void Stop(){RevokeArming();if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("OPERATOR_STOP");}
+    public IDisposable? TryEnterDispatch(OkxPreparedRequest request,DateTimeOffset now)=>EnterAdvisoryDispatch(request,now);
+    internal void Stop(){entryAdvice=null;RevokeArming();if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("OPERATOR_STOP");}
     private readonly object closing=new();private Task? disposal;
     public ValueTask DisposeAsync(){lock(closing)return new(disposal??=DrainAsync());}
     private async Task DrainAsync()
     {
         RevokeArming();disposed=true;if(ReferenceEquals(account.BrokerSession,session))session.Coordinator.Stop("BROKER_TRADING_DISPOSED");
         await client.DisposeAsync().ConfigureAwait(false);await lane.WaitAsync().ConfigureAwait(false);
-        try{feed.Dispose();account.UnregisterTrading(this);}finally{lane.Release();}
+        try{entryAdvice=null;advisoryStore?.Dispose();feed.Dispose();account.UnregisterTrading(this);}finally{lane.Release();}
     }
 }
