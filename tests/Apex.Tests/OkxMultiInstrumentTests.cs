@@ -233,12 +233,12 @@ public sealed partial class OkxConditionalTradingTests
         internal EngineState Seed=null!;
         private MultiFixture(OperationalPeer f,FiniteDemoPeer history){F=f;History=history;Peer=new(f){CandleInstrument="SOL-EUR"};Market=new(Peer,Cycles);}
         private static int nextMixedUid=99220000;
-        internal static async Task<MultiFixture> Create(string availability="")
+        internal static async Task<MultiFixture> Create(string availability="",bool windowsLocalSeed=false)
         {
             string uid=Guid.NewGuid().ToString("N");
             string accountUid=Interlocked.Increment(ref nextMixedUid).ToString();
             var binding=OkxConfiguration.Bind(new OkxNavalOptions{Schema="okx-naval-config-v1",Scopes=new[]{new OkxScopeOptions{ScopeId="account",Environment="OkxDemo",Region="EEA",ExpectedUid=accountUid,ExpectedMainUid=accountUid,QuoteCurrency="EUR",CredentialBindingId="key",SafetyVersion="okx-cash-v1"}}})[0];
-            var f=new OperationalPeer(binding:binding,finite:true);var h=new FiniteDemoPeer(f){BaseCurrency="SOL"};var fixture=new MultiFixture(f,h);bool benchmark=false;
+            var f=new OperationalPeer(binding:binding,finite:true,native:windowsLocalSeed);var h=new FiniteDemoPeer(f){BaseCurrency="SOL"};var fixture=new MultiFixture(f,h);bool benchmark=false;
             f.Mutate=(p,b)=>
             {
                 OkxOrdinaryMixedAccountTests.Shape(f,h,p,b);
@@ -287,6 +287,7 @@ public sealed partial class OkxConditionalTradingTests
             seed.NavalBroker=NavalBrokerValidation.Seal(seed.NavalBroker with{Operational=seed.NavalBroker.Operational with{Intents=seed.NavalBroker.Operational.Intents.Select(i=>i.Id==buy.Id?buy:i).ToArray()}});
             File.WriteAllText(f.Target,NavalJson.Serialize(seed));original=buy;
             fixture.Seed=NavalJson.Clone(seed);
+            if(windowsLocalSeed)return fixture;
             fixture.Runtime=OkxNavalRuntime.ComposeLinuxDemo(f.Root,f.Binding,f,f,()=>true);
             fixture.Account=AccountFor(f,fixture.Runtime);
             var request=f.Request with{Session=Guid.NewGuid()};var lease=await fixture.Runtime.Activation.RequestAsync(request,default);Assert.True(await fixture.Account.ConnectAsync(request,lease!,default),fixture.Account.Status);

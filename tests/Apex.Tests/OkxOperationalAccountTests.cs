@@ -238,8 +238,9 @@ internal sealed class OperationalPeer : HttpMessageHandler, IOkxExecutionSecretP
         Request=new(Binding,Convert.ToHexString(SHA256.HashData(Key)).ToLowerInvariant(),Guid.NewGuid(),0,OkxActivationPurpose.Observe,DateTimeOffset.UtcNow.AddSeconds(120));
         Service=OkxAccountConnectionService.ForTests(Runtime,Root,Binding,this,Clock,
             (scope,provider,fp,fence)=>OkxExecutionObservationClient.ForTests(this,Clock,scope,provider,fp,fence,(t,ct)=>{Clock.Advance(t);return Task.CompletedTask;}),
-            (scope,provider,fp,fence)=>OkxObservationStream.ForTests((uri,ct)=> { var s=new OperationalSocket(uri);Sockets.Add(s);return Task.FromResult<WebSocket>(s); },Clock,scope,provider,fp,fence),()=>native?OkxNavalStore.OpenNative(Root,Binding):OkxNavalStore.ForTests(Root,Binding,b=>WriteBoundary?.Invoke(b)));
+            (scope,provider,fp,fence)=>OkxObservationStream.ForTests((uri,ct)=> { var s=new OperationalSocket(uri);Sockets.Add(s);return Task.FromResult<WebSocket>(s); },Clock,scope,provider,fp,fence),()=>native?NativeObservedStore():OkxNavalStore.ForTests(Root,Binding,b=>WriteBoundary?.Invoke(b)));
     }
+    private OkxNavalStore NativeObservedStore()=>(OkxNavalStore)Activator.CreateInstance(typeof(OkxNavalStore),System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic,null,new object[]{Root,Binding,false,(Action<AtomicWriteBoundary>)(b=>WriteBoundary?.Invoke(b)),false},null)!;
     private static int nextUid=910000;
     public OkxExecutionCredentialLease Open(OkxScopeBinding binding,OkxScopePaths paths)
     { SecretOpens++; Assert.Equal(Binding,binding);return native?new WindowsOkxCredentialStore(Root).Open(binding,paths):new(binding,"DemoTradingApi",Key.ToArray(),Secret.ToArray(),Pass.ToArray()); }
