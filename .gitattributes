@@ -11,3 +11,7 @@
 /tools/windows/Test-WindowsAdvisoryPrerequisite.ps1 text eol=lf
 /tools/windows/advisory-prerequisite-job.yml text eol=lf
 /tools/windows/publish_windows_advisory_overlay.py text eol=lf
+/src/Apex.Desktop/Okx/OkxAdvisoryCanonicalData.cs text eol=lf
+/tools/windows/Test-WindowsAdvisoryRefresh.ps1 text eol=lf
+/tools/windows/advisory-refresh-job.yml text eol=lf
+/tools/windows/publish_windows_advisory_refresh.py text eol=lf

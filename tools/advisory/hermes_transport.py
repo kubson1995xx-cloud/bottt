@@ -60,7 +60,7 @@ def parse_stream(text):
 
 
 async def request(prompt: str, seconds: float) -> dict:
-    if not isinstance(prompt, str) or not 1 <= len(prompt) <= 16000:
+    if not isinstance(prompt, str) or not 1 <= len(prompt) <= 250000:
         raise ValueError('bounded prompt required')
     if isinstance(seconds, bool) or not isinstance(seconds,(int,float)) or not math.isfinite(seconds) or not 0 < seconds <= 120:
         raise ValueError('bounded timeout required')
