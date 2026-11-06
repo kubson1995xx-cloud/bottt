@@ -69,6 +69,9 @@ try {
  $exe=Join-Path $extracted 'APEX-Desktop/ApexDesktop.exe'
  if($env:APEX_ADVISORY_PRIOR){
   $env:APEX_ADVISORY_TEST_BUNDLE=Join-Path $extracted 'AI'
+  foreach($pattern in @('test_budget.py','test_native_messages.py','test_local_install.py')){
+   & python -B -m unittest discover -s (Join-Path $repo 'tools/advisory/tests') -p $pattern -v *> (Join-Path $e ($pattern+'.log'));if($LASTEXITCODE -ne 0){throw 'Native pure companion boundary failed'}
+  }
   $advisoryProject=Join-Path $repo 'tests/Apex.Tests/Apex.Tests.csproj'
   & dotnet build $advisoryProject -c Release -p:NuGetAudit=false *> (Join-Path $e 'advisory-tests-build.log');if($LASTEXITCODE -ne 0){throw 'Native advisory consumers failed to compile'}
   Copy-Item (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') (Join-Path $e 'advisory-tested-closure') -Recurse

@@ -40,7 +40,7 @@ def main():
    if control.exists():cancel.set();return
  threading.Thread(target=watch,daemon=True).start()
  from supervisor import Supervisor
- service=Supervisor(root/'reports',contract,hermes_home=home,request_ms=25000,worker_seconds=600,cancel=cancel,store_guard=target/'ApexAdvisoryStoreGuard.exe')
+ service=Supervisor(root/'reports',contract,hermes_home=home,request_ms=60000,worker_seconds=600,cancel=cancel,store_guard=target/'ApexAdvisoryStoreGuard.exe')
  try:
   result=service.refresh(data['Instrument'],data['AsOfUtc'],raw)
   print(json.dumps({'state':result.state,'reason':result.reason}))

@@ -17,6 +17,30 @@ internal sealed class OkxAdvisoryCoordinator : IAsyncDisposable
     internal static string LocalRoot=>Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"APEX-Advisory");
     readonly string root;readonly object sync=new();readonly CancellationTokenSource lifetime=new();CancellationTokenSource? round;Task? work;bool closed;int setupEpoch;
     readonly Dictionary<string,object> status=new(StringComparer.Ordinal);
+    readonly SemaphoreSlim seriesLane=new(1,1);readonly Dictionary<string,NavalSeries> seriesCache=new(StringComparer.Ordinal);DateTimeOffset seriesDay;
+    // One completed daily window for BOTH strategy and analysts. A rolling endpoint
+    // cannot silently rebase its 299/300-bar boundary after proof publication.
+    internal NavalSeries PinSeries(NavalSeries incoming,DateTimeOffset cutoff)
+    {
+        lock(sync)
+        {
+            if(seriesDay==cutoff&&seriesCache.TryGetValue(incoming.Instrument,out var current))return current;
+            _=OkxAdvisoryCanonicalData.Serialize(incoming,cutoff);
+            if(seriesDay!=cutoff){seriesCache.Clear();seriesDay=cutoff;}
+            if(seriesCache.Count>=3)throw new InvalidDataException("AI_SERIES_UNIVERSE_LIMIT");
+            var frozen=incoming with{Bars=Array.AsReadOnly(incoming.Bars.ToArray())};seriesCache.Add(incoming.Instrument,frozen);return frozen;
+        }
+    }
+    internal async Task<NavalSeries> ReadSeriesAsync(OkxPublicMarketFeed feed,NavalInstrument spec,DateTimeOffset cutoff,CancellationToken ct)
+    {
+        await seriesLane.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            lock(sync)if(seriesDay==cutoff&&seriesCache.TryGetValue(spec.Instrument,out var current))return current;
+            return PinSeries(await feed.ReadSeriesAsync(spec,ct).ConfigureAwait(false),cutoff);
+        }
+        finally{seriesLane.Release();}
+    }
     internal OkxAdvisoryCoordinator(string root){this.root=root;foreach(string p in new[]{"BTC-EUR","ETH-EUR","SOL-EUR"})status[p]=new{instrument=p,state="MISSING",reason="AI_LOCAL_SETUP_REQUIRED"};}
     internal void Start(){lock(sync){if(!closed&&work==null)work=Task.Run(Run);}}
     internal void CancelAnalyses(){lock(sync)round?.Cancel();}
@@ -42,7 +66,7 @@ internal sealed class OkxAdvisoryCoordinator : IAsyncDisposable
                     {
                         if(!File.Exists(Path.Combine(root,"installed","installation.json"))){Set(pair,"MISSING","AI_LOCAL_SETUP_REQUIRED");continue;}
                         Set(pair,"REFRESHING","PUBLIC_ANALYSIS_BACKGROUND");
-                        var series=await feed.ReadSeriesAsync(new NavalInstrument(pair,pair.Split('-')[0],"EUR",.00000001m,.00000001m,.01m),cancellation.Token).ConfigureAwait(false);
+                        var series=await ReadSeriesAsync(feed,new NavalInstrument(pair,pair.Split('-')[0],"EUR",.00000001m,.00000001m,.01m),day,cancellation.Token).ConfigureAwait(false);
                         byte[] raw=OkxAdvisoryCanonicalData.Serialize(series,day);
                         string result=await RunCompanion(root,"refresh",raw,cancellation.Token).ConfigureAwait(false);
                         using var store=new WindowsOkxAdvisoryStore(Path.Combine(root,"reports"));using var reports=store.Acquire(pair,OkxAdvisorySnapshot.Hash(raw),day,DateTimeOffset.UtcNow);

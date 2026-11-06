@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,attempt TEXT NOT NULL,da
             if stored!= (attempt.day,attempt.pair,attempt.tool,attempt.deadline,attempt.digest,'reserved'):return Refusal('ATTEMPT_INACTIVE')
             now=self.clock()
             if now.strftime('%Y-%m-%d')!=attempt.day or now+timedelta(milliseconds=milliseconds)>datetime.fromisoformat(attempt.deadline):return Refusal('DEADLINE_EXHAUSTED')
+            if db.execute("SELECT 1 FROM requests WHERE day=? AND outcome IN ('failed','cancelled') LIMIT 1",(attempt.day,)).fetchone():return Refusal('GLOBAL_INFERENCE_HALTED')
             count,total=db.execute('SELECT COUNT(*),COALESCE(SUM(milliseconds),0) FROM requests WHERE day=?',(attempt.day,)).fetchone()
             if count>=48 or total+milliseconds>900000:return Refusal('DAILY_BUDGET_EXHAUSTED')
             row=RequestReservation(uuid.uuid4().hex,milliseconds)

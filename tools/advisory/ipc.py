@@ -14,7 +14,9 @@ def request_prompt(tool,payload):
     schema=payload['schema']
     if schema is not None and (type(schema) is not dict or payload['tools']):raise ValueError('structured schema refused')
     for message in payload['messages']:
-        if type(message) is not dict or set(message)-{'role','content','tool_calls','tool_call_id','name'} or message.get('role') not in ('system','human','ai','tool','user','assistant') or not isinstance(message.get('content'),(str,list)):raise ValueError('message schema')
+        if type(message) is not dict or set(message)-{'role','content','tool_calls','tool_call_id','name','reasoning_content'} or message.get('role') not in ('system','human','ai','tool','user','assistant') or not isinstance(message.get('content'),(str,list)):raise ValueError('message schema')
+        reasoning=message.get('reasoning_content')
+        if reasoning is not None and (type(reasoning)is not str or len(reasoning)>16000):raise ValueError('bounded native reasoning field required')
     formatting=('Return JSON matching this schema, no fences: '+json.dumps(schema)) if schema is not None else 'Return exactly JSON {"content":"analysis","tool_calls":[{"name":"offered name","args":{}}]}. Only offered read-only computational tools. Empty tool_calls for final prose.'
     prompt='Public-only advisory, execution forbidden. No shell/files/broker/auth/web tools. Exact EUR completed 1Dutc inputs; holdings unknown. Application JSON tool requests are NOT Hermes tools. '+formatting+'\n'+json.dumps(payload,ensure_ascii=True,allow_nan=False)
     if len(prompt)>MAX_PROMPT:raise ValueError('oversized public prompt')

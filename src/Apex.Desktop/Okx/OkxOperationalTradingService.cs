@@ -117,14 +117,15 @@ internal sealed partial class OkxOperationalTradingService : IAsyncDisposable,IN
             var state=session.ReadState();var baseline=state.NavalBroker!.Baseline;var definition=NavalOrdinaryCatalogPolicy.Definition(state.NavalBroker);
             var spec=definition.Catalog.SingleOrDefault(i=>i.Instrument==instrument);
             if(spec==null){EvaluationCode("SKIPPED_INELIGIBLE");return Refuse("INSTRUMENT_INELIGIBLE");}
-            var series=await feed.ReadSeriesAsync(spec,ct).ConfigureAwait(false);
-            var cutoff=new DateTimeOffset(clock.GetUtcNow().UtcDateTime.Date,TimeSpan.Zero);var hasLong=state.Naval!.Reservations.Any(r=>r.Fleet==fleet&&r.Intent.Instrument==instrument&&r.Inventory>0&&r.QuarantineMark==null);
+            var cutoff=new DateTimeOffset(clock.GetUtcNow().UtcDateTime.Date,TimeSpan.Zero);
+            var series=await (account.AdvisoryCoordinator is {} coordinator?coordinator.ReadSeriesAsync(feed,spec,cutoff,ct):feed.ReadSeriesAsync(spec,ct)).ConfigureAwait(false);
+            var hasLong=state.Naval!.Reservations.Any(r=>r.Fleet==fleet&&r.Intent.Instrument==instrument&&r.Inventory>0&&r.QuarantineMark==null);
             NavalSeries? btc=null;
             if(!hasLong)
             {
                 var btcSpec=definition.Catalog.SingleOrDefault(i=>i.BaseCurrency=="BTC"&&i.QuoteCurrency==spec.QuoteCurrency)??await BenchmarkAsync(spec,ct).ConfigureAwait(false);
                 if(btcSpec==null){EvaluationCode("SKIPPED_BTC_REFERENCE");return Refuse("CURRENT_BTC_REFERENCE_UNPROVEN");}
-                btc=spec==btcSpec?series:await feed.ReadSeriesAsync(btcSpec,ct).ConfigureAwait(false);
+                btc=spec==btcSpec?series:await (account.AdvisoryCoordinator is {} referenceCoordinator?referenceCoordinator.ReadSeriesAsync(feed,btcSpec,cutoff,ct):feed.ReadSeriesAsync(btcSpec,ct)).ConfigureAwait(false);
             }
             var request=new NavalEvaluationRequest(fleet,series,btc,cutoff,hasLong);var decision=new NavalD1Evaluator().Evaluate(request);
             Evaluated(decision.Action);evaluated=true;

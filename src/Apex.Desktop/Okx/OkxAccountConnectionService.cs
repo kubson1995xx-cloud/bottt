@@ -62,6 +62,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     internal string Status=>status;
     internal bool WindowsAdvisoryRequired=>runtime.IsWindowsOrdinary(binding);
     internal string AdvisoryReportRoot=>Path.Combine(runtime.AdvisoryRoot,"reports");
+    internal OkxAdvisoryCoordinator? AdvisoryCoordinator=>runtime.Advisory;
     internal NavalRiskResult RegisterConfirmedSignal(NavalEvaluationRequest request)=>session?.Coordinator.RegisterBrokerSignal(request)??new(NavalMutationStatus.Refused,"BROKER_REQUIRED",null,0);
     private OkxOperationalTradingService? trading;
     internal void RegisterTrading(OkxOperationalTradingService service){if(trading!=null)throw new InvalidOperationException("ONE_TRADING_LOOP_PER_ACCOUNT");trading=service;}

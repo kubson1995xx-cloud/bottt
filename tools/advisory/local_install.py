@@ -5,6 +5,11 @@ HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 from runtime_contract import PINS,RuntimeContract,sha256,child_environment,validate_contract,validate_platform
 from reports import atomic_write,encoded
+STAGE='bundle-verification'
+def checkpoint(name):
+ global STAGE
+ STAGE=name
+ print('AI_INSTALL_STAGE_'+name, file=sys.stderr,flush=True)
 
 def verify_bundle(root):
  root=Path(root);m=json.loads((root/'bundle.json').read_text(encoding='utf-8-sig'))
@@ -32,12 +37,13 @@ def cli(install,home,*args,timeout=60,quiet=True):
  if result.returncode:raise ValueError('supported Hermes CLI refused')
 
 def install(bundle,root):
+ checkpoint('platform')
  validate_platform(sys.platform)
  if sys.version_info[:3]!=(3,14,0):raise ValueError('exact Python required')
  bundle=Path(bundle).resolve();root=Path(root).absolute();verify_bundle(bundle)
  from store import StoreLease
  # Guard is the independently published self-contained source-linked native inspector.
- with_store=StoreLease(root,bundle/'ApexAdvisoryStoreGuard.exe')
+ checkpoint('native-root-admission');with_store=StoreLease(root,bundle/'ApexAdvisoryStoreGuard.exe')
  target=root/'installed'
  try:
   if target.exists():
@@ -45,26 +51,31 @@ def install(bundle,root):
    contract=RuntimeContract(**json.loads((target/'runtime-contract.json').read_text()));validate_contract(contract);return target
   with_store.directory(target);atomic_write(target/'pending.json',encoded({'Schema':'apex-advisory-install-pending-v1'}),store=with_store)
   # Venv launchers contain absolute paths: CREATE THEM AT FINAL LOCATION; never copy/rebase a venv.
-  shutil.copytree(bundle/'python-base',target/'python-base')
+  checkpoint('copy-pristine-resources');shutil.copytree(bundle/'python-base',target/'python-base')
   shutil.copytree(bundle/'sources',target/'sources');shutil.copytree(bundle/'bridge',target/'bridge')
   shutil.copyfile(bundle/'ApexAdvisoryStoreGuard.exe',target/'ApexAdvisoryStoreGuard.exe')
   rows={};base=target/'python-base/python.exe';home=root/'inference-home';with_store.directory(home)
   for name,pin in PINS.items():
+   checkpoint('create-'+name)
    source=target/'sources'/name;env=child_environment(home,base);venv=target/name/'env';venv.parent.mkdir()
    for key in ('TEMP','APPDATA','LOCALAPPDATA'):Path(env[key]).mkdir(parents=True,exist_ok=True)
    def run(args):
     r=subprocess.run([str(a) for a in args],cwd=target,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=600)
     if r.returncode:raise ValueError('offline pinned runtime install failed')
    run([base,'-I','-m','venv',venv]);python=venv/'Scripts/python.exe';lock=target/name/'requirements.lock';shutil.copyfile(bundle/'locks'/(name+'-windows-py314.lock'),lock)
-   run([python,'-I','-m','pip','--isolated','install','--no-index','--find-links',bundle/'wheels'/name,'--only-binary=:all:','--require-hashes','-r',lock]);run([python,'-I','-m','pip','check'])
+   checkpoint('offline-pip-'+name);run([python,'-I','-m','pip','--isolated','install','--no-index','--find-links',bundle/'wheels'/name,'--only-binary=:all:','--require-hashes','-r',lock]);run([python,'-I','-m','pip','check'])
    rows[name]={'source':str(source),'commit':pin['commit'],'python':str(python),'python_sha256':sha256(python),'prefix':str(venv),'lock':str(lock),'lock_sha256':sha256(lock)}
-  contract=RuntimeContract(rows);validate_contract(contract)
+  checkpoint('validate-installed-contract');contract=RuntimeContract(rows);validate_contract(contract)
   from dataclasses import asdict
   atomic_write(target/'runtime-contract.json',encoded(asdict(contract)),store=with_store)
-  for key,value in [('model.default','gpt-6.1-sol'),('model.provider','openai-codex'),('auth.adopt_external_logins','false'),('security.allow_lazy_installs','false'),('fallback_providers','[]'),('fallback_model','null')]:cli(target,home,'config','set',key,value)
+  for key,value in [('model.default','gpt-6.1-sol'),('model.provider','openai-codex'),('auth.adopt_external_logins','false'),('security.allow_lazy_installs','false'),('fallback_providers','[]'),('fallback_model','null')]:
+   checkpoint('supported-config-'+key);cli(target,home,'config','set',key,value)
+  checkpoint('native-final-scan');with_store.scan()
   atomic_write(target/'installation.json',encoded({'Schema':'apex-advisory-installed-v1','PythonSha256':sha256(target/'hermes/env/Scripts/python.exe'),'BridgeSha256':sha256(target/'bridge/local_companion.py'),'GuardSha256':sha256(target/'ApexAdvisoryStoreGuard.exe')}),store=with_store)
-  (target/'pending.json').unlink();with_store.scan();return target
+  (target/'pending.json').unlink();checkpoint('ready');return target
  finally:with_store.close()
 if __name__=='__main__':
  try:install(Path(sys.argv[1]),Path(sys.argv[2]));print('AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED')
- except Exception:print('AI_INSTALL_REFUSED_PARTIAL_PRESERVED');sys.exit(2)
+ except Exception as error:
+  print('AI_INSTALL_FAILURE_'+STAGE+'_'+type(error).__name__,file=sys.stderr,flush=True)
+  print('AI_INSTALL_REFUSED_PARTIAL_PRESERVED');sys.exit(2)

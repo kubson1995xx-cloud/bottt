@@ -55,19 +55,19 @@ public sealed partial class OkxConditionalTradingTests
         using var guard=Apex.Desktop.Services.WindowsPrivateData.Open(root,AppContext.BaseDirectory);
         foreach(var row in reports.Files){string path=System.IO.Path.Combine(root,pair,row.Key);System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);System.IO.File.WriteAllBytes(path,row.Value);}
     }
-    private sealed class AdviceFinalFence(IOkxSerializedDispatchFence inner,Action mutate):IOkxSerializedDispatchFence
+    private sealed class AdviceFinalFence(IOkxSerializedDispatchFence inner,Action<OkxPreparedRequest> mutate):IOkxSerializedDispatchFence
     {
         internal int Enters;
         public bool CanDispatch(OkxPreparedRequest r,DateTimeOffset now)=>false;
         public IDisposable? TryEnterDispatch(OkxPreparedRequest r,DateTimeOffset now)
-        {Enters++;mutate();return inner.TryEnterDispatch(r,now);}
+        {Enters++;mutate(r);return inner.TryEnterDispatch(r,now);}
     }
     [Theory][InlineData("none")][InlineData("generation")][InlineData("expiry")]
     [Trait("Gate","WindowsAdvisoryIntegration")]
     public async Task Windows_actual_post_signing_fence_has_send_control_and_mutations_are_NotSent(string mode)
     {
         AdviceFinalFence? fence=null;MultiFixture? current=null;
-        await using var fixture=await NativeAdvisoryFixture(x=>fence=new(x,()=>
+        await using var fixture=await NativeAdvisoryFixture(x=>fence=new(x,r=>
         {
             if(mode=="generation")
             {
@@ -75,7 +75,19 @@ public sealed partial class OkxConditionalTradingTests
                 var p=System.Text.Json.Nodes.JsonNode.Parse(System.IO.File.ReadAllText(pointer))!;p["Generation"]=new string('c',32);
                 System.IO.File.WriteAllText(pointer+".next",p.ToJsonString());System.IO.File.Move(pointer+".next",pointer,true);
             }
-            if(mode=="expiry")current!.F.Clock.Advance(TimeSpan.FromDays(1));
+            var prepared=typeof(OkxOperationalTradingService).GetMethod("PreparedAdmission",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!;
+            // Financial/quote/maxima guards remain valid at this reached post-signing fence.
+            // Expiry mutation changes only the report, never the shared financial clock.
+            if(mode=="expiry")
+            {
+                string folder=System.IO.Path.Combine(current!.F.Root,"advisory","reports","BTC-EUR");
+                string pointer=System.IO.Path.Combine(folder,"CURRENT.json");var p=System.Text.Json.Nodes.JsonNode.Parse(System.IO.File.ReadAllText(pointer))!;
+                string manifest=System.IO.Path.Combine(folder,"generations",p["Generation"]!.GetValue<string>(),"manifest.json");
+                var m=System.Text.Json.Nodes.JsonNode.Parse(System.IO.File.ReadAllText(manifest))!;m["ExpiresUtc"]=current.F.Clock.GetUtcNow().AddSeconds(-1).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'");
+                byte[] bytes=System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(m);System.IO.File.WriteAllBytes(manifest,bytes);p["ManifestSha256"]=OkxWindowsAdvisoryConsumerTests.Hash(bytes);
+                System.IO.File.WriteAllText(pointer+".next",p.ToJsonString());System.IO.File.Move(pointer+".next",pointer,true);
+            }
+            Assert.True((bool)prepared.Invoke(current!.Loop,new object[]{r})!,"Earlier private maxima/funding fence must remain valid after report-only mutation");
         }));current=fixture;
         await SeedSyntheticAdvice(fixture);int before=fixture.Peer.Posts;
         // All funding, sizing, quotes, private maxima, protection and durable Prepare must pass

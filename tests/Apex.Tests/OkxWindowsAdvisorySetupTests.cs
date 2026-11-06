@@ -25,6 +25,19 @@ public sealed class OkxWindowsAdvisorySetupTests
         // Keep only nonsecret identity/provenance, never the local credential owner or whole runtime profile.
         Console.WriteLine("NATIVE_AI_INSTALL_PASS offline=True relocatedVenv=True supportedMissingAuth=True existingDPAPIAndHistoryPreserved=True inference=False");
     }
+    [Fact]
+    public async Task Closed_setup_route_requires_operator_local_origin_and_no_executable_or_secret_payload()
+    {
+        await using var host=new NavalProductionHost();await host.Start();
+        foreach(string mutation in new[]{"reader","origin","header","extra","duplicate"})
+        {
+            using var request=host.Request("/api/naval/okx/setup-ai",mutation=="reader"?"read":"operator","POST");
+            if(mutation!="header")request.Headers.Add("X-Apex-Local","1");
+            if(mutation=="origin")request.Headers.Add("Origin","https://foreign.invalid");
+            request.Content=new System.Net.Http.StringContent(mutation=="extra"?"{\"commandId\":\"x\",\"executable\":\"evil\"}":mutation=="duplicate"?"{\"commandId\":\"x\",\"commandId\":\"y\"}":"{\"commandId\":\"x\"}",System.Text.Encoding.UTF8,"application/json");
+            Assert.Equal(mutation is "reader" or "origin" or "header"?System.Net.HttpStatusCode.Forbidden:System.Net.HttpStatusCode.BadRequest,(await host.Client.SendAsync(request)).StatusCode);
+        }
+    }
     [Fact][Trait("Gate","WindowsAdvisoryIntegration")]
     public async Task Cancelled_install_never_executes_or_touches_profile()
     {

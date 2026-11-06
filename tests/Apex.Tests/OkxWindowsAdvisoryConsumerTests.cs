@@ -64,6 +64,19 @@ public sealed class OkxWindowsAdvisoryConsumerTests
     {var r=new Reports{Mutate=(p,n)=>{if(p=="vibe-trading.json")n[key]=value;}};r.Build();Assert.False(r.Admits());}
     [Fact] public void Expiry_wrong_actual_data_and_tampered_native_refuse()
     {var r=new Reports();r.Build();Assert.False(r.Admits(Cutoff.AddDays(1)));Assert.False(r.Admits(digest:new string('c',64)));r.Files["generations/"+r.Generation+"/tradingagents-native.json"]=new byte[]{123,125};Assert.False(r.Admits());}
+    [Fact]
+    public void Production_daily_series_is_the_same_pinned_strategy_and_supervisor_input_not_rebased()
+    {
+        var type=typeof(OkxAdvisoryComparison).Assembly.GetType("Apex.Desktop.Okx.OkxAdvisoryCoordinator")!;
+        var pin=type.GetMethod("PinSeries",BindingFlags.Instance|BindingFlags.NonPublic);Assert.NotNull(pin);
+        var coordinator=Activator.CreateInstance(type,BindingFlags.Instance|BindingFlags.NonPublic,null,new object[]{"unused"},null)!;
+        var bars=Enumerable.Range(0,299).Select(i=>new Apex.Core.Naval.NavalBar(Cutoff.AddDays(i-299),100,102,99,101,1,true)).ToArray();
+        var first=new Apex.Core.Naval.NavalSeries("BTC-EUR","BTC","EUR","OKX EEA public /market/candles 1Dutc","trade",bars);
+        var frozen=(Apex.Core.Naval.NavalSeries)pin!.Invoke(coordinator,new object[]{first,Cutoff})!;
+        bars[0]=bars[0] with{Close=100};
+        var rolling=first with{Bars=bars.Skip(1).ToArray()};
+        var again=pin.Invoke(coordinator,new object[]{rolling,Cutoff});Assert.Same(frozen,again);Assert.Equal(299,frozen.Bars.Count);Assert.Equal(101,frozen.Bars[0].Close);
+    }
     [Fact] public void Traversal_generation_refuses_before_reader_path_access()
     {var r=new Reports{Mutate=(p,n)=>{if(p=="CURRENT.json")n["Generation"]="../../outside";}};r.Build();Assert.False(r.Admits());}
 }

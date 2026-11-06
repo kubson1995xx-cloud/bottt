@@ -42,6 +42,11 @@ class BudgetTests(unittest.TestCase):
         self.assertIsInstance(self.b.reserve_request(a,1000),Refusal)
         self.assertEqual(18000,self.b.usage('2026-11-06')['reserved_ms'])
         self.assertEqual(3,self.b.usage('2026-11-06')['observed_ms'])
+    def test_failed_inference_halts_shared_day_across_tools_pairs_and_restart(self):
+        a=self.attempt();r=self.b.reserve_request(a,25000);self.b.complete_request(r,20000,'failed');self.b.finish(a,'failed')
+        b=Budget(self.path,lambda:NOW);other=b.reserve('2026-11-06','ETH-EUR','tradingagents',NOW+timedelta(hours=1),'b'*64)
+        denied=b.reserve_request(other,60000);self.assertIsInstance(denied,Refusal);self.assertEqual('GLOBAL_INFERENCE_HALTED',denied.reason)
+        self.assertEqual(1,b.usage('2026-11-06')['supervised_requests'])
     def test_crash_restart_no_refund(self):
         p=subprocess.run([sys.executable,__file__,'crash',str(self.path)],capture_output=True,text=True,timeout=20)
         self.assertEqual(23,p.returncode,p.stderr);self.assertEqual('Reservation',p.stdout.strip())
