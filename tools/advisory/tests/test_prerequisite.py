@@ -104,6 +104,66 @@ class TransportTests(unittest.TestCase):
         self.assertFalse(check(SimpleNamespace(provider='other',code='codex_auth_missing',relogin_required=True)))
         self.assertFalse(check(RuntimeError('something else')))
 
+    def test_no_fallback_or_custom_transport_policy(self):
+        transport=self.transport()
+        check=getattr(transport,'check_policy',lambda c:c)
+        good={'model':{'default':'gpt-6.1-sol','provider':'openai-codex'},'fallback_providers':[],'fallback_model':None}
+        check(good)
+        for bad in [{**good,'fallback_providers':[{'provider':'other'}]}, {**good,'fallback_model':{'model':'other'}},
+                    {**good,'model':{**good['model'],'base_url':'http://other'}},
+                    {**good,'model':{**good['model'],'openai_runtime':'codex_app_server'}}]:
+            with self.assertRaises(ValueError): check(bad)
+
+    def test_canonical_request_exact_route_and_readback(self):
+        import asyncio
+        import types
+        from hermes_transport import request
+        calls=[]; views=[]; info=self.info()
+        class Client:
+            async def rpc(self,method,**kwargs):
+                calls.append((method,kwargs))
+                return {'stored_session_id':'synthetic-session','info':info}
+        client=Client()
+        class Connection:
+            async def __aenter__(self): return client
+            async def __aexit__(self,*args): pass
+        class View:
+            def __init__(self,client,snapshot,**kwargs): self.emitter=kwargs['emitter'];views.append(self)
+            async def run(self,prompt,oneshot):
+                print(json.dumps({'type':'system','subtype':'init','model':'gpt-6.1-sol'}))
+                print(json.dumps({'type':'result','exit_code':0,'error':None,'text':'synthetic RPC fixture'}))
+                return 0
+        modules={
+            'hermes_cli.config':types.SimpleNamespace(load_config=lambda:{'model':{'default':'gpt-6.1-sol','provider':'openai-codex'}}),
+            'hermes_cli.gateway_client':types.SimpleNamespace(connect_gateway=lambda:Connection()),
+            'hermes_cli.gateway_chat_view':types.SimpleNamespace(GatewayChatView=View),
+            'hermes_cli.stream_json':types.SimpleNamespace(StreamJsonEmitter=lambda **kw:None)}
+        with patch.dict(sys.modules,modules):
+            result=asyncio.run(request('synthetic public prompt',1))
+            self.assertEqual(result['text'],'synthetic RPC fixture')
+            self.assertEqual([c[0] for c in calls],['session.create','session.resume'])
+            create=calls[0][1]
+            for key,value in [('model','gpt-6.1-sol'),('provider','openai-codex'),('safe_mode',True),('toolsets',[]),('max_turns',1)]:
+                self.assertEqual(create[key],value)
+            self.assertTrue(views[0].unattended)
+            calls.clear();views.clear();info={**info,'provider':'wrong'}
+            with self.assertRaisesRegex(ValueError,'model/provider'): asyncio.run(request('synthetic public prompt',1))
+            self.assertEqual(len(views),0)
+            info=self.info(); calls.clear()
+            async def parked(*args,**kwargs): await asyncio.sleep(10)
+            async def cancelled():
+                task=asyncio.create_task(request('synthetic public prompt',1))
+                await asyncio.sleep(.01);task.cancel()
+                with self.assertRaises(asyncio.CancelledError): await task
+            with patch.object(View,'run',parked): asyncio.run(cancelled())
+            self.assertEqual([c[0] for c in calls],['session.create','session.interrupt'])
+
+    def test_request_bounds_before_gateway_import(self):
+        import asyncio
+        from hermes_transport import request
+        for prompt,seconds in [('',1),('x',0),('x',float('nan')),('x',121),('x',True)]:
+            with self.assertRaises(ValueError): asyncio.run(request(prompt,seconds))
+
     def test_tool_events_and_error_stream_are_refused(self):
         parse = getattr(self.transport(), 'parse_stream', lambda text: {})
         valid = [{'type':'system','subtype':'init','model':'gpt-6.1-sol'},

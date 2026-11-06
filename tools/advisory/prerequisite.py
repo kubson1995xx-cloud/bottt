@@ -45,7 +45,7 @@ def probe_runtime(contract: RuntimeContract, evidence_root=None) -> ProbeResult:
             (Path(env['HERMES_HOME'])/'config.yaml').write_text(
                 'model:\n  default: gpt-6.1-sol\n  provider: openai-codex\n'
                 'auth:\n  adopt_external_logins: false\nsecurity:\n  allow_lazy_installs: false\n'
-                'fallback_models: []\n', encoding='utf-8')
+                'fallback_providers: []\nfallback_model: null\n', encoding='utf-8')
         output = root/'evidence'/(name+'-probe.json')
         command = [row['python'],'-I',str(Path(__file__).with_name('native_probe.py')),
                    name,str(root/'closure/runtime-contract.json'),str(output)]

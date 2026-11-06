@@ -65,7 +65,7 @@ def prepare(root):
         manifest=tomllib.loads((source/'pyproject.toml').read_text(encoding='utf-8'))
         deps=manifest['project']['dependencies']
         if name=='vibe-trading':
-            deps=[d for d in deps if re.split(r'[<>=!\[; @]',d,1)[0].lower() in VIBE_DEPS]
+            deps=[d for d in deps if re.split(r'[<>=!\[; @]',d,maxsplit=1)[0].lower() in VIBE_DEPS]
             if len(deps)!=len(VIBE_DEPS): raise ValueError('Vibe dependency manifest drift')
         dependencies=build/'dependencies.in';dependencies.write_text('\n'.join(deps)+'\n')
         runtime=root/'closure'/name/'env'
@@ -82,7 +82,7 @@ def prepare(root):
         else:
             command([python,'-m','pip','--isolated','install','--dry-run','--ignore-installed','--report',report,
                      '--only-binary=:all:','--index-url','https://pypi.org/simple','-r',dependencies],build/'resolution.log',env=env,cwd=home)
-            resolved=json.loads(report.read_text())['install']; lines=[]
+            resolved=json.loads(report.read_text(encoding='utf-8'))['install']; lines=[]
             for package in resolved:
                 download=package['download_info'];url=download['url'];parsed=urllib.parse.urlsplit(url)
                 filename=Path(urllib.parse.unquote(parsed.path)).name

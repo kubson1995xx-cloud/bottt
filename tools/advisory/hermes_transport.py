@@ -13,6 +13,19 @@ import uuid
 from runtime_contract import MODEL, PROVIDER
 
 
+def check_policy(config):
+    model=config.get('model',{})
+    if not isinstance(model,dict) or (model.get('default'),model.get('provider'))!=(MODEL,PROVIDER):
+        raise ValueError('unsupported inference route configuration')
+    if config.get('fallback_providers') or config.get('fallback_model'):
+        raise ValueError('fallback forbidden')
+    if model.get('base_url') or model.get('api_key') or model.get('openai_runtime') not in (None,'','codex_responses'):
+        raise ValueError('custom transport forbidden')
+    if MODEL in config.get('model_aliases',{}) or MODEL in model.get('aliases',{}):
+        raise ValueError('model alias forbidden')
+    return True
+
+
 def check_route(info):
     if info.get('model') != MODEL or info.get('provider') != PROVIDER:
         raise ValueError('model/provider mismatch')
@@ -52,6 +65,8 @@ async def request(prompt: str, seconds: float) -> dict:
     if isinstance(seconds, bool) or not isinstance(seconds,(int,float)) or not math.isfinite(seconds) or not 0 < seconds <= 120:
         raise ValueError('bounded timeout required')
     # Lazy canonical imports: offline validation cannot accidentally bootstrap.
+    from hermes_cli.config import load_config
+    check_policy(load_config())
     from hermes_cli.gateway_client import connect_gateway
     from hermes_cli.gateway_chat_view import GatewayChatView
     from hermes_cli.stream_json import StreamJsonEmitter
@@ -73,7 +88,7 @@ async def request(prompt: str, seconds: float) -> dict:
                 view.unattended = True
                 try:
                     code = await asyncio.wait_for(view.run(prompt, oneshot=True), seconds)
-                except asyncio.TimeoutError:
+                except (asyncio.TimeoutError, asyncio.CancelledError):
                     await asyncio.wait_for(client.rpc('session.interrupt', session_id=session), 3)
                     raise
             after = await client.rpc('session.resume', session_id=session)

@@ -24,6 +24,6 @@ try {
   [ordered]@{exitCode=$tests;phase=$Phase} | ConvertTo-Json | Set-Content (Join-Path $root 'evidence/unit-exit.json')
   if ($tests -ne 0) { throw "Python behavioral tests failed: $tests" }
   if ($Phase -eq 'red') { throw 'RED unexpectedly passed; do not claim calibration' }
-  & python tools/advisory/native_setup.py --root $root *> (Join-Path $root 'evidence/setup.log')
+  & python -X utf8 tools/advisory/native_setup.py --root $root *> (Join-Path $root 'evidence/setup.log')
   if ($LASTEXITCODE -ne 0) { throw 'Native runtime/setup prerequisite failed; retained setup.log' }
 } finally { Pop-Location }
