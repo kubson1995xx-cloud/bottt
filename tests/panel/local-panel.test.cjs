@@ -58,10 +58,28 @@ test('disconnected local owner: "—" values with explicit disconnected state an
  assert.match(p.text('markets'),/BTC \/ EUR—brak wyceny/);assert.ok(!/\d/.test(p.text('markets').replace(/BTC|ETH|SOL|EUR|\//g,'')),'no market numbers without data');
  assert.match(p.text('state-pill'),/STOP/);
 });
-test('stale account observation is flagged even when connected',async()=>{
- const old=new Date(Date.now()-10*60000).toISOString();
- const p=setup(serve(status({accounts:[acct({connected:true,localOrdinary:true})]}),dashboard({connected:true,localOrdinary:true,snapshotState:'CURRENT',snapshot:snapshot({observation:{origin:'OPERATIONAL',captureUtc:old,requestUtc:old,receiveUtc:old,economicUtc:old,evidenceAvailable:true,historyAvailable:true}}),limits,equity,marks})));await tick();
- assert.match(p.text('data-notice'),/Dane nieaktualne/);
+test('stale, future or missing observation clocks show no financial values even when connected',async()=>{
+ for(const at of [new Date(Date.now()-10*60000).toISOString(),new Date(Date.now()+60000).toISOString(),null,'invalid']){
+  const p=setup(serve(status({accounts:[acct({connected:true,localOrdinary:true})]}),dashboard({connected:true,localOrdinary:true,snapshotState:'CURRENT',snapshot:snapshot({observation:{origin:'OPERATIONAL',captureUtc:at,requestUtc:at,receiveUtc:at,economicUtc:at,evidenceAvailable:true,historyAvailable:true}}),limits,equity,marks})));await tick();
+  assert.match(p.text('data-notice'),/Dane nieaktualne/);
+  for(const id of metricIds)assert.equal(p.text(id),'—',id);
+  assert.equal(p.q('#chart-wrap').hasAttribute('hidden'),true);
+  assert.equal(p.q('#daily-card').hasAttribute('hidden'),true);
+  assert.ok(!p.text('history-rows').includes('110'));
+  assert.ok(!p.text('markets').includes('111 EUR'));
+ }
+});
+test('incomplete history cannot invent realized P&L from unmatched sales or unsupported fees',async()=>{
+ for(const h of [
+  {...snapshot().history,truncated:true},
+  {total:1,truncated:false,items:[snapshot().history.items[1]]},
+  {total:2,truncated:false,items:[{...snapshot().history.items[1],quantity:1},snapshot().history.items[2]]},
+  {total:2,truncated:false,items:[{...snapshot().history.items[1],feeCurrency:'BTC'},snapshot().history.items[2]]}
+ ]){
+  const p=setup(serve(status(),dashboard({connected:true,snapshotState:'CURRENT',snapshot:snapshot({history:h}),limits,equity,marks})));await tick();
+  assert.equal(p.q('#chart-wrap').hasAttribute('hidden'),true);
+  assert.equal(p.text('chart-value'),'—');
+ }
 });
 test('real snapshot renders capital, account balance, excluded holdings, positions, history, chart and marks',async()=>{
  const p=setup(serve(status({keepAwake:true,accounts:[acct({connected:true,localOrdinary:true,mode:'RUNNING',armed:true,instruments:['BTC-EUR','ETH-EUR','SOL-EUR']})]}),dashboard({connected:true,localOrdinary:true,snapshotState:'CURRENT',snapshot:snapshot(),limits,equity,marks})));await tick();

@@ -28,7 +28,11 @@
   function setText(id, text, stale) { const n = $(id); n.textContent = text; n.classList.toggle('stale', !!stale); }
 
   function account() { return (status?.accounts || []).find(a => a.environment === 'OkxDemo' && !a.readOnly) || null; }
-  function current() { return healthy && dash?.snapshotState === 'CURRENT' && dash.snapshot?.connected === true ? dash.snapshot : null; }
+  function staleObservation() {
+    const at = Date.parse(dash?.snapshot?.observation?.captureUtc || '');
+    return !Number.isFinite(at) || Date.now() < at || Date.now() - at > 120000;
+  }
+  function current() { return healthy && dash?.snapshotState === 'CURRENT' && dash.snapshot?.connected === true && !staleObservation() ? dash.snapshot : null; }
 
   function icon(k) { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true'); const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', ICONS[k]); s.append(p); return s; }
   function buildNav() {
@@ -98,18 +102,22 @@
     const quote = dash?.limits?.quote || 'EUR';
     for (const f of h.items) {
       const gross = f.quantity * f.price, base = f.instrument.split('-')[0], feeQuote = f.feeCurrency === quote;
-      const net = feeQuote ? (f.reduction ? signed(gross - f.fee) : signed(-(gross + f.fee))) : (f.reduction ? signed(gross) + ' · −' + fmt(f.fee) + ' ' + f.feeCurrency : signed(-gross) + ' · ' + fmt(f.quantity - f.fee) + ' ' + base + ' netto');
+      const net = feeQuote ? (f.reduction ? signed(gross - f.fee) : signed(-(gross + f.fee))) : (f.reduction ? signed(gross) + ' · −' + fmt(f.fee) + ' ' + f.feeCurrency : signed(-gross) + ' · ' + fmt(f.quantity - (f.feeCurrency === base ? f.fee : 0)) + ' ' + base + ' netto' + (f.feeCurrency === base ? '' : ' · −' + fmt(f.fee) + ' ' + f.feeCurrency));
       const tr = el('tr'); [time(f.tradeUtc), f.instrument, f.reduction ? 'SPRZEDAŻ' : 'KUPNO', fmt(f.quantity), fmt(f.price, 4), fmt(gross, 2, 2), fmt(f.fee) + ' ' + f.feeCurrency, net].forEach((c, n) => { const td = el('td', null, c); if (n === 1) td.className = 'symbol-cell'; tr.append(td); }); body.append(tr);
     }
   }
   // Realized result from visible own fills only (average cost per instrument). No series is invented.
   function realizedSeries(snap) {
     const quote = dash?.limits?.quote || 'EUR', book = {}, points = []; let total = 0, skipped = 0;
+    const incomplete = () => ({points: [], skipped: 1, truncated: !!snap?.history?.truncated});
+    if (snap?.history?.truncated) return incomplete();
     for (const f of [...(snap?.history?.items || [])].reverse()) {
       const b = book[f.instrument] ||= {qty: 0, cost: 0}; const base = f.instrument.split('-')[0];
+      if (f.feeCurrency !== quote && f.feeCurrency !== base) return incomplete();
       if (!f.reduction) { b.qty += f.quantity - (f.feeCurrency === base ? f.fee : 0); b.cost += f.quantity * f.price + (f.feeCurrency === quote ? f.fee : 0); continue; }
-      if (b.qty <= 0) { skipped++; continue; }
-      const sold = Math.min(f.quantity, b.qty), avg = b.cost / b.qty, proceeds = f.quantity * f.price - (f.feeCurrency === quote ? f.fee : 0);
+      const sold = f.quantity + (f.feeCurrency === base ? f.fee : 0);
+      if (b.qty <= 0 || sold > b.qty) return incomplete();
+      const avg = b.cost / b.qty, proceeds = f.quantity * f.price - (f.feeCurrency === quote ? f.fee : 0);
       total += proceeds - avg * sold; b.cost -= avg * sold; b.qty -= sold; points.push({at: f.tradeUtc, v: total});
     }
     return {points, skipped, truncated: !!snap?.history?.truncated};
@@ -118,7 +126,7 @@
     const snap = current(), svg = $('equity-chart'); svg.replaceChildren();
     const s = snap ? realizedSeries(snap) : {points: [], skipped: 0, truncated: false};
     hide($('chart-wrap'), s.points.length === 0); hide($('chart-empty'), s.points.length > 0);
-    $('chart-empty').textContent = snap ? 'Brak zamkniętych transakcji bota — wykres pojawi się po pierwszym wyjściu.' : '— Brak połączenia z OKX (Observe): wynik niedostępny.';
+    $('chart-empty').textContent = snap ? s.skipped ? '— Niepełna historia lub nieobsługiwana waluta opłaty — wynik nie jest obliczany.' : 'Brak zamkniętych transakcji bota — wykres pojawi się po pierwszym wyjściu.' : '— Brak aktualnych danych z OKX (Observe): wynik niedostępny.';
     $('chart-note').textContent = s.points.length ? 'Szacunek z widocznych własnych transakcji (średni koszt, opłaty uwzględnione); nie jest wyceną portfela.' + (s.truncated || s.skipped ? ' Okno transakcji jest niepełne — wynik może być niepełny.' : '') : '';
     if (!s.points.length) { setText('chart-value', '—', true); $('chart-change').textContent = ''; return; }
     const last = s.points.at(-1).v; setText('chart-value', signed(last)); $('chart-change').textContent = s.points.length + ' zamkn. wyjść'; $('chart-change').className = last >= 0 ? 'pos' : 'neg';
@@ -201,8 +209,8 @@
   function renderNotice() {
     const n = $('data-notice'), snap = current(); let text = '', klass = 'notice';
     if (!healthy) { text = 'Brak potwierdzonego statusu — wszystkie wartości pokazane jako „—”. Sprawdź, czy okno APEX działa.'; klass += ' err'; }
+    else if (dash?.snapshotState === 'CURRENT' && dash.snapshot?.connected && staleObservation()) { text = 'Dane nieaktualne: brak poprawnego, świeżego czasu odczytu konta — wartości ukryte („—”).'; klass += ' warn'; }
     else if (!snap) { text = dash?.snapshotState === 'CHANGED_RETRY' ? 'Stan bota zmienia się — odczyt zostanie ponowiony.' : 'Bot nie jest połączony z OKX (Observe) — saldo, pozycje i historia niedostępne („—”). Wykonaj kroki w „Sterowanie botem”.'; klass += ' warn'; }
-    else { const cap = snap.observation?.captureUtc ? new Date(snap.observation.captureUtc) : null; if (!cap || Date.now() - cap > 120000) { text = 'Dane nieaktualne: ostatni odczyt konta ' + (cap ? clock(cap) : '—') + '.'; klass += ' warn'; } }
     n.className = klass; n.textContent = text; hide(n, !text);
   }
   function render() { collectEvents(); renderNotice(); renderCards(); drawChart(); positionRows(false); positionRows(true); historyRows(); renderMarkets(); renderStrategy(); renderSettings(); renderControls(); renderFeed(); }

@@ -157,11 +157,22 @@ public sealed partial class OkxConditionalTradingTests
         await using var app=builder.Build();OkxControlEndpoints.Map(app,control);await app.StartAsync();
         string url=app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
         string dir=Path.Combine(temp,"controller-windows-source","screens");Directory.CreateDirectory(dir);
+        using(var http=new System.Net.Http.HttpClient())
+        {
+            string html=await http.GetStringAsync(url+"/local/");Assert.Contains("id=\"state-pill\"",html);
+            Assert.Contains("function renderControls",await http.GetStringAsync(url+"/local-panel.js"));
+        }
         await using var cdp=await MiniCdp.Start(Path.Combine(temp,"edge-"+Guid.NewGuid().ToString("N")));string sid=await cdp.NewPage();
         await cdp.Send("Emulation.setDeviceMetricsOverride",new{width=1440,height=1350,deviceScaleFactor=1,mobile=false},sid);
         await cdp.Send("Page.navigate",new{url=url+"/local/#dashboard"},sid);
         string ready="(document.getElementById('state-pill')?.textContent||'').includes("+JsonSerializer.Serialize(expected)+")&&document.getElementById('data-notice').hidden&&document.getElementById('capital-cash').textContent!=='—'";
-        if(!await cdp.Until(sid,ready,30))Assert.Fail("Rendered panel did not show "+expected+": "+await cdp.Text(sid,"document.getElementById('state-pill').textContent+' | '+document.getElementById('data-notice').textContent+' | '+document.getElementById('capital-cash').textContent"));
+        if(!await cdp.Until(sid,ready,30))
+        {
+            string diagnostic=await cdp.Text(sid,"JSON.stringify({url:location.href,ready:document.readyState,title:document.title,state:document.getElementById('state-pill')?.textContent,notice:document.getElementById('data-notice')?.textContent,capital:document.getElementById('capital-cash')?.textContent,body:document.body?.innerText.slice(0,1200)})");
+            File.WriteAllText(Path.Combine(dir,"native-"+label+"-failure.json"),diagnostic);
+            var image=await cdp.Send("Page.captureScreenshot",new{format="png"},sid);File.WriteAllBytes(Path.Combine(dir,"native-"+label+"-failure.png"),Convert.FromBase64String(image.GetProperty("data").GetString()!));
+            Assert.Fail("Rendered panel did not show "+expected+": "+diagnostic);
+        }
         string dom=await cdp.Text(sid,"document.documentElement.outerHTML");Assert.DoesNotContain("USDT",dom);Assert.DoesNotContain("Prototyp",dom);
         foreach(string view in views)
         {
