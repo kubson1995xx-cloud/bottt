@@ -18,6 +18,7 @@ Ta wersja handluje **wyłącznie na OKX DEMO** (cash SPOT: BTC-EUR, ETH-EUR, SOL
 1. Rozpakuj **cały** plik ZIP do zwykłego folderu (np. `C:\APEX`). Nie uruchamiaj programu z wnętrza ZIP.
 2. Uruchom **`Uruchom-APEX.cmd`** (otwiera klasyczne okno konsoli APEX). Możesz też uruchomić `APEX-Desktop\ApexDesktop.exe`.
 3. Otworzy się panel w przeglądarce (adres `127.0.0.1`). **Okno konsoli APEX musi pozostać otwarte** — to ono jest botem.
+4. **Uwaga na układ panelu:** u góry strony jest sekcja „Silnik VPS — sterowanie” — dotyczy tylko wersji z VPS, w trybie lokalnym jej nie używaj. Bot lokalny obsługujesz w sekcji **„OKX — lokalny operator”** niżej na tej samej stronie (przewiń w dół); tam jest napis „Tryb: …” i wszystkie przyciski z tej instrukcji.
 
 ## 3. Pierwsze uruchomienie: nowy lokalny bot (tylko raz)
 1. W panelu widzisz „Tryb: nie wybrano”. Kliknij **„Nowy lokalny bot na tym PC (DEMO, pierwsze uruchomienie)”**.
