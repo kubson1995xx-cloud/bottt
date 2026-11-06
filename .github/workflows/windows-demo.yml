@@ -702,14 +702,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.427'
-      - name: I1 native storage RED or full advisory GREEN, no upstream reinstall
+      - name: Consolidated advisory native production boundary
         shell: pwsh
-        run: ./tools/windows/Test-WindowsAdvisoryStore.ps1 -Phase '${{ inputs.phase }}'
+        run: ./tools/windows/Test-WindowsAdvisoryIntegration.ps1 -Phase '${{ inputs.phase }}'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Windows-Advisory-Store-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/windows-advisory-store/
+          name: Windows-Advisory-Integration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-advisory-integration/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
