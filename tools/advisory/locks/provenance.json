@@ -16,5 +16,14 @@
     "installedReportSha256": "036253b5ce90dc2c6fcb36fd6a7570519c1fff4f9af44b155712c168a92edfb6",
     "artifact": "Windows-Advisory-Prerequisite-42234145199-1",
     "scope": "genuine native PyPI wheel-only resolution and --no-index --require-hashes install; pip check passed; import/computation not yet run"
+  },
+  "hermes": {
+    "nativeRun": 42235586689,
+    "sourceCommit": "61dc7f3005d57ad05d09852116655018c6f8af25",
+    "artifact": "Windows-Advisory-Prerequisite-42235586689-1",
+    "lockSha256": "50e57dfe7fb3723d6d575016d00d4f5fe494f074b2e016ce1623446e76621802",
+    "resolutionReportSha256": "8a1e7ce7b1247c7bdc0be7b569440cd1b4e1939de2c4b04b133af3c23ab3949a",
+    "installedReportSha256": "4e55c2eafcddbe568681cff31c3844d3f08a1c1311c02957d392490d7ab2ca46",
+    "scope": "tool-free Hermes core minus browser-harness only; native offline install and pip check passed; bootstrap not yet run"
   }
 }

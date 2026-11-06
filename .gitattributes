@@ -7,3 +7,7 @@
 /docs/third-party/react-three-fiber-9.6.1-LICENSE.txt text eol=lf
 # Original reviewer proof bytes are causal fixtures, including JSON whitespace.
 /tests/package/publish-scalar-originals/*.json -text
+/tools/advisory/** text eol=lf
+/tools/windows/Test-WindowsAdvisoryPrerequisite.ps1 text eol=lf
+/tools/windows/advisory-prerequisite-job.yml text eol=lf
+/tools/windows/publish_windows_advisory_overlay.py text eol=lf

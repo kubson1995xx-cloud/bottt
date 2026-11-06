@@ -58,6 +58,15 @@ def main():
         if workflow.count(marker)!=1: raise ValueError('owned job drift')
         workflow=workflow.split(marker)[0]+'\n'+(REPO/'tools/windows/advisory-prerequisite-job.yml').read_text()
     add(WORKFLOW,workflow.encode())
+    # Preserve accepted remote attributes and add LF only for owned new inputs.
+    attributes=run('git','show',base+':.gitattributes')+'\n'
+    owned_attributes=['/tools/advisory/** text eol=lf',
+                      '/tools/windows/Test-WindowsAdvisoryPrerequisite.ps1 text eol=lf',
+                      '/tools/windows/advisory-prerequisite-job.yml text eol=lf',
+                      '/tools/windows/publish_windows_advisory_overlay.py text eol=lf']
+    for line in owned_attributes:
+        if line not in attributes.splitlines(): attributes+=line+'\n'
+    add('.gitattributes',attributes.encode())
     tree=run('git','write-tree',env=env)
     commit=run('git','commit-tree',tree,'-p',base,input=('test: Windows advisory prerequisite '+args.lane+'\n').encode())
     record={'base':base,'commit':commit,'tree':tree,'overlays':rows,'phase':args.phase,'mainHead':head,'mainIndexSha256':index_hash}
