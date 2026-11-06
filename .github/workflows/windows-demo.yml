@@ -604,7 +604,7 @@ jobs:
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./tools/windows/Test-ControllerCompositionReplay.ps1 -Phase acceptance-completion-default
+        run: ./tools/windows/Test-WindowsLocalExecution.ps1 -Phase '${{ inputs.phase }}'
       - name: Retain source-gate evidence and verify unchanged source
         if: always()
         shell: powershell
@@ -617,7 +617,7 @@ jobs:
           $changed=@($before | Where-Object { (Get-FileHash -LiteralPath (Join-Path $env:GITHUB_WORKSPACE $_.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $_.sha256 })
           & python (Join-Path $env:GITHUB_WORKSPACE 'tools/windows/verify_controller_composition_source.py') $e $env:GITHUB_WORKSPACE
           $sourceCode=$LASTEXITCODE
-          $binaryMap=@(Get-ChildItem -LiteralPath $e -File -Recurse | Where-Object { $_.FullName -match '[\\/](composition-closure)[\\/]' } | ForEach-Object { [ordered]@{path=$_.FullName.Substring($e.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
+          $binaryMap=@(Get-ChildItem -LiteralPath $e -File -Recurse | Where-Object { $_.FullName -match '[\\/](composition-closure|local-closure)[\\/]' } | ForEach-Object { [ordered]@{path=$_.FullName.Substring($e.Length+1);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} })
           $binaryMap | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $e 'binary-closures.json')
           if ($sourceCode -ne 0) { throw 'Unadmitted source changed during native execution' }
       - uses: actions/upload-artifact@v4

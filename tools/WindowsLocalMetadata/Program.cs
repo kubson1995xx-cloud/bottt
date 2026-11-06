@@ -1,0 +1,13 @@
+using System;
+using System.IO;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
+using System.Text.Json;
+using var stream=File.OpenRead(args[0]);using var pe=new PEReader(stream);
+var metadata=pe.GetMetadataReader();int token=pe.PEHeaders.CorHeader!.EntryPointTokenOrRelativeVirtualAddress;
+var method=metadata.GetMethodDefinition((MethodDefinitionHandle)MetadataTokens.Handle(token));
+var type=metadata.GetTypeDefinition(method.GetDeclaringType());
+string owner=metadata.GetString(type.Namespace)+"."+metadata.GetString(type.Name),name=metadata.GetString(method.Name);
+Console.WriteLine(JsonSerializer.Serialize(new{owner,name,token}));
+return owner=="Apex.Tests.SyntheticHostEntry"&&name=="Main"?0:91;
