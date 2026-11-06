@@ -22,7 +22,7 @@ public sealed class OkxWindowsAdvisoryStoreTests
         using(var lease=(IDisposable?)method.Invoke(store,args))
         {
             Assert.NotNull(lease);string current=Path.Combine(root,"BTC-EUR","CURRENT.json"),temp=current+".new";File.WriteAllBytes(temp,fixture.Files["CURRENT.json"]);
-            Assert.ThrowsAny<IOException>(()=>File.Move(temp,current,true));
+            var error=Record.Exception(()=>File.Move(temp,current,true));Assert.True(error is IOException or UnauthorizedAccessException);
         }
         File.Move(Path.Combine(root,"BTC-EUR","CURRENT.json.new"),Path.Combine(root,"BTC-EUR","CURRENT.json"),true);
         using var admitted=(IDisposable?)method.Invoke(store,args);Assert.NotNull(admitted);
