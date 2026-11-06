@@ -1,0 +1,43 @@
+{
+  "vibe-trading": {
+    "repository": "https://github.com/HKUDS/Vibe-Trading.git",
+    "commit": "8172827ec537146920e112a9952e8e7e063e218b",
+    "tree": "7af87f0a8f78c40204252ec91b461f7dc202b251",
+    "files": {
+      "pyproject.toml": "e83f2abc072fe95e9f9afe9a46c3e6c87d9875f15966fb2323b95cebce6e745f",
+      "LICENSE": "b155549b8bc4e43a9b96b2288dbf4eb1bc0c697f14b3f5ec6b36bf64d5a18679",
+      "NOTICE": "a898503c041b27d1046748144666a1309b6b25fa4d75a1b0a06ce2f8acd3b07c",
+      "agent/src/tools/technical_indicator_tool.py": "8137efa6180f6152e0e95686ae8e43c557ac8002753127346961c0d145dab48a",
+      "agent/src/quantlib/risk.py": "702e1f56e5f3f69701c086597c51ab81ecb578bb05fe7e68a3e65a60840d3f37",
+      "agent/src/agent/loop.py": "5f2e3f03c68646876405453465c6819a883a49f8ad3e5c3b74d7314aed695c02",
+      "agent/src/agent/grounding/identity.py": "5c4fe858f53baa1b713e27a32ef995d729e31f1471d99e5395fbc83d2ad633a9"
+    }
+  },
+  "tradingagents": {
+    "repository": "https://github.com/TauricResearch/TradingAgents.git",
+    "commit": "9fa1196fffbcfd9de5146d2dd2869df84ab99838",
+    "tree": "21197e6c24b0d5fa01076530a3f0c37863b5c555",
+    "files": {
+      "pyproject.toml": "670cd3552c10b5dbb2ea4c420336c7b58af455c27b1a65599727ecbefb4f375c",
+      "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "tradingagents/graph/setup.py": "a2790ebd549ff082e114b43201997ac29b7e58d00e643536d4ced8e949c855be",
+      "tradingagents/dataflows/vendors/yahoo/snapshot.py": "a121a38ebe9d3b7f749f0cf7ab736e72d7355a9e3d259aa8018acc897109e9a7"
+    }
+  },
+  "hermes": {
+    "repository": "https://github.com/NousResearch/hermes-agent.git",
+    "commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "tree": "675b4cea2d2aef80460f07235b0e27e6c6922743",
+    "files": {
+      "pyproject.toml": "b1531ab4807bc64441a3fe3f56d6c166dcf0074e3510e061a1377c4d05d3ca24",
+      "setup.py": "23b2453c734661af9b4d9998171dc794e555c22f554d44cd4a625ea74d348d5d",
+      "LICENSE": "821556e6336796450ab852d375117b48a4887e71d255794fd6318d99982a5ab6",
+      "uv.lock": "5057a8a3cbc6d2b1f2059d66e27ffa43f447021f89779599dca416056574c064",
+      "hermes_cli/gateway_client.py": "4edfde2b7c5f62cf8bdf6aabc9fc39371153a2ea5f93e6910025f41090f32a21",
+      "hermes_cli/gateway_chat_view.py": "6819082e1a3ef2aff40c86b24465f8da1ab83af6a5c91d464dbab845e72d77b8",
+      "hermes_cli/stream_json.py": "16587f970f9ffac9a5a9b111c14d42293458cd7e0a391081e5f15f20383fab04",
+      "gateway/runtime_bootstrap_windows.py": "7f39768e31e6082714304b32d75c175e3534d23d07aa1b1b31ac9e645668e32f",
+      "hermes_cli/gateway_runtime.py": "0fa5838763c1f0f3798591d9b42acf1127f0595c1a38efb6d9027902cb791c59"
+    }
+  }
+}

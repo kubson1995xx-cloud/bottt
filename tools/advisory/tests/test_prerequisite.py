@@ -67,6 +67,68 @@ class ContractTests(unittest.TestCase):
                 if mutation == 'route': contract.provider = 'other'
                 with self.assertRaisesRegex(ValueError, reason): self.validate(contract, pins)
 
+    def test_no_secret_or_environment_inheritance(self):
+        sentinel = {'OKX_SECRET':'not-a-real-secret', 'OPENAI_API_KEY':'not-a-real-key',
+                    'PYTHONPATH':'untrusted', 'HERMES_TUI_GATEWAY_URL':'ws://untrusted',
+                    'HTTP_PROXY':'http://untrusted', 'PATH':'untrusted', 'HOME':'untrusted'}
+        builder = getattr(runtime, 'child_environment', lambda *a: dict(os.environ))
+        with patch.dict(os.environ, sentinel), tempfile.TemporaryDirectory() as d:
+            env = builder(Path(d), Path(sys.executable))
+            for key in ('OKX_SECRET','OPENAI_API_KEY','PYTHONPATH','HERMES_TUI_GATEWAY_URL','HTTP_PROXY'):
+                self.assertNotIn(key, env)
+            self.assertNotEqual(env['PATH'], 'untrusted')
+            self.assertEqual(env['HOME'], str(Path(d).resolve()))
+            self.assertIn('SYSTEMROOT', env)
+
+
+class TransportTests(unittest.TestCase):
+    def transport(self):
+        from types import SimpleNamespace
+        try: import hermes_transport; return hermes_transport
+        except ModuleNotFoundError: return SimpleNamespace()
+
+    def info(self):
+        return {'model':'gpt-6.1-sol','provider':'openai-codex','enabled_toolsets':[], 'tool_count':0,
+                'launch_request':{'safe_mode':True,'toolsets':[],'max_turns':1}}
+
+    def test_unsupported_route_or_tool_authority_refused(self):
+        check = getattr(self.transport(), 'check_route', lambda info: info)
+        self.assertEqual(check(self.info())['model'], 'gpt-6.1-sol')
+        for key, value in [('model','wrong'),('provider','wrong'),('enabled_toolsets',['terminal']),('tool_count',1),('launch_request',{})]:
+            with self.subTest(key=key), self.assertRaises(ValueError): check({**self.info(), key:value})
+
+    def test_missing_auth_is_typed_and_no_other_failure_is_auth_pass(self):
+        from types import SimpleNamespace
+        check = getattr(self.transport(), 'is_missing_auth', lambda error: False)
+        self.assertTrue(check(SimpleNamespace(provider='openai-codex',code='codex_auth_missing',relogin_required=True)))
+        self.assertFalse(check(SimpleNamespace(provider='other',code='codex_auth_missing',relogin_required=True)))
+        self.assertFalse(check(RuntimeError('something else')))
+
+    def test_tool_events_and_error_stream_are_refused(self):
+        parse = getattr(self.transport(), 'parse_stream', lambda text: {})
+        valid = [{'type':'system','subtype':'init','model':'gpt-6.1-sol'},
+                 {'type':'result','exit_code':0,'text':'synthetic transport fixture','error':None}]
+        for extra in [{'type':'tool_use'},{'type':'tool_result'}]:
+            with self.assertRaises(ValueError): parse('\n'.join(map(json.dumps,valid+[extra])))
+        for change in [{'exit_code':1},{'error':'unavailable'},{'text':''}]:
+            with self.assertRaises(ValueError): parse('\n'.join(map(json.dumps,[valid[0],{**valid[1],**change}])))
+        self.assertEqual(parse('\n'.join(map(json.dumps,valid)))['text'],'synthetic transport fixture')
+
+class ProbeTests(unittest.TestCase):
+    def test_observed_runtime_and_computation_must_match_contract(self):
+        try: import prerequisite; validator = prerequisite.validate_observation
+        except ModuleNotFoundError: validator = lambda *a: None
+        expected = {'python':str(Path(sys.executable).resolve()),'prefix':'isolated-vibe'}
+        observation = {'python':expected['python'],'prefix':expected['prefix'],'platform':'win32',
+                       'python_version':[3,14,0],'import_ok':True,'computation_ok':True,
+                       'pandas_version':'2.3.3','synthetic_public_input':True}
+        validator('vibe-trading', expected, observation)
+        for key, value in [('python','wrong'),('prefix','wrong'),('platform','linux'),('python_version',[3,11,0]),
+                           ('import_ok',False),('computation_ok',False),('pandas_version','3.0.6'),('synthetic_public_input',False)]:
+            with self.subTest(key=key), self.assertRaises(ValueError): validator('vibe-trading',expected,{**observation,key:value})
+        validator('tradingagents', expected, {**observation,'pandas_version':'3.0.6'})
+        with self.assertRaises(ValueError): validator('tradingagents',expected,observation)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

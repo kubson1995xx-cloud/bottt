@@ -1,0 +1,13 @@
+{
+  "vibe_identity.py": {
+    "source": "/home/ubuntu/apex-tools/advisory-bridge/compat/vibe_identity.py",
+    "sha256": "9eb39b21b01975d2487afb53b7fef4c7038d455d4efddd5085267c1a45ba07a7",
+    "upstream": "HKUDS/Vibe-Trading",
+    "commit": "8172827ec537146920e112a9952e8e7e063e218b",
+    "original": "agent/src/agent/grounding/identity.py",
+    "original_sha256": "5c4fe858f53baa1b713e27a32ef995d729e31f1471d99e5395fbc83d2ad633a9",
+    "delta": "Existing reviewed isolated compatibility only: add BTC/ETH/SOL-EUR recognition, venue crypto_or_fx and asset crypto. No installed source edits."
+  },
+  "transport": "Adapted from advisory-bridge/hermes_transport.py and bridge.py check_route/parse_stream; canonical source dependencies pinned in upstream-pins.json.",
+  "computations": "Adapter loader seams reused from advisory-bridge/worker.py; synthetic public fixture replaces campaign data; native calculations unchanged."
+}
