@@ -41,7 +41,7 @@ class StoreLease:
             root.mkdir(parents=True,exist_ok=True,mode=0o700)
             self.scan()
     def _line(self):
-        q=queue.Queue();threading.Thread(target=lambda:q.put(self.process.stdout.readline(128)),daemon=True).start()
+        q=queue.Queue();threading.Thread(target=lambda:q.put(self.process.stdout.readline(256)),daemon=True).start()
         try:return q.get(timeout=self.timeout)
         except queue.Empty:self.close();raise StoreRefused('native store admission timeout')
     def _command(self,operation,path):
@@ -51,7 +51,12 @@ class StoreLease:
             except OSError:raise StoreRefused('native store lease unavailable') from None
             line=self._line().decode('ascii',errors='replace').strip()
             if line=='MISSING':raise FileNotFoundError(str(path))
-            if not line.startswith('OK '):raise StoreRefused('unsafe advisory descendant refused')
+            if not line.startswith('OK '):
+                import re
+                diagnostic=line.removeprefix('REFUSED ')
+                if re.fullmatch(r'(Open|Validate|Kind|Links) (HOST_DATA_[A-Z_]+|[A-Za-z]+Exception) [a-f0-9]{64} -?[01] [0-9]{1,10} -?[0-9]{1,11}',diagnostic):
+                    raise StoreRefused('unsafe advisory descendant refused: '+diagnostic.replace(' ','-'))
+                raise StoreRefused('unsafe advisory descendant refused')
             return int(line[3:])
     def _bound(self,path):
         p=Path(path)

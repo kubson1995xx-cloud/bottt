@@ -17,7 +17,20 @@ public sealed class OkxWindowsAdvisorySetupTests
         await using var profile=new OperationalPeer(native:true); // Synthetic DPAPI only; no Connect/broker call.
         string history=Path.Combine(profile.Root,"retained-history.txt");File.WriteAllText(history,"synthetic existing v2 history");
         var before=Directory.GetFiles(profile.Root,"*",SearchOption.AllDirectories).ToDictionary(p=>p,p=>File.ReadAllBytes(p));
-        Assert.Equal("AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED",await WindowsOkxAdvisorySetup.InstallAsync(root,bundle,default));
+        string installed=await WindowsOkxAdvisorySetup.InstallAsync(root,bundle,default);
+        if(installed!="AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED")
+        {
+            Console.WriteLine(installed);
+            var digest=System.Text.RegularExpressions.Regex.Match(installed,"-[a-f0-9]{64}-");
+            if(digest.Success)
+                foreach(string path in Directory.EnumerateFileSystemEntries(root,"*",SearchOption.AllDirectories))
+                {
+                    string relative=Path.GetRelativePath(root,path).Replace('\\','/');
+                    string hash=Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(relative))).ToLowerInvariant();
+                    if(hash==digest.Value.Trim('-'))Console.WriteLine("NATIVE_SYNTHETIC_INSTALL_REJECTED_PATH "+relative);
+                }
+        }
+        Assert.Equal("AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED",installed);
         Assert.Equal("AI_LOCAL_SIGN_IN_REQUIRED",await OkxAdvisoryCoordinator.RunCompanion(root,"status",null,default));
         string contract=File.ReadAllText(Path.Combine(root,"installed","runtime-contract.json"));Assert.DoesNotContain("D:\\a\\",contract);Assert.Contains(root.Replace("\\","\\\\"),contract);
         Assert.Equal("AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED",await WindowsOkxAdvisorySetup.InstallAsync(root,bundle,default));

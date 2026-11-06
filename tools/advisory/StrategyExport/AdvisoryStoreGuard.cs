@@ -13,6 +13,21 @@ internal sealed class AdvisoryStoreGuard : IDisposable
     readonly Dictionary<string, WindowsPathSecurity.NativeObject> directories = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<int, WindowsPathSecurity.NativeObject> files = new();
     int sequence;
+    string faultPath = "", faultStage = "None";
+    int actualDirectory = -1;
+    uint links;
+    internal string Diagnostic(Exception error)
+    {
+        string relative = Path.GetRelativePath(root, faultPath.Length == 0 ? root : faultPath).Replace('\\', '/');
+        string digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(relative))).ToLowerInvariant();
+        string reason = error is WindowsDataException w && w.Message is WindowsPathSecurity.PathInvalid or WindowsPathSecurity.PermissionsInvalid or WindowsPathSecurity.Unavailable ? error.Message : error.GetType().Name;
+        return $"{faultStage} {reason} {digest} {actualDirectory} {links} {error.HResult}";
+    }
+    WindowsPathSecurity.NativeObject Open(string path)
+    {
+        faultPath = path; faultStage = "Open"; actualDirectory = -1; links = 0;
+        return WindowsPathSecurity.Open(path);
+    }
     internal AdvisoryStoreGuard(string root) { this.root = root; }
     string Bound(string path)
     {
@@ -21,20 +36,24 @@ internal sealed class AdvisoryStoreGuard : IDisposable
             throw new WindowsDataException(WindowsPathSecurity.PathInvalid);
         return full;
     }
-    static void Check(WindowsPathSecurity.NativeObject h, bool directory)
+    void Check(WindowsPathSecurity.NativeObject h, bool directory)
     {
+        actualDirectory = h.IsDirectory ? 1 : 0;
+        bool information = GetFileInformationByHandle(h.Handle, out var info); links = information ? info.Links : 0;
+        faultStage = "Validate";
         WindowsPathSecurity.Validate(h, true);
-        if (h.IsDirectory != directory || (!directory && (!GetFileInformationByHandle(h.Handle, out var info) || info.Links != 1)))
+        faultStage = h.IsDirectory != directory ? "Kind" : "Links";
+        if (h.IsDirectory != directory || (!directory && (!information || info.Links != 1)))
             throw new WindowsDataException(WindowsPathSecurity.PathInvalid);
     }
     internal void Directory(string path)
     {
         path = Bound(path);
-        if (directories.TryGetValue(path, out var held)) { Check(held, true); return; }
+        if (directories.TryGetValue(path, out var held)) { faultPath = path; Check(held, true); return; }
         if (path != root) Directory(Path.GetDirectoryName(path)!);
         // GetAttributes sees a dangling reparse too; never treat it as absent.
         if (!Exists(path)) WindowsPathSecurity.CreatePrivateDirectory(path);
-        var h = WindowsPathSecurity.Open(path);
+        var h = Open(path);
         try { Check(h, true); directories.Add(path, h); }
         catch { h.Dispose(); throw; }
     }
@@ -50,7 +69,7 @@ internal sealed class AdvisoryStoreGuard : IDisposable
         foreach (var child in System.IO.Directory.EnumerateFileSystemEntries(path))
         {
             // Open before classifying: never recurse through a junction/reparse.
-            using var h = WindowsPathSecurity.Open(child);
+            using var h = Open(child);
             bool fileName = Path.GetFileName(child) is "CURRENT.json" or "refresh.lock" or "budget.sqlite" or "budget.sqlite-journal" or "budget.sqlite-wal" or "budget.sqlite-shm" || child.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
             bool directoryName = Path.GetFileName(child) is "BTC-EUR" or "ETH-EUR" or "SOL-EUR" or "attempts" or "generations";
             Check(h, fileName ? false : directoryName ? true : h.IsDirectory);
@@ -63,7 +82,7 @@ internal sealed class AdvisoryStoreGuard : IDisposable
         if (create && !Exists(path))
             using (new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite)) { }
         if (!Exists(path)) throw new FileNotFoundException();
-        var h = WindowsPathSecurity.Open(path);
+        var h = Open(path);
         try { Check(h, false); int id = ++sequence; files.Add(id, h); return id; }
         catch { h.Dispose(); throw; }
     }
@@ -91,7 +110,7 @@ internal sealed class AdvisoryStoreGuard : IDisposable
                 Console.WriteLine("OK " + id);
             }
             catch (FileNotFoundException) { Console.WriteLine("MISSING"); }
-            catch (Exception) { Console.WriteLine("REFUSED"); }
+            catch (Exception error) { Console.WriteLine("REFUSED " + Diagnostic(error)); }
             Console.Out.Flush();
         }
     }

@@ -80,5 +80,7 @@ if __name__=='__main__':
  try:install(Path(sys.argv[1]),Path(sys.argv[2]));print('AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED')
  except Exception as error:
   kind={'native store admission timeout':'NativeScanTimeout','unsafe advisory descendant refused':'UnsafeDescendant','native store lease unavailable':'NativeLeaseUnavailable'}.get(str(error),type(error).__name__)
+  diagnostic=str(error).removeprefix('unsafe advisory descendant refused: ')
+  if re.fullmatch(r'(Open|Validate|Kind|Links)-(HOST_DATA_[A-Z_]+|[A-Za-z]+Exception)-[a-f0-9]{64}--?[01]-[0-9]{1,10}--?[0-9]{1,11}',diagnostic):kind='UnsafeDescendant-'+diagnostic
   print('AI_INSTALL_FAILURE_'+STAGE+'_'+kind,file=sys.stderr,flush=True)
   print('AI_INSTALL_REFUSED_PARTIAL_PRESERVED');sys.exit(2)

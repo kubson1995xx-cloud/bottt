@@ -6,7 +6,7 @@ if(args[0]=="--guard")
  if(!OperatingSystem.IsWindows())throw new Exception("native Windows required");
  string path=Path.GetFullPath(args[1]);
  if(!Path.IsPathFullyQualified(args[1]))throw new Exception("absolute store required");
- var leases=new List<Apex.Desktop.Services.WindowsPathSecurity.NativeObject>();int stage=0;
+ var leases=new List<Apex.Desktop.Services.WindowsPathSecurity.NativeObject>();int stage=0;AdvisoryStoreGuard? descendants=null;
  try
  {
   var parent=new DirectoryInfo(Path.GetDirectoryName(path)!);
@@ -15,12 +15,12 @@ if(args[0]=="--guard")
   stage=100;
   if(!Directory.Exists(path))Apex.Desktop.Services.WindowsPathSecurity.CreatePrivateDirectory(path);
   var root=Apex.Desktop.Services.WindowsPathSecurity.Open(path);leases.Add(root);Apex.Desktop.Services.WindowsPathSecurity.Validate(root,true);
-  using var descendants=new AdvisoryStoreGuard(path);
+  descendants=new AdvisoryStoreGuard(path);
   stage=101;descendants.Scan(path); // Complete existing-tree preflight BEFORE Python opens SQLite.
   descendants.Serve();
  }
- catch(Apex.Desktop.Services.WindowsDataException error){Console.WriteLine($"ADVISORY_STORE_REFUSED {stage} {error.Message}");Console.Out.Flush();}
- finally{foreach(var lease in leases)lease.Dispose();}
+ catch(Apex.Desktop.Services.WindowsDataException error){Console.WriteLine($"ADVISORY_STORE_REFUSED {stage} {error.Message}");if(descendants!=null)Console.Error.WriteLine("ADVISORY_SCAN_FAULT "+descendants.Diagnostic(error));Console.Out.Flush();}
+ finally{descendants?.Dispose();foreach(var lease in leases)lease.Dispose();}
  return;
 }
 var cutoff=DateTimeOffset.Parse("2026-11-06T00:00:00Z");
