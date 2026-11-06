@@ -104,10 +104,10 @@ public sealed class LocalPackagedTests
             IntPtr form=IntPtr.Zero;
             await WindowsTestHost.Until(()=>Task.FromResult((form=Window("APEX — lokalny bot: klucz OKX DEMO"))!=IntPtr.Zero),"Native DEMO key form missing");
             Assert.Contains("BEZ Withdraw",Children(form));Assert.Contains("Klucze LIVE są odrzucane",Children(form));
-            stage="LIVE_KEY";Fill(form,LiveKey,Secret,Pass);Enter(form);
+            stage="LIVE_KEY";FillMasked(form,LiveKey,Secret,Pass);Enter(form);
             await WindowsTestHost.Until(()=>Task.FromResult(Text(GetDlgItem(form,91)).StartsWith("LOCAL_DEMO_KEYS_REFUSED_",StringComparison.Ordinal)),"LIVE key not refused in the native form");
             string liveRefusal=Text(GetDlgItem(form,91));Assert.False(Directory.Exists(Path.Combine(root,"okx")));
-            stage="DEMO_KEY";Fill(form,DemoKey,Secret,Pass);Enter(form);
+            stage="DEMO_KEY";FillMasked(form,DemoKey,Secret,Pass);Enter(form);
             IntPtr confirm=IntPtr.Zero;
             await WindowsTestHost.Until(()=>Task.FromResult((confirm=Window("APEX — potwierdź nowego lokalnego bota"))!=IntPtr.Zero),"Polish confirmation dialog missing");
             stage="CONFIRM_TEXT";string text="";
@@ -157,7 +157,10 @@ public sealed class LocalPackagedTests
         }
         finally{if(Directory.Exists(root))Directory.Delete(root,true);if(Directory.Exists(root+"-browser"))Directory.Delete(root+"-browser",true);}
     }
-    private static void Fill(IntPtr w,params string[] values){for(int i=0;i<values.Length;i++){SendText(GetDlgItem(w,100+i),0xC,IntPtr.Zero,values[i]);Assert.Equal(values[i],Text(GetDlgItem(w,100+i)));}}
+    // Masked (ES_PASSWORD) fields cannot be read cross-process by design; the product's response proves receipt.
+    private static void Fill(IntPtr w,params string[] values)=>Fill(w,true,values);
+    private static void FillMasked(IntPtr w,params string[] values)=>Fill(w,false,values);
+    private static void Fill(IntPtr w,bool readBack,string[] values){for(int i=0;i<values.Length;i++){SendText(GetDlgItem(w,100+i),0xC,IntPtr.Zero,values[i]);if(readBack)Assert.Equal(values[i],Text(GetDlgItem(w,100+i)));}}
     private static IntPtr Window(string title)
     {
         var pids=Process.GetProcessesByName("ApexDesktop").Select(p=>(uint)p.Id).ToHashSet();IntPtr found=IntPtr.Zero;
