@@ -88,7 +88,7 @@ internal sealed class OkxAccountConnectionService : IAsyncDisposable,IOkxObserva
     internal static OkxAccountConnectionService Create(OkxNavalRuntime runtime,string root,OkxScopeBinding binding)
     {
         OkxAccountConnectionService? service=null;
-        var provider=new WindowsOkxApprovalProvider(()=>service?.original);
+        IOkxProtectedBaselineProvider provider=runtime.IsWindowsOrdinary(binding)?new WindowsOkxOrdinaryApprovalProvider(()=>service):new WindowsOkxApprovalProvider(()=>service?.original);
         service=new(runtime,root,binding,provider,TimeProvider.System,OkxExecutionObservationClient.Create,OkxObservationStream.Create,()=>OkxNavalStore.OpenNative(root,binding));
         return service;
     }

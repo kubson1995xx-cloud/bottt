@@ -16,6 +16,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     internal const string ProductionBlocker="ACCOUNT_CONFIGURATION_REQUIRED";
     private readonly OkxNavalRuntime runtime;
     private readonly ConfigStore config;
+    private readonly Func<OkxAccountConnectionService,OkxOperationalTradingService> tradingFactory;
     private readonly SemaphoreSlim actionLane=new(1,1);
     private readonly ConcurrentDictionary<string,Entry> entries=new(StringComparer.Ordinal);
     private readonly object sync=new();
@@ -36,7 +37,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
         internal CancellationTokenSource? LoopCancellation;
         internal Task? Loop;
     }
-    internal OkxOperatorControl(OkxNavalRuntime runtime,ConfigStore config){this.runtime=runtime;this.config=config;if(OperatingSystem.IsWindows())foreach(var a in new WindowsOkxReadStore(config.DataDir).List())readAccounts.TryAdd(a.ScopeId,a);}
+    internal OkxOperatorControl(OkxNavalRuntime runtime,ConfigStore config,Func<OkxAccountConnectionService,OkxOperationalTradingService>? tradingFactory=null){this.runtime=runtime;this.config=config;this.tradingFactory=tradingFactory??(a=>OkxOperationalTradingService.Create(a));if(OperatingSystem.IsWindows())foreach(var a in new WindowsOkxReadStore(config.DataDir).List())readAccounts.TryAdd(a.ScopeId,a);}
     internal object ReadStatus()=>new {mode=entries.Values.Any(e=>e.Trading?.ReadStatus().Mode=="RUNNING")?"RUNNING":"STOP",productionProfileApproved=entries.Values.Any(e=>e.Trading?.ReadStatus().ProductionProfileApproved==true),productionBlocker=entries.Count==0?ProductionBlocker:null,conditionalPolicyAvailable=true,
         nativeAvailable=OperatingSystem.IsWindows()&&Environment.UserInteractive,lastResult=last,enrollmentStage,unboundStoreState=WindowsOkxProvisioning.PassiveUnboundState(config),
         requirements=new[]{"Dedykowany cash SPOT ≤1x, bez pożyczek; feeType=0: kupno fee w base, sprzedaż w quote; feeType=1: quote. Rzeczywiste fee i inventory netto są wiążące.","FOK z żądanym TP i SL; ochrona warunkowa po fill, możliwy brak ochrony i niechroniona reszta po anulowaniu", "Osobne uzbrojenie i START; STOP nie oznacza sprzedaży", "Katalog prywatny, świeże referencje USD/USDT do limitów; prywatny test DEMO pozostaje lokalnym działaniem użytkownika"},
@@ -173,7 +174,7 @@ internal sealed class OkxOperatorControl : IAsyncDisposable
     private void StartScheduler(Entry entry)
     {
         if(entry.Trading!=null)return;
-        entry.Trading=OkxOperationalTradingService.Create(entry.Account);
+        entry.Trading=tradingFactory(entry.Account);
         entry.LoopCancellation=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         entry.Loop=Schedule(entry,entry.LoopCancellation.Token);
     }
