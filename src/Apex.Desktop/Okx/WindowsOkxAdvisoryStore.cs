@@ -57,7 +57,7 @@ internal sealed class WindowsOkxAdvisoryStore : IDisposable
                 var snapshot=OkxAdvisorySnapshot.Read(Read,instrument,digest,cutoff,now);
                 return new(snapshot,files);
             }
-            catch(Exception e) when(e is IOException or UnauthorizedAccessException or WindowsDataException or JsonException or ArgumentException or InvalidOperationException or KeyNotFoundException)
+            catch(Exception e) when(e is InvalidDataException or IOException or UnauthorizedAccessException or WindowsDataException or JsonException or ArgumentException or InvalidOperationException or KeyNotFoundException)
             {foreach(var f in files)f.Dispose();return null;}
         }
     }

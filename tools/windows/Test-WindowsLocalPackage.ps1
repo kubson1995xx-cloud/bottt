@@ -77,7 +77,7 @@ try {
   Copy-Item (Join-Path $repo 'tests/Apex.Tests/bin/Release/net8.0') (Join-Path $e 'advisory-tested-closure') -Recurse
   $old=$ErrorActionPreference
   try{$ErrorActionPreference='Continue';& dotnet test $advisoryProject -c Release --no-build --filter 'Gate=WindowsAdvisoryInstaller|Gate=WindowsAdvisoryIntegration|Gate=WindowsLocalExecution|FullyQualifiedName~OkxWindowsAdvisoryConsumerTests' --logger 'trx;LogFileName=advisory-native.trx' --results-directory $e -- xUnit.ParallelizeTestCollections=false *> (Join-Path $e 'advisory-native-tests.log');$advisoryCode=$LASTEXITCODE}finally{$ErrorActionPreference=$old}
-  if($advisoryCode -ne 0){throw 'Native extracted-resource installer/admission/lifecycle failed'}
+  # Continue independent extracted-EXE/UI acceptance even when setup refuses; retain both gates.
  }
  # Runner-only synthetic OKX DEMO endpoint (never shipped): trusted test root + hosts redirect.
  Copy-Item $hosts $hostsBackup
@@ -98,6 +98,7 @@ try {
  if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $zipHash){throw 'ZIP changed during native execution'}
  [ordered]@{zipSha256=$zipHash;exeSha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant();zipBytes=(Get-Item $zip).Length;extractedTestsExit=$code;extractedTests=(Read-ApexTestCounts (Join-Path $e 'extracted-local.trx'));actualExtractedExe=$true;syntheticOkxLoopback=$true;secureDesktopStartTestedOnExe=$false;brokerTested=$false;windows11Tested=$false}|ConvertTo-Json -Depth 4|Set-Content (Join-Path $e 'package-summary.json')
  if($code -ne 0){throw 'Extracted-EXE tests failed; ZIP and TRX retained'}
+ if($env:APEX_ADVISORY_PRIOR -and $advisoryCode -ne 0){throw 'Native extracted-resource installer/admission/lifecycle failed; independent EXE proof retained'}
 }
 finally{
  Pop-Location

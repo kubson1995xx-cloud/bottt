@@ -27,7 +27,7 @@ internal sealed partial class OkxOperationalTradingService
             if(!lease.Snapshot.AllowsEntry){advisoryEntryCode="AI_ENTRY_VETO_DUAL_BUY_REQUIRED";return false;}
             entryAdvice=new(SessionId,decision,digest,cutoff,lease.Snapshot);advisoryEntryCode="DUAL_BUY_CURRENT_ENTRY_CANDIDATE";return true;
         }
-        catch(Exception e) when(e is IOException or WindowsDataException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException)
+        catch(Exception e) when(e is InvalidDataException or IOException or WindowsDataException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException)
         {advisoryEntryCode="AI_ENTRY_VETO_STORE_OR_DATA_UNAVAILABLE";return false;}
     }
     private void BindAdvice(string decision,string intent,OkxPreparedRequest request)

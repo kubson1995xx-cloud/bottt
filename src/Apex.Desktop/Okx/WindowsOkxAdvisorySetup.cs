@@ -49,12 +49,36 @@ internal static class WindowsOkxAdvisorySetup
             Visit(bundle);names.Add("bundle.json");if(!actual.SetEquals(names))return "AI_BUNDLE_UNLISTED_FILES";
         }
         var start=OkxAdvisoryCoordinator.StartInfo(Path.Combine(bundle,"python-base","python.exe"),control);start.ArgumentList.Add("-B");start.ArgumentList.Add("-I");start.ArgumentList.Add(Path.Combine(bundle,"bridge","local_install.py"));start.ArgumentList.Add(bundle);start.ArgumentList.Add(root);
+        start.RedirectStandardError=true;
         using var process=new Process{StartInfo=start};process.Start();
+        string stage="START";
+        async Task CaptureStage()
+        {
+            var buffer=new char[256];var line=new System.Text.StringBuilder(256);int count=0,total=0,n;bool overflow=false;
+            while((n=await process.StandardError.ReadAsync(buffer.AsMemory()).ConfigureAwait(false))>0)
+            {
+                total+=n;if(total>65536){if(!process.HasExited)process.Kill(true);return;}
+                for(int i=0;i<n;i++)
+                {
+                    char c=buffer[i];if(c=='\r')continue;
+                    if(c=='\n')
+                    {
+                        string text=line.ToString();line.Clear();
+                        if(!overflow&&++count<=64&&System.Text.RegularExpressions.Regex.IsMatch(text,"\\AAI_INSTALL_(?:STAGE|FAILURE)_[A-Za-z0-9_.-]{1,180}\\z")){stage=text;Console.WriteLine(text);}overflow=false;
+                    }
+                    else if(line.Length<256)line.Append(c);else overflow=true;
+                }
+            }
+        }
+        Task stages=CaptureStage();
         try
         {
             process.StandardInput.Close();using var limit=new CancellationTokenSource(TimeSpan.FromMinutes(20));using var linked=CancellationTokenSource.CreateLinkedTokenSource(ct,limit.Token);
-            string? line=await process.StandardOutput.ReadLineAsync(linked.Token).ConfigureAwait(false);await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
-            return process.ExitCode==0&&line=="AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED"?line:"AI_INSTALL_REFUSED_PARTIAL_PRESERVED";
+            char[] output=new char[257];int used=0,read;
+            while(used<output.Length&&(read=await process.StandardOutput.ReadAsync(output.AsMemory(used),linked.Token).ConfigureAwait(false))>0)used+=read;
+            if(used==output.Length){process.Kill(true);return "AI_INSTALL_IPC_REFUSED_PARTIAL_PRESERVED";}
+            string line=new string(output,0,used).Trim();await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);await stages.ConfigureAwait(false);
+            return process.ExitCode==0&&line=="AI_INSTALLED_LOCAL_SIGN_IN_REQUIRED"?line:"AI_INSTALL_REFUSED_PARTIAL_PRESERVED_"+stage;
         }
         finally{if(!process.HasExited){process.Kill(true);await process.WaitForExitAsync().ConfigureAwait(false);}}
     }
