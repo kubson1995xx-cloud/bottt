@@ -1,0 +1,63 @@
+name: Windows advisory budget accounting
+on:
+  push:
+    branches: [apex-demo/controller-windows-admission-20261105]
+    paths:
+      - 'tools/advisory/budget.py'
+      - 'tools/advisory/supervisor.py'
+      - 'tools/advisory/tests/test_budget*.py'
+      - 'tools/advisory/tests/test_supervisor_settlement.py'
+      - '.github/workflows/windows-advisory-budget.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  accounting:
+    if: github.ref == 'refs/heads/apex-demo/controller-windows-admission-20261105'
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.0'
+          architecture: x64
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.427'
+      - name: Source-bound SQLite and Supervisor accounting only, no upstream reinstall or model calls
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $e=Join-Path $env:RUNNER_TEMP 'windows-advisory-budget'
+          New-Item -ItemType Directory -Path $e | Out-Null
+          $os=Get-CimInstance Win32_OperatingSystem
+          [ordered]@{source=(& git rev-parse HEAD);os=$os.Caption;osBuild=$os.BuildNumber;python=(& python --version);genuineInference=$false;upstreamInstall=$false;brokerCalls=$false} | ConvertTo-Json | Set-Content (Join-Path $e 'environment.json')
+          $source=Join-Path $e 'source'
+          $files=@(Get-ChildItem tools/advisory -File -Recurse | Where-Object {$_.FullName -notmatch '[\\/](bin|obj|__pycache__)[\\/]'})
+          $map=@($files | ForEach-Object {$rel=[IO.Path]::GetRelativePath($env:GITHUB_WORKSPACE,$_.FullName);$out=Join-Path $source $rel;New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null;Copy-Item $_.FullName $out;[ordered]@{path=$rel;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}})
+          $map | ConvertTo-Json | Set-Content (Join-Path $e 'input-map.json')
+          # Existing native store helper only: no upstream dependency installation,
+          # graph/financial test repetition, package build, login or inference.
+          & dotnet build tools/advisory/StrategyExport/StrategyExport.csproj -p:NuGetAudit=false *> (Join-Path $e 'guard-build.log')
+          if($LASTEXITCODE -ne 0){throw 'native store helper build failed'}
+          Copy-Item tools/advisory/StrategyExport/bin/Debug/net8.0 (Join-Path $e 'guard-closure') -Recurse
+          & python -m unittest discover -s tools/advisory/tests -p 'test_budget*.py' -v *> (Join-Path $e 'budget-tests.log')
+          $budget=$LASTEXITCODE
+          & python -m unittest discover -s tools/advisory/tests -p test_supervisor_settlement.py -v *> (Join-Path $e 'supervisor-tests.log')
+          $supervisor=$LASTEXITCODE
+          & python -m unittest discover -s tools/advisory/tests -p test_store_retained_graph.py -v *> (Join-Path $e 'historical-migration-tests.log')
+          $historical=$LASTEXITCODE
+          $changed=@($map | Where-Object {(Get-FileHash (Join-Path $env:GITHUB_WORKSPACE $_.path) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $_.sha256})
+          [ordered]@{budgetExit=$budget;supervisorExit=$supervisor;historicalExit=$historical;changedInputs=$changed.Count;modelCalls=0} | ConvertTo-Json | Set-Content (Join-Path $e 'result.json')
+          if($budget -ne 0 -or $supervisor -ne 0 -or $historical -ne 0 -or $changed.Count -ne 0){throw 'native accounting gate failed'}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-Advisory-Budget-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-advisory-budget/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

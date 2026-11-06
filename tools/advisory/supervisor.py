@@ -92,7 +92,7 @@ class Supervisor:
             reservation=self.budget.reserve_request(attempt,self.request_ms)
             if isinstance(reservation,Refusal):raise ValueError(reservation.reason)
             atomic_write(work/(reservation.id+'-request.json'),encoded({'payload':payload,'promptSha256':dataset_digest(prompt.encode()),'reserved_ms':reservation.milliseconds,'inference':'fixture' if self.fixture else 'genuine'}),store=self.store_lease)
-            started=time.monotonic();outcome='failed'
+            started=time.monotonic_ns();outcome='failed'
             try:
                 response=self.inference(tool,payload,prompt,reservation.milliseconds/1000)
                 if self.cancel.is_set():raise ValueError('analysis cancelled')
@@ -102,7 +102,16 @@ class Supervisor:
                 reply=parse_reply(response['text'],payload['tools'],payload['schema'])
                 atomic_write(work/(reservation.id+'-response.json'),encoded(response),store=self.store_lease)
                 outcome='ok';return {'reply':reply,'tokens':response.get('tokens') or {}}
-            finally:self.budget.complete_request(reservation,int((time.monotonic()-started)*1000),outcome)
+            finally:
+                # Integer monotonic duration, round UP; never release a partial ms.
+                elapsed_ns=time.monotonic_ns()-started
+                if type(elapsed_ns) is not int or elapsed_ns<0:raise ValueError('invalid inference timing')
+                elapsed_ms=(elapsed_ns+999999)//1000000
+                overshoot=outcome=='ok' and elapsed_ns>reservation.milliseconds*1000000
+                if self.cancel.is_set():outcome='cancelled'
+                elif overshoot:outcome='failed'
+                self.budget.complete_request(reservation,elapsed_ms,outcome)
+                if overshoot:raise TimeoutError('successful inference exceeded reservation')
         command=[row['python'],'-I',str(HERE/'worker.py'),tool,'--instrument',pair,'--cutoff',cutoff,'--dataset',str(data_path),'--work-root',str(work),'--runtime-contract',str(contract_file)]
         return run_worker(command,env,work,work/'ipc',exchange,self.worker_seconds,self.cancel)
     def refresh(self,pair,cutoff,dataset):

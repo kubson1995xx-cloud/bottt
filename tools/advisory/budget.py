@@ -1,8 +1,8 @@
-"""Cross-process, crash-conservative daily reservations, not billing counters.
+"""One cross-process daily budget: reserve fully, settle verified new successes.
 
-Every request permanently charges its entire deadline slice BEFORE invocation.
-No refunds, even on success. Observed wall time is separate and may be unknown
-following a crash. SQLite FULL synchronous commit serializes all six analyses.
+Original milliseconds are immutable. Historical requests retain their full
+charge; only elapsed-success-v1 requests can settle to measured successful time.
+Failures and crashes keep full charges. These are not provider billing counters.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -28,6 +28,8 @@ class Reservation:
 class RequestReservation:
     id:str
     milliseconds:int
+    attempt:str
+    day:str
 
 class Budget:
     def __init__(self,path,clock=None,*,store=None):
@@ -35,8 +37,14 @@ class Budget:
         if store:store.stable_file(self.path)
         self.path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
         with self._transaction() as db:
-            db.executescript('''CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY,day TEXT NOT NULL,pair TEXT NOT NULL,tool TEXT NOT NULL,deadline TEXT NOT NULL,digest TEXT NOT NULL,status TEXT NOT NULL,UNIQUE(day,pair,tool));
-CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,attempt TEXT NOT NULL,day TEXT NOT NULL,milliseconds INTEGER NOT NULL CHECK(milliseconds>0),observed_ms INTEGER, outcome TEXT NOT NULL);''')
+            # execute(), not executescript(): migration stays in BEGIN IMMEDIATE.
+            db.execute('CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY,day TEXT NOT NULL,pair TEXT NOT NULL,tool TEXT NOT NULL,deadline TEXT NOT NULL,digest TEXT NOT NULL,status TEXT NOT NULL,UNIQUE(day,pair,tool))')
+            db.execute('CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,attempt TEXT NOT NULL,day TEXT NOT NULL,milliseconds INTEGER NOT NULL CHECK(milliseconds>0),observed_ms INTEGER, outcome TEXT NOT NULL)')
+            columns={row[1] for row in db.execute('PRAGMA table_info(requests)')}
+            if 'charge_policy' not in columns:
+                db.execute("ALTER TABLE requests ADD COLUMN charge_policy TEXT NOT NULL DEFAULT 'legacy-full-v1'")
+            if 'charged_ms' not in columns:
+                db.execute('ALTER TABLE requests ADD COLUMN charged_ms INTEGER CHECK(charged_ms>0 AND charged_ms<=milliseconds)')
     @contextmanager
     def _transaction(self):
         # Main DB identity stays leased; journal/WAL/SHM must remain deletable by SQLite.
@@ -69,15 +77,20 @@ CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,attempt TEXT NOT NULL,da
             now=self.clock()
             if now.strftime('%Y-%m-%d')!=attempt.day or now+timedelta(milliseconds=milliseconds)>datetime.fromisoformat(attempt.deadline):return Refusal('DEADLINE_EXHAUSTED')
             if db.execute("SELECT 1 FROM requests WHERE day=? AND outcome IN ('failed','cancelled') LIMIT 1",(attempt.day,)).fetchone():return Refusal('GLOBAL_INFERENCE_HALTED')
-            count,total=db.execute('SELECT COUNT(*),COALESCE(SUM(milliseconds),0) FROM requests WHERE day=?',(attempt.day,)).fetchone()
+            count,total=db.execute('SELECT COUNT(*),COALESCE(SUM(COALESCE(charged_ms,milliseconds)),0) FROM requests WHERE day=?',(attempt.day,)).fetchone()
             if count>=48 or total+milliseconds>900000:return Refusal('DAILY_BUDGET_EXHAUSTED')
-            row=RequestReservation(uuid.uuid4().hex,milliseconds)
-            db.execute('INSERT INTO requests VALUES(?,?,?,?,?,?)',(row.id,attempt.id,attempt.day,milliseconds,None,'uncertain'))
+            row=RequestReservation(uuid.uuid4().hex,milliseconds,attempt.id,attempt.day)
+            db.execute("INSERT INTO requests(id,attempt,day,milliseconds,observed_ms,outcome,charge_policy,charged_ms) VALUES(?,?,?,?,NULL,'uncertain','elapsed-success-v1',?)",(row.id,attempt.id,attempt.day,milliseconds,milliseconds))
         return row
     def complete_request(self,reservation,observed_ms,outcome):
         if type(observed_ms) is not int or observed_ms<0 or outcome not in ('ok','failed','cancelled'):raise ValueError('usage refused')
         with self._transaction() as db:
-            if db.execute('UPDATE requests SET observed_ms=?,outcome=? WHERE id=? AND observed_ms IS NULL',(observed_ms,outcome,reservation.id)).rowcount!=1:raise ValueError('unknown/already completed request')
+            stored=db.execute('SELECT milliseconds,attempt,day,observed_ms,outcome,charge_policy FROM requests WHERE id=?',(reservation.id,)).fetchone()
+            if stored is None or stored[:5]!=(reservation.milliseconds,reservation.attempt,reservation.day,None,'uncertain'):
+                raise ValueError('unknown/wrong identity/already completed request')
+            if outcome=='ok' and observed_ms>reservation.milliseconds:raise ValueError('successful usage exceeds reservation')
+            charge=max(1,observed_ms) if outcome=='ok' and stored[5]=='elapsed-success-v1' else reservation.milliseconds
+            db.execute('UPDATE requests SET observed_ms=?,outcome=?,charged_ms=? WHERE id=?',(observed_ms,outcome,charge,reservation.id))
     def finish(self,attempt,status):
         if status not in ('ok','failed'):raise ValueError('status refused')
         with self._transaction() as db:
@@ -87,5 +100,5 @@ CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,attempt TEXT NOT NULL,da
             return db.execute('SELECT digest,status FROM attempts WHERE day=? AND pair=? AND tool=?',(day,pair,tool)).fetchone()
     def usage(self,day):
         with self._transaction() as db:
-            count,reserved,observed,unknown=db.execute('SELECT COUNT(*),COALESCE(SUM(milliseconds),0),COALESCE(SUM(observed_ms),0),SUM(CASE WHEN observed_ms IS NULL THEN 1 ELSE 0 END) FROM requests WHERE day=?',(day,)).fetchone()
-        return {'supervised_requests':count,'reserved_ms':reserved,'observed_ms':observed,'uncertain_requests':unknown or 0,'provider_internal_retries':None}
+            count,reserved,charged,observed,unknown=db.execute('SELECT COUNT(*),COALESCE(SUM(milliseconds),0),COALESCE(SUM(COALESCE(charged_ms,milliseconds)),0),COALESCE(SUM(observed_ms),0),SUM(CASE WHEN observed_ms IS NULL THEN 1 ELSE 0 END) FROM requests WHERE day=?',(day,)).fetchone()
+        return {'supervised_requests':count,'reserved_ms':reserved,'charged_ms':charged,'observed_ms':observed,'uncertain_requests':unknown or 0,'provider_internal_retries':None}
